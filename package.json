@@ -1,0 +1,14 @@
+{
+  "name": "local-karaoke-system",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.22.1",
+    "socket.io": "^4.8.3",
+    "axios": "^1.13.4"
+  },
+  "license": "ISC"
+}
