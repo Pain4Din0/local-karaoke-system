@@ -61,15 +61,20 @@
 <body class="text-zinc-100 h-[100dvh] flex flex-col overflow-hidden">
     <div id="app" class="flex flex-col h-full w-full">
 
-        <div v-if="!nickname"
+        <div v-if="!nickname || isRenaming"
             class="fixed inset-0 z-50 bg-black/95 flex items-center justify-center p-6 backdrop-blur-md">
             <div class="w-full max-w-sm text-center">
                 <div class="mb-8"><i class="ri-disc-line text-4xl text-zinc-500"></i></div>
+                <h3 v-if="isRenaming" class="text-white text-lg font-bold mb-4">{{ t('modify_nick') }}</h3>
                 <input v-model="tempNick" type="text" :placeholder="t('enterName')"
                     class="w-full bg-zinc-900 border border-zinc-700 text-white p-4 rounded-xl outline-none focus:border-zinc-500 transition text-center text-lg mb-4"
                     @keyup.enter="saveNickname">
-                <button @click="saveNickname" class="w-full bg-white text-black py-4 rounded-xl font-bold btn-press">{{
-                    t('join') }}</button>
+                <button @click="saveNickname"
+                    class="w-full bg-white text-black py-4 rounded-xl font-bold btn-press mb-4">{{
+                    isRenaming ? t('save') : t('join') }}</button>
+                <button v-if="isRenaming" @click="cancelRename"
+                    class="w-full bg-zinc-800 text-zinc-400 py-3 rounded-xl font-bold btn-press">{{
+                    t('cancel') }}</button>
             </div>
         </div>
 
@@ -134,7 +139,13 @@
                     <button @click="toggleLang"
                         class="text-xs font-mono text-zinc-500 border border-zinc-700 px-2 py-1 rounded hover:text-zinc-300">{{
                         lang.toUpperCase() }}</button>
-                    <div class="text-xs text-zinc-400 bg-zinc-800 px-3 py-1 rounded-full">{{ nickname }}</div>
+                    <div @click="startRename"
+                        class="text-xs text-zinc-400 bg-zinc-800 px-3 py-1 rounded-full cursor-pointer hover:bg-zinc-700 transition">
+                        {{ nickname }} <i class="ri-pencil-line ml-1 opacity-50"></i></div>
+                    <button @click="resetSystem"
+                        class="text-zinc-400 hover:text-red-500 border border-zinc-700 bg-zinc-800 w-8 h-8 rounded-full flex items-center justify-center transition ml-2">
+                        <i class="ri-restart-line"></i>
+                    </button>
                 </div>
             </div>
             <div class="flex gap-6 border-b border-zinc-800">
@@ -278,7 +289,11 @@
                 queue: "Up Next",
                 export: "Export List",
                 idle: "Ready to play",
-                join_warn: "Please enter a name first"
+                join_warn: "Please enter a name first",
+                reset_confirm: "Are you sure you want to reset the system? This will clear all playlists and history.",
+                modify_nick: "Modify Nickname",
+                save: "Save",
+                cancel: "Cancel"
             },
             zh: {
                 enterName: "输入您的昵称",
@@ -289,7 +304,11 @@
                 queue: "待播队列",
                 export: "导出列表",
                 idle: "当前空闲，请点歌",
-                join_warn: "请先输入昵称"
+                join_warn: "请先输入昵称",
+                reset_confirm: "确定要重置系统吗？这将清空所有播放列表和历史记录。",
+                modify_nick: "修改昵称",
+                save: "保存",
+                cancel: "取消"
             },
             ja: {
                 enterName: "ニックネームを入力",
@@ -300,7 +319,11 @@
                 queue: "再生待ち",
                 export: "リストを出力",
                 idle: "リクエスト待ち",
-                join_warn: "名前を入力してください"
+                join_warn: "名前を入力してください",
+                reset_confirm: "システムをリセットしますか？プレイリストと履歴はすべて消去されます。",
+                modify_nick: "ニックネーム変更",
+                save: "保存",
+                cancel: "キャンセル"
             }
         };
 
@@ -321,6 +344,7 @@
 
                 const nickname = ref(localStorage.getItem('ktv_nickname') || "");
                 const tempNick = ref("");
+                const isRenaming = ref(false);
                 const playlist = ref([]);
                 const history = ref([]);
                 const currentPlaying = ref(null);
@@ -342,14 +366,30 @@
 
                 const currentNetwork = computed(() => networks.value[currentNetIndex.value] || networks.value[0]);
 
-                const saveNickname = () => { if (!tempNick.value) return; nickname.value = tempNick.value; localStorage.setItem('ktv_nickname', nickname.value); };
+                const saveNickname = () => {
+                    if (!tempNick.value) return;
+                    nickname.value = tempNick.value;
+                    localStorage.setItem('ktv_nickname', nickname.value);
+                    isRenaming.value = false;
+                };
+                const startRename = () => {
+                    tempNick.value = nickname.value;
+                    isRenaming.value = true;
+                };
+                const cancelRename = () => {
+                    isRenaming.value = false;
+                };
                 const formatTime = (seconds) => { if (!seconds || isNaN(seconds)) return "00:00"; const m = Math.floor(seconds / 60); const s = Math.floor(seconds % 60); return `${m}:${s.toString().padStart(2, '0')}`; };
 
                 const addSong = () => { if (!addUrl.value) return; isAdding.value = true; socket.emit('add_song', { url: addUrl.value, requester: nickname.value }); };
                 const manageQueue = (action, item) => socket.emit('manage_queue', { action, id: item.id });
                 const skipSong = () => socket.emit('next_song');
                 const control = (type) => socket.emit('control_action', { type });
-                const resetSystem = () => confirm("Reset System?") && socket.emit('system_reset');
+                const resetSystem = () => {
+                    if (confirm(t('reset_confirm'))) {
+                        socket.emit('system_reset');
+                    }
+                };
                 const reAddHistory = (item) => { socket.emit('readd_history', item); activeTab.value = 'playlist'; };
 
                 const exportHistory = () => {
@@ -423,7 +463,8 @@
                     addSong, manageQueue, skipSong, control, resetSystem,
                     reAddHistory, exportHistory,
                     onSeekInput, onSeekEnd, onVolumeInput, formatTime,
-                    lang, t, toggleLang,
+
+                    lang, t, toggleLang, isRenaming, startRename, cancelRename,
                     showShareModal, openShare, networks, currentNetwork, nextNetwork, systemSSID, systemPort
                 };
             }
