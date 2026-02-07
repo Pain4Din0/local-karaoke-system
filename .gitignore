@@ -1,0 +1,17 @@
+# System dependencies & artifacts
+node_modules/
+downloads/
+dist/
+build/
+.env
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
+
+# User credentials (NEVER COMMIT THESE)
+cookies_*.txt
+cookies.txt
+auth.json
+secrets.json
