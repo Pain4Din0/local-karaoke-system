@@ -17,7 +17,7 @@ let playlist = [];
 let history = [];
 let currentPlaying = null;
 let isDownloading = false;
-let playerStatus = { playing: false, currentTime: 0, duration: 0, volume: 0.8 };
+let playerStatus = { playing: false, currentTime: 0, duration: 0, volume: 0.8, pitch: 0 };
 
 // --- Get all available network interfaces ---
 const getNetworkInterfaces = () => {
@@ -182,6 +182,7 @@ const promoteNextSong = () => {
         currentPlaying = playlist.shift();
         playerStatus.playing = true;
         playerStatus.currentTime = 0;
+        playerStatus.pitch = 0;
     } else {
         currentPlaying = null;
         playerStatus.playing = false;
@@ -256,6 +257,7 @@ io.on('connection', async (socket) => {
         if (action.type === 'toggle') playerStatus.playing = !playerStatus.playing;
         if (action.type === 'seek') playerStatus.currentTime = action.value;
         if (action.type === 'volume') playerStatus.volume = action.value;
+        if (action.type === 'pitch') playerStatus.pitch = action.value;
         io.emit('exec_control', action);
     });
 
@@ -267,7 +269,7 @@ io.on('connection', async (socket) => {
     socket.on('system_reset', () => {
         [...playlist, currentPlaying ? [currentPlaying] : [], ...history].flat().forEach(s => s && deleteSongFile(s));
         playlist = []; history = []; currentPlaying = null;
-        playerStatus = { playing: false, currentTime: 0, duration: 0, volume: 0.8 };
+        playerStatus = { playing: false, currentTime: 0, duration: 0, volume: 0.8, pitch: 0 };
         io.emit('sync_state', { playlist, currentPlaying, playerStatus, history });
         io.emit('exec_control', { type: 'reload' });
     });

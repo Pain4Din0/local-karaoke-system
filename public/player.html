@@ -171,11 +171,55 @@
                     nextTick(() => generateQR());
                 };
 
+                const initAudioContext = async () => {
+                    if (window.audioCtx) return;
+                    try {
+                        window.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                        await window.audioCtx.audioWorklet.addModule('pitch-processor.js');
+                        window.pitchNode = new AudioWorkletNode(window.audioCtx, 'pitch-processor');
+
+                        // Wait for artplayer to be ready to connect
+                    } catch (e) {
+                        console.error("AudioContext Init Failed", e);
+                    }
+                };
+
+                const connectAudioNode = () => {
+                    if (!art || !window.audioCtx || !window.pitchNode || art.audioEncoded) return;
+
+                    try {
+                        // ArtPlayer exposes the video element
+                        const video = art.video;
+                        // Prevent double connection
+                        if (video._sourceNode) return;
+
+                        const source = window.audioCtx.createMediaElementSource(video);
+                        video._sourceNode = source;
+
+                        source.connect(window.pitchNode);
+                        window.pitchNode.connect(window.audioCtx.destination);
+
+                        art.audioEncoded = true; // Flag to avoid reconnection
+
+                        // Initialize pitch parameter
+                        const pitchParam = window.pitchNode.parameters.get('pitch');
+                        if (pitchParam) pitchParam.value = 0;
+
+                    } catch (e) {
+                        console.error("Audio Routing Failed", e);
+                    }
+                };
+
                 const startInteraction = () => {
                     hasInteracted.value = true;
-                    if (art) art.play().catch(() => { });
-                    if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => { });
+                    initAudioContext().then(() => {
+                        if (art) {
+                            art.play().catch(() => { });
+                            connectAudioNode();
+                        }
+                    });
 
+                    if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => { });
                     nextTick(() => generateQR());
                 };
 
@@ -203,7 +247,8 @@
                                 playing: !art.video.paused,
                                 currentTime: art.currentTime,
                                 duration: art.duration,
-                                volume: art.volume
+                                volume: art.volume,
+                                pitch: window.pitchNode && window.pitchNode.parameters.get('pitch') ? window.pitchNode.parameters.get('pitch').value : 0
                             });
                         }
                     }, 1000);
@@ -221,11 +266,16 @@
                         fullscreen: true,
                         theme: '#ffffff',
                     });
+
                     art.on('video:ended', () => socket.emit('next_song'));
                     art.on('ready', () => {
-                        if (hasInteracted.value) art.play().catch(() => { });
+                        if (hasInteracted.value) {
+                            if (window.audioCtx && window.audioCtx.state === 'suspended') window.audioCtx.resume();
+                            art.play().catch(() => { });
+                            connectAudioNode();
+                        }
                         startHeartbeat();
-                        socket.emit('player_tick', { playing: true, currentTime: 0, duration: art.duration, volume: 0.8 });
+                        socket.emit('player_tick', { playing: true, currentTime: 0, duration: art.duration, volume: 0.8, pitch: 0 });
                     });
                 };
 
@@ -273,13 +323,27 @@
                         case 'seek_rew': art.backward = 5; break;
                         case 'replay': art.currentTime = 0; art.play(); break;
                         case 'reload': location.reload(); break;
+                        case 'pitch':
+                            if (window.pitchNode) {
+                                const param = window.pitchNode.parameters.get('pitch');
+                                if (param) param.setValueAtTime(action.value, window.audioCtx.currentTime);
+                                art.notice.show = `KEY ${action.value > 0 ? '+' : ''}${action.value}`;
+                            }
+                            break;
                     }
                     setTimeout(() => {
+                        let currentPitch = 0;
+                        if (window.pitchNode) {
+                            const p = window.pitchNode.parameters.get('pitch');
+                            if (p) currentPitch = p.value;
+                        }
+
                         if (art) socket.emit('player_tick', {
                             playing: !art.video.paused,
                             currentTime: art.currentTime,
                             duration: art.duration,
-                            volume: art.volume
+                            volume: art.volume,
+                            pitch: currentPitch
                         });
                     }, 50);
                 });
