@@ -67,6 +67,18 @@ const processDownloadQueue = () => {
     if (targetSong) startDownload(targetSong);
 };
 
+const getCookiesPath = (url) => {
+    if (url.includes('bilibili.com')) {
+        const p = path.join(__dirname, 'cookies_bilibili.txt');
+        return fs.existsSync(p) ? p : null;
+    }
+    if (url.includes('youtube.com') || url.includes('youtu.be')) {
+        const p = path.join(__dirname, 'cookies_youtube.txt');
+        return fs.existsSync(p) ? p : null;
+    }
+    return null;
+};
+
 const startDownload = (song) => {
     isDownloading = true;
     song.status = 'downloading';
@@ -82,9 +94,13 @@ const startDownload = (song) => {
         '--merge-output-format', 'mp4',
         '-o', outputPath,
         '--no-playlist',
-        '-N', '16', '--http-chunk-size', '10M',
-        song.originalUrl
+        '-N', '16', '--http-chunk-size', '10M'
     ];
+
+    const cookies = getCookiesPath(song.originalUrl);
+    if (cookies) args.push('--cookies', cookies);
+
+    args.push(song.originalUrl);
 
     const dlProcess = spawn('yt-dlp.exe', args);
 
@@ -134,7 +150,11 @@ const deleteSongFile = (song) => {
 
 const fetchMetadata = (url) => {
     return new Promise((resolve) => {
-        const args = ['--flat-playlist', '--dump-json', '--no-playlist', url];
+        const args = ['--flat-playlist', '--dump-json', '--no-playlist'];
+        const cookies = getCookiesPath(url);
+        if (cookies) args.push('--cookies', cookies);
+        args.push(url);
+
         const child = spawn('yt-dlp.exe', args);
         let output = '';
         child.stdout.on('data', d => output += d);

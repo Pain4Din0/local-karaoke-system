@@ -131,21 +131,23 @@
                     <i class="ri-equalizer-line"></i> CONTROLLER
                 </div>
                 <div class="flex items-center gap-3">
+                    <button @click="resetSystem"
+                        class="text-zinc-400 hover:text-red-500 border border-zinc-700 bg-zinc-800 w-8 h-8 rounded-full flex items-center justify-center transition">
+                        <i class="ri-restart-line"></i>
+                    </button>
+
                     <button @click="openShare"
                         class="text-zinc-400 hover:text-white border border-zinc-700 bg-zinc-800 w-8 h-8 rounded-full flex items-center justify-center transition">
                         <i class="ri-qr-code-line"></i>
                     </button>
 
                     <button @click="toggleLang"
-                        class="text-xs font-mono text-zinc-500 border border-zinc-700 px-2 py-1 rounded hover:text-zinc-300">{{
+                        class="h-8 px-3 rounded-full border border-zinc-700 bg-zinc-800 flex items-center justify-center text-xs font-mono text-zinc-500 hover:text-white transition">{{
                         lang.toUpperCase() }}</button>
+
                     <div @click="startRename"
-                        class="text-xs text-zinc-400 bg-zinc-800 px-3 py-1 rounded-full cursor-pointer hover:bg-zinc-700 transition">
-                        {{ nickname }} <i class="ri-pencil-line ml-1 opacity-50"></i></div>
-                    <button @click="resetSystem"
-                        class="text-zinc-400 hover:text-red-500 border border-zinc-700 bg-zinc-800 w-8 h-8 rounded-full flex items-center justify-center transition ml-2">
-                        <i class="ri-restart-line"></i>
-                    </button>
+                        class="h-8 px-3 rounded-full border border-zinc-700 bg-zinc-800 flex items-center justify-center text-xs text-zinc-400 cursor-pointer hover:text-white transition">
+                        {{ nickname }}</div>
                 </div>
             </div>
             <div class="flex gap-6 border-b border-zinc-800">
@@ -285,7 +287,7 @@
                 join: "Join System",
                 playlist: "Queue",
                 history: "History",
-                pasteLink: "Paste Bilibili Link",
+                pasteLink: "Paste Link (Bilibili/YouTbe)",
                 queue: "Up Next",
                 export: "Export List",
                 idle: "Ready to play",
@@ -300,7 +302,7 @@
                 join: "进入系统",
                 playlist: "播放列表",
                 history: "历史记录",
-                pasteLink: "粘贴 Bilibili 链接",
+                pasteLink: "粘贴 Bilibili / YouTube 链接",
                 queue: "待播队列",
                 export: "导出列表",
                 idle: "当前空闲，请点歌",
@@ -315,7 +317,7 @@
                 join: "参加する",
                 playlist: "プレイリスト",
                 history: "履歴",
-                pasteLink: "Bilibiliのリンクを貼り付け",
+                pasteLink: "リンクを貼り付け (Bilibili/YT)",
                 queue: "再生待ち",
                 export: "リストを出力",
                 idle: "リクエスト待ち",
