@@ -79,6 +79,8 @@
             </div>
         </div>
 
+
+        <!-- SHARE MODAL (Existing) -->
         <div v-if="showShareModal"
             class="fixed inset-0 z-50 bg-[#09090b] flex flex-col items-center justify-center p-6 animate-fade-in">
             <div class="w-full max-w-sm flex flex-col items-center space-y-8">
@@ -125,6 +127,52 @@
                 </div>
             </div>
         </div>
+
+        <!-- NEW: PLAYLIST SELECTION MODAL -->
+        <div v-if="showPlaylistModal"
+            class="fixed inset-0 z-50 bg-[#09090b]/95 backdrop-blur-md flex flex-col pt-safe pb-safe animate-fade-in">
+            <div class="px-4 py-3 border-b border-zinc-800 flex justify-between items-center bg-zinc-900">
+                <div class="font-bold text-lg">{{ t('select_songs') }}</div>
+                <button @click="closePlaylistModal"
+                    class="w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-400 hover:text-white">
+                    <i class="ri-close-line"></i>
+                </button>
+            </div>
+
+            <div class="px-4 py-2 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/50">
+                <label class="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
+                    <input type="checkbox" :checked="isAllSelected" @change="toggleSelectAll"
+                        class="w-4 h-4 rounded border-zinc-600 bg-zinc-800 accent-blue-500">
+                    {{ t('select_all') }} ({{ playlistItems.length }})
+                </label>
+                <span class="text-xs text-zinc-500">{{ selectedItems.size }} {{ t('selected') }}</span>
+            </div>
+
+            <div class="flex-1 overflow-y-auto p-4 space-y-2">
+                <div v-for="(item, index) in playlistItems" :key="index"
+                    class="flex items-center gap-3 p-3 rounded-xl border border-zinc-800 bg-zinc-900/50 active:bg-zinc-800 transition-colors cursor-pointer"
+                    @click="toggleItem(index)">
+                    <div @click.stop>
+                        <input type="checkbox" :checked="selectedItems.has(index)" @change="toggleItem(index)"
+                            class="w-5 h-5 rounded border-zinc-600 bg-zinc-800 accent-blue-500">
+                    </div>
+
+                    <div class="min-w-0 flex-1">
+                        <div class="text-sm font-medium text-zinc-200 truncate">{{ item.title }}</div>
+                        <div class="text-xs text-zinc-500 truncate">{{ item.uploader }}</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="p-4 border-t border-zinc-800 bg-zinc-900">
+                <button @click="confirmAddBatch" :disabled="selectedItems.size === 0"
+                    class="w-full bg-blue-600 text-white py-3 rounded-xl font-bold disabled:opacity-50 disabled:bg-zinc-800 disabled:text-zinc-500 transition-all flex items-center justify-center gap-2">
+                    <span v-if="selectedItems.size > 0">{{ t('add_selected') }} ({{ selectedItems.size }})</span>
+                    <span v-else>{{ t('select_songs_first') }}</span>
+                </button>
+            </div>
+        </div>
+
 
         <div v-if="showTuning"
             class="fixed inset-0 z-50 bg-[#09090b]/80 backdrop-blur-sm flex items-end sm:items-center justify-center animate-fade-in"
@@ -433,7 +481,12 @@
                 click_to_process: "Click to process",
                 start_process: "Remove Vocals",
                 auto_process: "Auto-process new songs",
-                auto_process_hint: "Automatically prepare instrumental tracks"
+                auto_process_hint: "Automatically prepare instrumental tracks",
+                select_songs: "Select Songs",
+                select_all: "Select All",
+                selected: "selected",
+                add_selected: "Add Selected",
+                select_songs_first: "Select at least one song"
             },
             zh: {
                 enterName: "输入您的昵称",
@@ -463,7 +516,12 @@
                 click_to_process: "点击开始处理",
                 start_process: "消除人声",
                 auto_process: "自动处理新歌曲",
-                auto_process_hint: "自动为歌曲准备纯伴奏"
+                auto_process_hint: "自动为歌曲准备纯伴奏",
+                select_songs: "选择歌曲",
+                select_all: "全选",
+                selected: "已选",
+                add_selected: "添加选中歌曲",
+                select_songs_first: "请至少选择一首歌曲"
             },
             ja: {
                 enterName: "ニックネームを入力",
@@ -493,7 +551,12 @@
                 click_to_process: "クリックで処理開始",
                 start_process: "ボーカル除去",
                 auto_process: "新曲を自動処理",
-                auto_process_hint: "自動的にインストを準備"
+                auto_process_hint: "自動的にインストを準備",
+                select_songs: "曲を選択",
+                select_all: "すべて選択",
+                selected: "選択済み",
+                add_selected: "選択した曲を追加",
+                select_songs_first: "曲を選択してください"
             }
         };
 
@@ -535,12 +598,18 @@
                 const karaokeAvailable = computed(() => currentPlaying.value && currentPlaying.value.karaokeReady);
 
                 const showShareModal = ref(false);
+                const showPlaylistModal = ref(false);
+                const playlistItems = ref([]);
+                const selectedItems = ref(new Set()); // using Set for indices
+
                 const networks = ref([{ name: 'Loading', ip: '...' }]);
                 const currentNetIndex = ref(0);
                 const systemSSID = ref('...');
                 const systemPort = ref('8080');
 
                 const currentNetwork = computed(() => networks.value[currentNetIndex.value] || networks.value[0]);
+                const isAllSelected = computed(() => playlistItems.value.length > 0 && selectedItems.value.size === playlistItems.value.length);
+
 
                 const saveNickname = () => {
                     if (!tempNick.value) return;
@@ -557,7 +626,46 @@
                 };
                 const formatTime = (seconds) => { if (!seconds || isNaN(seconds)) return "00:00"; const m = Math.floor(seconds / 60); const s = Math.floor(seconds % 60); return `${m}:${s.toString().padStart(2, '0')}`; };
 
-                const addSong = () => { if (!addUrl.value) return; isAdding.value = true; socket.emit('add_song', { url: addUrl.value, requester: nickname.value }); };
+                const addSong = () => {
+                    if (!addUrl.value) return;
+                    isAdding.value = true;
+                    // Changed to support playlist parsing
+                    socket.emit('parse_url', addUrl.value);
+                };
+
+                const closePlaylistModal = () => {
+                    showPlaylistModal.value = false;
+                    playlistItems.value = [];
+                    selectedItems.value.clear();
+                    isAdding.value = false;
+                    addUrl.value = "";
+                };
+
+                const toggleItem = (index) => {
+                    if (selectedItems.value.has(index)) {
+                        selectedItems.value.delete(index);
+                    } else {
+                        selectedItems.value.add(index);
+                    }
+                };
+
+                const toggleSelectAll = () => {
+                    if (isAllSelected.value) {
+                        selectedItems.value.clear();
+                    } else {
+                        playlistItems.value.forEach((_, idx) => selectedItems.value.add(idx));
+                    }
+                };
+
+                const confirmAddBatch = () => {
+                    const songsToAdd = Array.from(selectedItems.value).map(idx => playlistItems.value[idx]);
+                    if (songsToAdd.length > 0) {
+                        socket.emit('add_batch_songs', { songs: songsToAdd, requester: nickname.value });
+                        isAdding.value = true; // wait for success
+                    }
+                    closePlaylistModal();
+                };
+
                 const manageQueue = (action, item) => socket.emit('manage_queue', { action, id: item.id });
                 const skipSong = () => socket.emit('next_song');
                 const control = (type) => socket.emit('control_action', { type });
@@ -671,6 +779,25 @@
                 socket.on('add_success', () => { isAdding.value = false; addUrl.value = ""; });
                 socket.on('error_msg', (msg) => { alert(msg); isAdding.value = false; });
 
+                // Handle parsing results
+                socket.on('parse_result', (result) => {
+                    if (result && result.list) {
+                        if (result.list.length === 1) {
+                            // Single video - add directly
+                            socket.emit('add_batch_songs', { songs: result.list, requester: nickname.value });
+                        } else {
+                            // Multiple videos - show selection modal
+                            playlistItems.value = result.list;
+                            selectedItems.value = new Set(result.list.map((_, i) => i)); // Default select all
+                            showPlaylistModal.value = true;
+                            isAdding.value = false; // Stop spinner on main button, user is selecting now
+                        }
+                    } else {
+                        isAdding.value = false;
+                        alert("Failed to parse URL");
+                    }
+                });
+
                 return {
                     nickname, tempNick, saveNickname,
                     playlist, currentPlaying, history, activeTab,
@@ -684,7 +811,9 @@
                     showShareModal, openShare, networks, currentNetwork, nextNetwork, systemSSID, systemPort,
                     showTuning, changePitch, resetPitch, localPitch,
                     localVocalRemoval, toggleVocalRemoval,
-                    autoProcessKaraoke, toggleAutoProcess, karaokeAvailable
+                    autoProcessKaraoke, toggleAutoProcess, karaokeAvailable,
+                    showPlaylistModal, playlistItems, selectedItems, isAllSelected,
+                    closePlaylistModal, toggleItem, toggleSelectAll, confirmAddBatch
                 };
             }
         }).mount('#app');

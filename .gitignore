@@ -21,3 +21,7 @@ cookies_*.txt
 cookies.txt
 auth.json
 secrets.json
+
+yt-dlp.exe
+ffmpeg.exe
+ffprobe.exe

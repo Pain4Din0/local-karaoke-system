@@ -7,12 +7,13 @@ A robust, locally hosted karaoke solution that enables seamless queuing and play
 ## ✨ Features
 
 - **Universal Content Support**: Queue songs directly via URL from YouTube, Bilibili, and any platform supported by `yt-dlp`.
+- **Playlist & Batch Import**: Seamless import of **Bilibili Favorites/Collections** and **YouTube Playlists**. Select multiple tracks to queue in bulk.
 - **AI-Powered Vocal Removal**: Remove vocals from any song using [Demucs](https://github.com/facebookresearch/demucs) for studio-quality karaoke. Enable auto-processing to prepare instrumental tracks as songs are queued.
-- **Intelligent Queue Management**:
+- **Intelligent Queue System**:
+  - **Sequential Downloading**: Strict one-at-a-time downloading prevents bandwidth congestion and ensures stability.
+  - **Robust Deletion**: Instantly terminates active downloads and cleans up files when a song is removed.
   - **Priority Queuing**: Move urgent requests to the top.
-  - **Auto-Play**: Automatically plays the next track.
-  - **History & Re-Queue**: Quickly access and re-add previously played songs.
-  - **Request Tracking**: Identifies who requested each song.
+  - **Auto-Play & History**: Automatically plays the next track and allows quick re-queuing.
 - **Dual-Interface System**:
   - **Player VIew**: A clean, distraction-free interface for TV or projector output.
   - **Controller View**: A responsive mobile web app for guests to search, queue, and control playback.

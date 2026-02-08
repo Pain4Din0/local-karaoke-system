@@ -21,6 +21,7 @@ let playerStatus = { playing: false, currentTime: 0, duration: 0, volume: 0.8, p
 let autoProcessKaraoke = false; // Global setting: auto-process songs for karaoke
 let karaokeProcessingQueue = []; // Queue of songs waiting to be processed
 let isProcessingKaraoke = false;
+let currentDownloadingId = null; // Track specific song ID for download synchronization
 
 // --- Demucs-based Vocal Separation ---
 const SEPARATED_DIR = path.join(__dirname, 'separated');
@@ -32,6 +33,7 @@ const PYTHON_EXE = fs.existsSync(PORTABLE_PYTHON) ? PORTABLE_PYTHON : 'python';
 
 // Track active processes for termination
 const activeKaraokeProcesses = new Map(); // songId -> { proc, song }
+const activeDownloads = new Map(); // songId -> proc
 
 const cleanupSeparatedFiles = (songId) => {
     // Clean up the separated folder for a specific song
@@ -68,7 +70,10 @@ const terminateKaraokeProcess = (songId) => {
     }
 };
 
+
+
 const processVocalSeparation = (song) => {
+
     if (!song || !song.localPath || !fs.existsSync(song.localPath)) return;
     if (song.karaokeReady || song.karaokeProcessing) return;
 
@@ -232,6 +237,7 @@ const getCookiesPath = (url) => {
 
 const startDownload = (song) => {
     isDownloading = true;
+    currentDownloadingId = song.id; // Set current download ID
     song.status = 'downloading';
     song.progress = 0;
     io.emit('sync_state', { playlist, currentPlaying, playerStatus, history });
@@ -254,6 +260,7 @@ const startDownload = (song) => {
     args.push(song.originalUrl);
 
     const dlProcess = spawn('yt-dlp.exe', args);
+    activeDownloads.set(song.id, dlProcess);
 
     dlProcess.stdout.on('data', (data) => {
         const match = data.toString().match(/(\d+\.\d+)%/);
@@ -269,71 +276,238 @@ const startDownload = (song) => {
     });
 
     dlProcess.on('close', (code) => {
-        isDownloading = false;
-        if (code === 0) {
-            console.log(`[System] Ready: ${song.title}`);
-            song.status = 'ready';
-            song.progress = 100;
-            song.src = `/downloads/${outputFilename}`;
-            song.localPath = outputPath;
-            song.karaokeReady = false; // Initialize karaoke status
-            song.karaokeSrc = null;
+        activeDownloads.delete(song.id);
 
-            // Queue for karaoke processing if enabled
-            if (autoProcessKaraoke) {
-                queueKaraokeProcessing(song);
+        // Critical: Only proceed if this process corresponds to the officially active download
+        if (currentDownloadingId === song.id) {
+            currentDownloadingId = null;
+            isDownloading = false;
+
+            if (code === 0) {
+                console.log(`[System] Ready: ${song.title}`);
+                song.status = 'ready';
+                song.progress = 100;
+                song.src = `/downloads/${outputFilename}`;
+                song.localPath = outputPath;
+                song.karaokeReady = false; // Initialize karaoke status
+                song.karaokeSrc = null;
+
+                // Queue for karaoke processing if enabled
+                if (autoProcessKaraoke) {
+                    queueKaraokeProcessing(song);
+                }
+
+                playerStatus.playing = true;
+                io.emit('sync_state', { playlist, currentPlaying, playerStatus, history, autoProcessKaraoke });
+                processDownloadQueue();
+            } else {
+                console.error(`[System] Failed/Cancelled: ${code}`);
+                song.status = 'error';
+                io.emit('sync_state', { playlist, currentPlaying, playerStatus, history, autoProcessKaraoke });
+                processDownloadQueue();
             }
-
-            playerStatus.playing = true;
-            io.emit('sync_state', { playlist, currentPlaying, playerStatus, history, autoProcessKaraoke });
-            processDownloadQueue();
-        } else {
-            console.error(`[System] Failed: ${code}`);
-            song.status = 'error';
-            io.emit('sync_state', { playlist, currentPlaying, playerStatus, history, autoProcessKaraoke });
-            processDownloadQueue();
         }
+    });
+
+    dlProcess.on('error', (err) => {
+        activeDownloads.delete(song.id);
+        if (currentDownloadingId === song.id) {
+            currentDownloadingId = null;
+            isDownloading = false;
+        }
+        console.error(`[System] Download spawn error for ${song.title}: ${err.message}`);
+        song.status = 'error';
+        io.emit('sync_state', { playlist, currentPlaying, playerStatus, history, autoProcessKaraoke });
+        processDownloadQueue();
     });
 };
 
 const deleteSongFile = (song) => {
     if (!song) return;
-    // Terminate any active karaoke processing for this song
+
+    // 1. Terminate Active Download
+    const downloadProc = activeDownloads.get(song.id);
+    if (downloadProc) {
+        console.log(`[System] Cancelling download for: ${song.title}`);
+        try {
+            spawn('taskkill', ['/pid', downloadProc.pid, '/f', '/t'], { shell: true });
+        } catch (e) {
+            try { downloadProc.kill('SIGKILL'); } catch (e2) { }
+        }
+        // activeDownloads.delete(song.id); // Let close handler handle cleanup
+        // isDownloading = false; // Let close handler handle state transition
+
+        // Ensure we process next if queue exists, but give a small delay for process cleanup
+        // setTimeout(processDownloadQueue, 500); // Removed to avoid race condition
+    }
+
+    // 2. Terminate Active Karaoke
     if (song.id) {
         terminateKaraokeProcess(song.id);
         cleanupSeparatedFiles(song.id);
     }
-    // Delete the main song file
-    if (song.localPath && fs.existsSync(song.localPath)) {
-        try { fs.unlinkSync(song.localPath); } catch (e) { }
-    }
-    // Delete karaoke file if exists
+
+    // 3. Delete Files (Retry mechanism for locked files)
+    const tryDelete = (filePath, retries = 3) => {
+        if (!filePath || !fs.existsSync(filePath)) return;
+        try {
+            fs.unlinkSync(filePath);
+            console.log(`[System] Deleted: ${filePath}`);
+        } catch (e) {
+            // console.error(`[System] Delete retry ${retries} for ${filePath}: ${e.message}`);
+            if (retries > 0) {
+                setTimeout(() => tryDelete(filePath, retries - 1), 1000);
+            }
+        }
+    };
+
+    if (song.localPath) tryDelete(song.localPath);
     if (song.id) {
         const karaokePath = path.join(DOWNLOAD_DIR, `${song.id}_karaoke.mp3`);
-        if (fs.existsSync(karaokePath)) {
-            try { fs.unlinkSync(karaokePath); } catch (e) { }
-        }
+        tryDelete(karaokePath);
     }
 };
 
-const fetchMetadata = (url) => {
+const fetchUrlInfo = (url) => {
     return new Promise((resolve) => {
-        const args = ['--flat-playlist', '--dump-json', '--no-playlist'];
-        const cookies = getCookiesPath(url);
-        if (cookies) args.push('--cookies', cookies);
-        args.push(url);
+        // 1. Try Bilibili Favorites API first
+        const biliFavMatch = url.match(/space\.bilibili\.com\/\d+\/favlist\?.*fid=(\d+)/);
+        if (biliFavMatch) {
+            (async () => {
+                const mediaId = biliFavMatch[1];
+                let allMedias = [];
+                let pn = 1;
+                let hasMore = true;
+                const https = require('https'); // Require https locally
 
-        const child = spawn('yt-dlp.exe', args);
-        let output = '';
-        child.stdout.on('data', d => output += d);
-        child.on('close', code => {
-            if (code === 0) {
-                try {
-                    const data = JSON.parse(output);
-                    resolve({ title: data.title, uploader: data.uploader || 'Unknown', pic: data.thumbnail || '' });
-                } catch (e) { resolve(null); }
-            } else { resolve(null); }
-        });
+                const fetchPage = (p) => new Promise(res => {
+                    // Use ps=20 as ps=50 causes -400 error
+                    const apiUrl = `https://api.bilibili.com/x/v3/fav/resource/list?media_id=${mediaId}&pn=${p}&ps=20&keyword=&order=mtime&type=0&tid=0&platform=web`;
+                    https.get(apiUrl, {
+                        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36)' }
+                    }, (r) => {
+                        let d = '';
+                        r.on('data', c => d += c);
+                        r.on('end', () => {
+                            try {
+                                const j = JSON.parse(d);
+                                if (j.code === 0 && j.data && j.data.medias) {
+                                    res({ medias: j.data.medias, hasMore: j.data.has_more });
+                                } else {
+                                    // console.error('[API] Bilibili Error:', j);
+                                    res({ medias: [], hasMore: false });
+                                }
+                            } catch (e) { res({ medias: [], hasMore: false }); }
+                        });
+                    }).on('error', () => res({ medias: [], hasMore: false }));
+                });
+
+                // Fetch up to 5 pages (100 items)
+                while (hasMore && pn <= 5) {
+                    try {
+                        const res = await fetchPage(pn);
+                        if (res.medias.length > 0) {
+                            allMedias = allMedias.concat(res.medias);
+                            hasMore = res.hasMore;
+                            pn++;
+                        } else {
+                            hasMore = false;
+                        }
+                    } catch (e) { hasMore = false; }
+                }
+
+                if (allMedias.length > 0) {
+                    const list = allMedias.map(item => ({
+                        title: item.title,
+                        uploader: item.upper ? item.upper.name : 'Unknown',
+                        pic: null, // Thumbnails disabled per user request
+                        originalUrl: `https://www.bilibili.com/video/${item.bvid}`
+                    }));
+                    resolve({ list });
+                    return;
+                }
+
+                // Fallback to yt-dlp if API fails or returns empty
+                runYtDlp(url, resolve);
+            })();
+            return; // Early return to prevent running yt-dlp immediately
+        }
+
+        // 2. Default yt-dlp logic for all other URLs or if Bilibili API failed
+        runYtDlp(url, resolve);
+    });
+};
+
+// Helper function to run yt-dlp logic
+const runYtDlp = (url, resolve) => {
+    const args = ['--flat-playlist', '--dump-json', '--no-playlist'];
+    const cookies = getCookiesPath(url);
+    if (cookies) args.push('--cookies', cookies);
+    args.push(url);
+
+    // Ensure we use the local yt-dlp.exe if available
+    const ytDlpExe = fs.existsSync(path.join(__dirname, 'yt-dlp.exe')) ? path.join(__dirname, 'yt-dlp.exe') : 'yt-dlp';
+    const child = spawn(ytDlpExe, args);
+    let output = '';
+    child.stdout.on('data', d => output += d);
+    child.on('close', code => {
+        if (code === 0) {
+            try {
+                const lines = output.trim().split('\n');
+                const items = lines.map(line => {
+                    try {
+                        return JSON.parse(line);
+                    } catch (e) { return null; }
+                }).filter(x => x);
+
+                if (items.length === 0) {
+                    resolve(null);
+                    return;
+                }
+
+                const formattedItems = items.map(data => {
+                    // Construct a usable URL
+                    let itemUrl = data.url || data.webpage_url;
+                    if (!itemUrl && data.id) {
+                        // Heuristic for YouTube IDs if url is missing/just ID
+                        if (data.ie_key === 'Youtube' || !data.ie_key) {
+                            itemUrl = `https://www.youtube.com/watch?v=${data.id}`;
+                        } else if (data.ie_key === 'BiliBili') {
+                            itemUrl = `https://www.bilibili.com/video/${data.id}`;
+                        } else {
+                            itemUrl = url; // Fallback to provided URL (might be wrong for playlists)
+                        }
+                    }
+
+                    // Handle Bilibili specific fields or missing titles
+                    let title = data.title;
+                    if (!title && data.id) title = `Video ${data.id}`;
+
+                    return {
+                        title: title || 'Unknown Title',
+                        uploader: data.uploader || data.uploader_id || 'Unknown',
+                        pic: null, // Thumbnails disabled per user request
+                        originalUrl: itemUrl || url
+                    };
+                });
+
+                if (formattedItems.length > 0) {
+                    resolve({ list: formattedItems });
+                } else {
+                    resolve(null);
+                }
+            } catch (e) {
+                console.error('[yt-dlp] JSON parse failed:', e.message);
+                resolve(null);
+            }
+        } else {
+            console.error(`[yt-dlp] Process exited with code ${code}`);
+            resolve(null);
+        }
+    });
+    child.on('error', (err) => {
+        console.error('[yt-dlp] Spawn error:', err.message);
+        resolve(null);
     });
 };
 
@@ -343,7 +517,7 @@ const promoteNextSong = () => {
         history.unshift(historyItem);
         if (history.length > 50) history.pop();
         const fileToDelete = { ...currentPlaying };
-        setTimeout(() => deleteSongFile(fileToDelete), 5000);
+        setTimeout(() => deleteSongFile(fileToDelete), 20000); // Increased delay
     }
 
     if (playlist.length > 0) {
@@ -361,6 +535,7 @@ const promoteNextSong = () => {
     processDownloadQueue();
 };
 
+
 io.on('connection', async (socket) => {
     socket.emit('sync_state', { playlist, currentPlaying, playerStatus, history, autoProcessKaraoke });
 
@@ -368,17 +543,68 @@ io.on('connection', async (socket) => {
     const ssid = await getWifiSSID();
     socket.emit('system_info', { networks, ssid, port: PORT });
 
+    // New: Parse URL and return list
+    socket.on('parse_url', async (url) => {
+        const result = await fetchUrlInfo(url);
+        if (result && result.list && result.list.length > 0) {
+            socket.emit('parse_result', result);
+        } else {
+            socket.emit('error_msg', 'Parse Error or No Content');
+        }
+    });
+
+    // New: Batch add songs
+    socket.on('add_batch_songs', async (data) => {
+        const { songs, requester } = data;
+        if (!songs || !Array.isArray(songs) || songs.length === 0) return;
+
+        let addedCount = 0;
+        songs.forEach(meta => {
+            const song = {
+                id: Date.now() + Math.floor(Math.random() * 1000), // Ensure unique IDs
+                title: meta.title,
+                uploader: meta.uploader,
+                pic: meta.pic,
+                requester,
+                originalUrl: meta.originalUrl,
+                status: 'pending',
+                progress: 0,
+                src: null
+            };
+            if (!currentPlaying) {
+                currentPlaying = song;
+                playerStatus.playing = true;
+            } else {
+                playlist.push(song);
+            }
+            addedCount++;
+        });
+
+        if (addedCount > 0) {
+            io.emit('add_success', addedCount);
+            io.emit('sync_state', { playlist, currentPlaying, playerStatus, history, autoProcessKaraoke });
+            processDownloadQueue();
+        }
+    });
+
+    // Legacy support (optional, or redirect to use new approach internally if we want to keep the event)
+    // We can keep it or remove it. The frontend will be updated to use parse_url -> add_batch_songs.
+    // usage of add_song in frontend is being replaced.
+    // I will keep it for now just in case.
     socket.on('add_song', async (data) => {
         const { url, requester } = data;
-        const meta = await fetchMetadata(url);
-        if (meta) {
+        // Re-use logic for single song adding
+        const result = await fetchUrlInfo(url);
+        if (result && result.list && result.list.length > 0) {
+            // Just take the first one
+            const meta = result.list[0];
             const song = {
                 id: Date.now(),
                 title: meta.title,
                 uploader: meta.uploader,
                 pic: meta.pic,
                 requester,
-                originalUrl: url,
+                originalUrl: meta.originalUrl,
                 status: 'pending',
                 progress: 0,
                 src: null
@@ -415,7 +641,7 @@ io.on('connection', async (socket) => {
         const index = playlist.findIndex(item => item.id === id);
         if (index !== -1) {
             const item = playlist.splice(index, 1)[0];
-            if (action === 'delete' && item.status === 'ready') deleteSongFile(item);
+            if (action === 'delete') deleteSongFile(item);
             if (action === 'top') playlist.unshift(item);
             io.emit('sync_state', { playlist, currentPlaying, playerStatus, history, autoProcessKaraoke });
             processDownloadQueue();
