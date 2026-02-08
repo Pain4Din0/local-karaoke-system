@@ -15,16 +15,28 @@ A robust, locally hosted karaoke solution that enables seamless queuing and play
   - **Priority Queuing**: Move urgent requests to the top.
   - **Auto-Play & History**: Automatically plays the next track and allows quick re-queuing.
 - **Dual-Interface System**:
-  - **Player VIew**: A clean, distraction-free interface for TV or projector output.
+  - **Player View**: A clean, distraction-free interface for TV or projector output.
   - **Controller View**: A responsive mobile web app for guests to search, queue, and control playback.
 - **Automated Deployment**: The included `start.bat` handles all dependencies (Node.js, yt-dlp, FFmpeg, Demucs) automatically.
 
 ## 🛠 Prerequisites
 
-- **Operating System**: Windows 10/11 (64-bit)
-- **Network**: Active internet connection (required for first-run setup and media retrieval)
+To ensure optimal performance and stability, we recommend setting up the following environment manually before running the system.
 
-> **Note**: All runtime dependencies (Node.js, Python, yt-dlp, FFmpeg, Demucs) are automatically downloaded and configured on first run. No pre-installation required.
+### System Requirements
+- **Operating System**: Windows 10/11 (64-bit)
+- **Network**: Active internet connection (for fetching media content)
+
+### Dependencies
+The system relies on the following core components. Please install them and ensure they are accessible via your system's PATH:
+
+- **[Node.js](https://nodejs.org/)** (Runtime Environment): Powers the web server and application logic.
+- **[Python](https://www.python.org/)** (3.10+): Required for AI vocal separation (Demucs).
+- **[FFmpeg](https://ffmpeg.org/)** (Multimedia Framework): Handles audio/video processing.
+- **[yt-dlp](https://github.com/yt-dlp/yt-dlp)** (Media Downloader): Extracts content from streaming platforms.
+- **[Visual C++ Redistributable](https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist)**: Often required for Python and media libraries to run correctly.
+
+> **Note on Automated Setup**: The included `start.bat` script is designed to automatically check for these dependencies and attempt a portable installation if they are missing. However, **we strongly advise against relying solely on this feature**, as network restrictions or mirror availability may cause failures.
 
 ## 🚀 Installation & Usage
 
@@ -33,7 +45,7 @@ A robust, locally hosted karaoke solution that enables seamless queuing and play
 2.  **Run `start.bat`**.
     - On first run, you'll be prompted to select a download source:
       - **[1] China Mainland**: Uses mirrors (npmmirror, Huawei Cloud, Aliyun) for faster downloads in China.
-      - **[2] International**: Uses official sources (nodejs.org, python.org, github.com).
+      - **[2] Original**: Uses official sources (nodejs.org, python.org, github.com).
     - The script will automatically set up a complete portable environment including Node.js, Python, yt-dlp, FFmpeg, and all required dependencies.
     - Your choice is saved and won't be asked again. Delete `.mirror_config` to reset.
 
