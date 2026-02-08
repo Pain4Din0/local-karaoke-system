@@ -1,6 +1,7 @@
 # System dependencies & artifacts
 node_modules/
 downloads/
+separated/
 dist/
 build/
 .env

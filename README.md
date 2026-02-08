@@ -20,16 +20,21 @@ A robust, locally hosted karaoke solution that enables seamless queuing and play
 
 ## 🛠 Prerequisites
 
-- **Operating System**: Windows 10/11
-- **Python 3.8+**: Required for AI vocal removal ([Download](https://www.python.org/downloads/))
-- **Network**: Active internet connection (required for media retrieval)
+- **Operating System**: Windows 10/11 (64-bit)
+- **Network**: Active internet connection (required for first-run setup and media retrieval)
+
+> **Note**: All runtime dependencies (Node.js, Python, yt-dlp, FFmpeg, Demucs) are automatically downloaded and configured on first run. No pre-installation required.
 
 ## 🚀 Installation & Usage
 
 ### 1. Quick Start
 1.  **Clone or Download** this repository.
 2.  **Run `start.bat`**.
-    - The script will automatically configure a portable Node.js environment, download necessary binaries (`yt-dlp`, `ffmpeg`), install dependencies, and launch the server.
+    - On first run, you'll be prompted to select a download source:
+      - **[1] China Mainland**: Uses mirrors (npmmirror, Huawei Cloud, Aliyun) for faster downloads in China.
+      - **[2] International**: Uses official sources (nodejs.org, python.org, github.com).
+    - The script will automatically set up a complete portable environment including Node.js, Python, yt-dlp, FFmpeg, and all required dependencies.
+    - Your choice is saved and won't be asked again. Delete `.mirror_config` to reset.
 
 ### 2. Connect Interfaces
 -   **Player (Host)**:
@@ -63,6 +68,8 @@ Place the cookie files directly in the **root directory** of the project. The sy
 -   **Socket.io**: Real-time State Synchronization
 -   **yt-dlp**: Media Extraction Engine
 -   **FFmpeg**: Media Processing
+-   **Python**: AI Processing Runtime
+-   **Demucs**: AI-Powered Audio Source Separation
 
 ## 📄 License
 
