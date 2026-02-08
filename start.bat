@@ -27,9 +27,9 @@ if exist "%CONFIG_FILE%" (
 
 :: First run - ask user to select mirror
 cls
-echo ============================================================
+echo ===========================================================
 echo               Download Source Selection
-echo ============================================================
+echo ===========================================================
 echo.
 echo [1] China Mainland
 echo     npmmirror, Huawei Cloud, Aliyun, ghfast

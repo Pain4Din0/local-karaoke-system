@@ -1,0 +1,6 @@
+# 强制所有批处理文件在检出/下载时使用 Windows CRLF 换行符
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 强制该文件被视为文本文件
+*.bat working-tree-encoding=UTF-8
