@@ -6,11 +6,16 @@ build/
 .env
 .DS_Store
 
+# Portable runtimes
+bin/
+python/
+.mirror_config
+
 # Logs
 *.log
 npm-debug.log*
 
-# User credentials (NEVER COMMIT THESE)
+# User credentials
 cookies_*.txt
 cookies.txt
 auth.json

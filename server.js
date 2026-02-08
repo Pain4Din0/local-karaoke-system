@@ -26,6 +26,10 @@ let isProcessingKaraoke = false;
 const SEPARATED_DIR = path.join(__dirname, 'separated');
 if (!fs.existsSync(SEPARATED_DIR)) fs.mkdirSync(SEPARATED_DIR);
 
+// Detect Python executable (portable version takes priority)
+const PORTABLE_PYTHON = path.join(__dirname, 'python', 'python.exe');
+const PYTHON_EXE = fs.existsSync(PORTABLE_PYTHON) ? PORTABLE_PYTHON : 'python';
+
 // Track active processes for termination
 const activeKaraokeProcesses = new Map(); // songId -> { proc, song }
 
@@ -82,7 +86,8 @@ const processVocalSeparation = (song) => {
         song.localPath
     ];
 
-    const proc = spawn('demucs', args, { shell: true });
+    // Use python -m demucs to ensure it works with portable Python
+    const proc = spawn(PYTHON_EXE, ['-m', 'demucs', ...args], { shell: true });
     activeKaraokeProcesses.set(song.id, { proc, song });
 
     proc.stderr.on('data', (data) => {
