@@ -130,6 +130,40 @@ echo [DONE] FFmpeg ready.
 echo.
 
 :: ---------------------------------------------------------
+:: 3.5 Check and Install Demucs (for AI vocal separation)
+:: ---------------------------------------------------------
+:CHECK_DEMUCS
+:: Check Python first
+python --version >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [WARN] Python not found. Demucs requires Python 3.8+
+    echo [HINT] Install Python from https://www.python.org/downloads/
+    echo.
+    goto INSTALL_DEPS
+)
+
+:: Check if demucs is installed via Python module
+python -c "import demucs" >nul 2>&1
+if %errorlevel% equ 0 (
+    echo [CHECK] Demucs AI Vocal Separation available.
+    echo.
+    goto INSTALL_DEPS
+)
+
+:: Auto-install demucs and dependencies
+echo [TASK] Installing Demucs (AI Vocal Separation)...
+echo [INFO] This may take a few minutes...
+pip install demucs torchcodec -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+if %errorlevel% neq 0 (
+    echo [WARN] Demucs installation failed. AI vocal removal will be disabled.
+    echo.
+    goto INSTALL_DEPS
+)
+echo [DONE] Demucs ready.
+echo.
+
+:: ---------------------------------------------------------
 :: 4. Install Dependencies
 :: ---------------------------------------------------------
 :INSTALL_DEPS

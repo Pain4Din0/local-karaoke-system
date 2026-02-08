@@ -139,6 +139,52 @@
                     </button>
                 </div>
 
+                <!-- Vocal Removal -->
+                <div class="space-y-3 pb-4 border-b border-zinc-800">
+                    <div class="flex justify-between items-center text-xs text-zinc-500 uppercase tracking-wider">
+                        <span>{{ t('vocal_removal') }}</span>
+                        <span v-if="currentPlaying && currentPlaying.karaokeProcessing"
+                            class="text-yellow-500 animate-pulse">{{ t('processing') }} {{
+                            currentPlaying.karaokeProgress || 0 }}%</span>
+                        <span v-else-if="currentPlaying && currentPlaying.karaokeReady" class="text-green-500">{{
+                            t('ready') }}</span>
+                        <span v-else-if="currentPlaying && currentPlaying.status === 'ready'" class="text-zinc-600">{{
+                            t('click_to_process') }}</span>
+                    </div>
+                    <!-- Progress Bar (simplified) -->
+                    <div v-if="currentPlaying && currentPlaying.karaokeProcessing"
+                        class="w-full h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                        <div class="h-full bg-yellow-500 transition-all duration-300"
+                            :style="{ width: (currentPlaying.karaokeProgress || 0) + '%' }"></div>
+                    </div>
+                    <button @click="toggleVocalRemoval"
+                        class="w-full py-4 rounded-xl font-bold flex items-center justify-center gap-3 transition-all duration-200"
+                        :class="karaokeAvailable ? (localVocalRemoval ? 'bg-blue-500 text-white shadow-lg shadow-blue-500/20' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700') : (currentPlaying && currentPlaying.karaokeProcessing ? 'bg-zinc-800 text-yellow-500' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700')"
+                        :disabled="currentPlaying && currentPlaying.karaokeProcessing">
+                        <i v-if="currentPlaying && currentPlaying.karaokeProcessing"
+                            class="ri-loader-4-line animate-spin text-xl"></i>
+                        <i v-else :class="localVocalRemoval ? 'ri-mic-off-fill' : 'ri-mic-line'" class="text-xl"></i>
+                        <span v-if="currentPlaying && currentPlaying.karaokeProcessing">{{ t('processing') }}...</span>
+                        <span v-else-if="karaokeAvailable">{{ localVocalRemoval ? t('vocal_off') : t('vocal_on')
+                            }}</span>
+                        <span v-else>{{ t('start_process') }}</span>
+                    </button>
+                    <p class="text-[10px] text-zinc-600 text-center">{{ t('vocal_hint') }}</p>
+
+                    <!-- Auto-Process Toggle (sub-item) -->
+                    <div class="flex justify-between items-center pt-2">
+                        <div>
+                            <span class="text-xs text-zinc-600">{{ t('auto_process') }}</span>
+                        </div>
+                        <button @click="toggleAutoProcess"
+                            class="w-12 h-6 rounded-full relative transition-colors duration-200"
+                            :class="autoProcessKaraoke ? 'bg-blue-500' : 'bg-zinc-700'">
+                            <div class="w-5 h-5 bg-white rounded-full absolute top-0.5 transition-all duration-200"
+                                :class="autoProcessKaraoke ? 'right-0.5' : 'left-0.5'"></div>
+                        </button>
+                    </div>
+                </div>
+
                 <!-- Volume -->
                 <div class="space-y-3">
                     <div class="flex justify-between text-xs text-zinc-500 uppercase tracking-wider">
@@ -276,8 +322,11 @@
                             <div class="flex-1 min-w-0 z-10">
                                 <h4 class="text-sm font-medium text-zinc-200 truncate">{{ item.title }}</h4>
                                 <div class="flex items-center gap-2 mt-1">
-                                    <div class="w-1.5 h-1.5 rounded-full"
-                                        :class="item.status==='ready'?'bg-zinc-500':(item.status==='downloading'?'bg-blue-500':'bg-zinc-800')">
+                                    <!-- Status indicator: blue=downloading, yellow=processing karaoke, green=karaoke ready, gray=ready -->
+                                    <div class="w-1.5 h-1.5 rounded-full" :class="item.status==='downloading' ? 'bg-blue-500 animate-pulse' : 
+                                                item.karaokeProcessing ? 'bg-yellow-500 animate-pulse' : 
+                                                item.karaokeReady ? 'bg-green-500' : 
+                                                item.status==='ready' ? 'bg-zinc-500' : 'bg-zinc-800'">
                                     </div><span class="text-xs text-zinc-500 truncate">{{ item.requester }}</span>
                                 </div>
                             </div>
@@ -339,7 +388,7 @@
             <div class="grid grid-cols-[1fr_auto_1fr] items-center px-6 py-4">
                 <div class="flex justify-start"><button @click="control('replay')"
                         class="flex flex-col items-center gap-1 text-zinc-500 hover:text-white btn-press"><i
-                            class="ri-replay-10-line text-2xl"></i></button></div>
+                            class="ri-restart-line text-2xl"></i></button></div>
                 <div class="flex justify-center"><button @click="control('toggle')"
                         class="w-16 h-16 rounded-full flex items-center justify-center bg-white text-black shadow-lg shadow-white/10 btn-press transition-all"><i
                             :class="localPlaying ? 'ri-pause-fill' : 'ri-play-fill'" class="text-3xl"></i></button>
@@ -373,7 +422,18 @@
                 tuning: "Audio Settings",
                 volume: "Volume",
                 pitch: "Key Shift",
-                reset: "Reset"
+                reset: "Reset",
+                vocal_removal: "Vocal Remover",
+                vocal_on: "Vocals On",
+                vocal_off: "Vocals Off",
+                vocal_hint: "Processing may take 1-2 minutes",
+                vocal_unavailable: "Not Available",
+                processing: "Processing",
+                ready: "Ready",
+                click_to_process: "Click to process",
+                start_process: "Remove Vocals",
+                auto_process: "Auto-process new songs",
+                auto_process_hint: "Automatically prepare instrumental tracks"
             },
             zh: {
                 enterName: "输入您的昵称",
@@ -392,7 +452,18 @@
                 tuning: "音频设置",
                 volume: "音量",
                 pitch: "升降调",
-                reset: "重置"
+                reset: "重置",
+                vocal_removal: "人声消除",
+                vocal_on: "人声开启",
+                vocal_off: "人声已消除",
+                vocal_hint: "处理可能需要 1-2 分钟",
+                vocal_unavailable: "暂不可用",
+                processing: "处理中",
+                ready: "就绪",
+                click_to_process: "点击开始处理",
+                start_process: "消除人声",
+                auto_process: "自动处理新歌曲",
+                auto_process_hint: "自动为歌曲准备纯伴奏"
             },
             ja: {
                 enterName: "ニックネームを入力",
@@ -411,7 +482,18 @@
                 tuning: "オーディオ設定",
                 volume: "音量",
                 pitch: "キー変更",
-                reset: "リセット"
+                reset: "リセット",
+                vocal_removal: "ボーカル除去",
+                vocal_on: "ボーカルあり",
+                vocal_off: "ボーカルなし",
+                vocal_hint: "処理には 1～2 分かかります",
+                vocal_unavailable: "利用不可",
+                processing: "処理中",
+                ready: "準備完了",
+                click_to_process: "クリックで処理開始",
+                start_process: "ボーカル除去",
+                auto_process: "新曲を自動処理",
+                auto_process_hint: "自動的にインストを準備"
             }
         };
 
@@ -445,8 +527,12 @@
                 const localDuration = ref(0);
                 const localVolumeDisplay = ref(80);
                 const localPitch = ref(0);
+                const localVocalRemoval = ref(false);
                 const isDragging = ref(false);
                 const showTuning = ref(false);
+                const autoProcessKaraoke = ref(false);
+
+                const karaokeAvailable = computed(() => currentPlaying.value && currentPlaying.value.karaokeReady);
 
                 const showShareModal = ref(false);
                 const networks = ref([{ name: 'Loading', ip: '...' }]);
@@ -511,6 +597,18 @@
                     sendPitch(0);
                 };
 
+                const toggleVocalRemoval = () => {
+                    // Allow manual trigger even when not ready - server will start processing
+                    if (currentPlaying.value && currentPlaying.value.karaokeProcessing) return; // Don't interrupt processing
+                    localVocalRemoval.value = !localVocalRemoval.value;
+                    socket.emit('control_action', { type: 'vocal_removal', value: localVocalRemoval.value });
+                };
+
+                const toggleAutoProcess = () => {
+                    autoProcessKaraoke.value = !autoProcessKaraoke.value;
+                    socket.emit('set_auto_process', autoProcessKaraoke.value);
+                };
+
                 // --- Network / Share Logic ---
                 socket.on('system_info', (info) => {
                     networks.value = info.networks;
@@ -545,17 +643,30 @@
                     }
                 };
 
-                socket.on('sync_state', (state) => { playlist.value = state.playlist; currentPlaying.value = state.currentPlaying; history.value = state.history; });
+                socket.on('sync_state', (state) => {
+                    playlist.value = state.playlist;
+                    currentPlaying.value = state.currentPlaying;
+                    history.value = state.history;
+                    if (state.autoProcessKaraoke !== undefined) autoProcessKaraoke.value = state.autoProcessKaraoke;
+                });
                 socket.on('sync_tick', (status) => {
                     localPlaying.value = status.playing;
                     if (!isDragging.value) localCurrentTime.value = Math.floor(status.currentTime);
                     localDuration.value = Math.floor(status.duration);
                     if (Math.abs(localVolumeDisplay.value - Math.round(status.volume * 100)) > 2) localVolumeDisplay.value = Math.round(status.volume * 100);
                     if (status.pitch !== undefined) localPitch.value = status.pitch;
+                    if (status.vocalRemoval !== undefined) localVocalRemoval.value = status.vocalRemoval;
                 });
                 socket.on('update_progress', ({ id, progress }) => {
                     const item = playlist.value.find(p => p.id === id); if (item) item.progress = progress;
                     if (currentPlaying.value && currentPlaying.value.id === id) currentPlaying.value.progress = progress;
+                });
+                socket.on('karaoke_progress', ({ id, progress }) => {
+                    if (currentPlaying.value && currentPlaying.value.id === id) {
+                        currentPlaying.value.karaokeProgress = progress;
+                    }
+                    const item = playlist.value.find(p => p.id === id);
+                    if (item) item.karaokeProgress = progress;
                 });
                 socket.on('add_success', () => { isAdding.value = false; addUrl.value = ""; });
                 socket.on('error_msg', (msg) => { alert(msg); isAdding.value = false; });
@@ -571,7 +682,9 @@
 
                     lang, t, toggleLang, isRenaming, startRename, cancelRename,
                     showShareModal, openShare, networks, currentNetwork, nextNetwork, systemSSID, systemPort,
-                    showTuning, changePitch, resetPitch, localPitch
+                    showTuning, changePitch, resetPitch, localPitch,
+                    localVocalRemoval, toggleVocalRemoval,
+                    autoProcessKaraoke, toggleAutoProcess, karaokeAvailable
                 };
             }
         }).mount('#app');

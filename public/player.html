@@ -171,14 +171,88 @@
                     nextTick(() => generateQR());
                 };
 
+                // --- Karaoke Audio Switching (AI-based, uses pre-processed karaoke track) ---
+                let karaokeAudio = null;
+                let isVocalRemovalActive = false;
+
+                const initKaraokeAudio = (karaokeSrc) => {
+                    if (karaokeAudio) {
+                        karaokeAudio.pause();
+                        karaokeAudio = null;
+                    }
+                    if (!karaokeSrc) return;
+
+                    karaokeAudio = new Audio(karaokeSrc);
+                    karaokeAudio.preload = 'auto';
+                    karaokeAudio.volume = art ? art.volume : 0.8;
+                    karaokeAudio.muted = !isVocalRemovalActive;
+
+                    // Wait for audio to be ready before syncing
+                    karaokeAudio.addEventListener('canplaythrough', () => {
+                        if (art && isVocalRemovalActive && !art.video.paused) {
+                            karaokeAudio.currentTime = art.currentTime;
+                            karaokeAudio.play().catch(() => { });
+                        }
+                    }, { once: true });
+
+                    // Start loading
+                    karaokeAudio.load();
+                };
+
+                const toggleVocalRemoval = (active) => {
+                    isVocalRemovalActive = active;
+                    if (art && art.video) {
+                        // Swap audio sources: mute video when using karaoke, mute karaoke when using video
+                        art.video.muted = active;
+                        if (karaokeAudio) {
+                            karaokeAudio.muted = !active;
+                            if (active) {
+                                // Sync time and match play state
+                                karaokeAudio.currentTime = art.currentTime;
+                                if (!art.video.paused) {
+                                    karaokeAudio.play().catch(() => { });
+                                } else {
+                                    karaokeAudio.pause();
+                                }
+                            } else {
+                                karaokeAudio.pause();
+                            }
+                        }
+                    }
+                };
+
+                // Sync karaoke audio with video - called periodically and on events
+                const syncKaraokeAudio = () => {
+                    if (!karaokeAudio || !art || !art.video) return;
+
+                    // Sync volume
+                    karaokeAudio.volume = art.volume;
+
+                    // Only sync if vocal removal is active
+                    if (!isVocalRemovalActive) {
+                        if (!karaokeAudio.paused) karaokeAudio.pause();
+                        return;
+                    }
+
+                    // Sync time if drifted
+                    if (Math.abs(karaokeAudio.currentTime - art.currentTime) > 0.2) {
+                        karaokeAudio.currentTime = art.currentTime;
+                    }
+
+                    // Sync play state
+                    if (!art.video.paused && karaokeAudio.paused) {
+                        karaokeAudio.play().catch(() => { });
+                    } else if (art.video.paused && !karaokeAudio.paused) {
+                        karaokeAudio.pause();
+                    }
+                };
+
                 const initAudioContext = async () => {
                     if (window.audioCtx) return;
                     try {
                         window.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
                         await window.audioCtx.audioWorklet.addModule('pitch-processor.js');
                         window.pitchNode = new AudioWorkletNode(window.audioCtx, 'pitch-processor');
-
-                        // Wait for artplayer to be ready to connect
                     } catch (e) {
                         console.error("AudioContext Init Failed", e);
                     }
@@ -188,20 +262,18 @@
                     if (!art || !window.audioCtx || !window.pitchNode || art.audioEncoded) return;
 
                     try {
-                        // ArtPlayer exposes the video element
                         const video = art.video;
-                        // Prevent double connection
                         if (video._sourceNode) return;
 
                         const source = window.audioCtx.createMediaElementSource(video);
                         video._sourceNode = source;
 
+                        // Chain: Source -> PitchNode -> Destination (No DSP vocal remover)
                         source.connect(window.pitchNode);
                         window.pitchNode.connect(window.audioCtx.destination);
 
-                        art.audioEncoded = true; // Flag to avoid reconnection
+                        art.audioEncoded = true;
 
-                        // Initialize pitch parameter
                         const pitchParam = window.pitchNode.parameters.get('pitch');
                         if (pitchParam) pitchParam.value = 0;
 
@@ -243,12 +315,14 @@
                     if (tickInterval) clearInterval(tickInterval);
                     tickInterval = setInterval(() => {
                         if (art && art.video) {
+                            syncKaraokeAudio(); // Keep karaoke audio in sync
                             socket.emit('player_tick', {
                                 playing: !art.video.paused,
                                 currentTime: art.currentTime,
                                 duration: art.duration,
                                 volume: art.volume,
-                                pitch: window.pitchNode && window.pitchNode.parameters.get('pitch') ? window.pitchNode.parameters.get('pitch').value : 0
+                                pitch: window.pitchNode && window.pitchNode.parameters.get('pitch') ? window.pitchNode.parameters.get('pitch').value : 0,
+                                vocalRemoval: isVocalRemovalActive
                             });
                         }
                     }, 1000);
@@ -273,12 +347,26 @@
                             if (window.audioCtx && window.audioCtx.state === 'suspended') window.audioCtx.resume();
                             art.play().catch(() => { });
                             connectAudioNode();
+                            // Reset vocal removal on new song
+                            isVocalRemovalActive = false;
+                            if (karaokeAudio) {
+                                karaokeAudio.pause();
+                                karaokeAudio = null;
+                            }
+                            art.video.muted = false;
                         }
+
+                        // Add event listeners for karaoke audio sync
+                        art.video.addEventListener('play', () => syncKaraokeAudio());
+                        art.video.addEventListener('pause', () => syncKaraokeAudio());
+                        art.video.addEventListener('seeked', () => syncKaraokeAudio());
+
                         startHeartbeat();
-                        socket.emit('player_tick', { playing: true, currentTime: 0, duration: art.duration, volume: 0.8, pitch: 0 });
+                        socket.emit('player_tick', { playing: true, currentTime: 0, duration: art.duration, volume: 0.8, pitch: 0, vocalRemoval: false });
                     });
                 };
 
+                // Remove existing references to ensure clean setup
                 socket.on('system_info', (info) => {
                     networks.value = info.networks;
                     systemSSID.value = info.ssid;
@@ -302,9 +390,17 @@
                             showInfo.value = true;
                             setTimeout(() => showInfo.value = false, 8000);
                         }
+
+                        // Initialize karaoke audio if available
+                        if (newSong.karaokeReady && newSong.karaokeSrc) {
+                            if (!karaokeAudio || karaokeAudio.src !== window.location.origin + newSong.karaokeSrc) {
+                                initKaraokeAudio(newSong.karaokeSrc);
+                            }
+                        }
                     } else if (!newSong) {
                         if (art) { art.destroy(); art = null; }
                         if (tickInterval) clearInterval(tickInterval);
+                        if (karaokeAudio) { karaokeAudio.pause(); karaokeAudio = null; }
                         if (hasInteracted.value) nextTick(() => generateQR());
                     }
                 });
@@ -316,18 +412,48 @@
                 socket.on('exec_control', (action) => {
                     if (!art) return;
                     switch (action.type) {
-                        case 'toggle': art.toggle(); break;
-                        case 'seek': art.currentTime = action.value; art.notice.show = `${formatTime(action.value)}`; break;
+                        case 'toggle':
+                            art.toggle();
+                            // Use small delay to let video state update before syncing karaoke
+                            setTimeout(() => syncKaraokeAudio(), 50);
+                            break;
+                        case 'seek':
+                            art.currentTime = action.value;
+                            if (karaokeAudio && isVocalRemovalActive) karaokeAudio.currentTime = action.value;
+                            art.notice.show = `${formatTime(action.value)}`;
+                            break;
                         case 'volume': art.volume = action.value; art.notice.show = `VOL ${Math.round(action.value * 100)}`; break;
-                        case 'seek_fwd': art.forward = 5; break;
-                        case 'seek_rew': art.backward = 5; break;
-                        case 'replay': art.currentTime = 0; art.play(); break;
+                        case 'seek_fwd':
+                            art.forward = 5;
+                            setTimeout(() => syncKaraokeAudio(), 50);
+                            break;
+                        case 'seek_rew':
+                            art.backward = 5;
+                            setTimeout(() => syncKaraokeAudio(), 50);
+                            break;
+                        case 'replay':
+                            art.currentTime = 0;
+                            if (karaokeAudio && isVocalRemovalActive) karaokeAudio.currentTime = 0;
+                            art.play();
+                            break;
                         case 'reload': location.reload(); break;
                         case 'pitch':
                             if (window.pitchNode) {
                                 const param = window.pitchNode.parameters.get('pitch');
                                 if (param) param.setValueAtTime(action.value, window.audioCtx.currentTime);
                                 art.notice.show = `KEY ${action.value > 0 ? '+' : ''}${action.value}`;
+                            }
+                            break;
+                        case 'vocal_removal':
+                            if (currentSong.value && currentSong.value.karaokeReady) {
+                                // Ensure karaoke audio is initialized before toggling
+                                if (!karaokeAudio && currentSong.value.karaokeSrc) {
+                                    initKaraokeAudio(currentSong.value.karaokeSrc);
+                                }
+                                toggleVocalRemoval(action.value);
+                                art.notice.show = `VOCAL ${action.value ? 'OFF' : 'ON'}`;
+                            } else {
+                                art.notice.show = 'Karaoke not ready';
                             }
                             break;
                     }
@@ -343,7 +469,8 @@
                             currentTime: art.currentTime,
                             duration: art.duration,
                             volume: art.volume,
-                            pitch: currentPitch
+                            pitch: currentPitch,
+                            vocalRemoval: isVocalRemovalActive
                         });
                     }, 50);
                 });

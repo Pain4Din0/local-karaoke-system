@@ -7,6 +7,7 @@ A robust, locally hosted karaoke solution that enables seamless queuing and play
 ## ✨ Features
 
 - **Universal Content Support**: Queue songs directly via URL from YouTube, Bilibili, and any platform supported by `yt-dlp`.
+- **AI-Powered Vocal Removal**: Remove vocals from any song using [Demucs](https://github.com/facebookresearch/demucs) for studio-quality karaoke. Enable auto-processing to prepare instrumental tracks as songs are queued.
 - **Intelligent Queue Management**:
   - **Priority Queuing**: Move urgent requests to the top.
   - **Auto-Play**: Automatically plays the next track.
@@ -15,11 +16,12 @@ A robust, locally hosted karaoke solution that enables seamless queuing and play
 - **Dual-Interface System**:
   - **Player VIew**: A clean, distraction-free interface for TV or projector output.
   - **Controller View**: A responsive mobile web app for guests to search, queue, and control playback.
-- **Automated Deployment**: The included `start.bat` handles all dependencies (Node.js, yt-dlp, FFmpeg) automatically.
+- **Automated Deployment**: The included `start.bat` handles all dependencies (Node.js, yt-dlp, FFmpeg, Demucs) automatically.
 
 ## 🛠 Prerequisites
 
 - **Operating System**: Windows 10/11
+- **Python 3.8+**: Required for AI vocal removal ([Download](https://www.python.org/downloads/))
 - **Network**: Active internet connection (required for media retrieval)
 
 ## 🚀 Installation & Usage

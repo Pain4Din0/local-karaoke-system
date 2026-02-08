@@ -131,14 +131,11 @@ class PitchProcessor extends AudioWorkletProcessor {
 class JungleProcessor extends AudioWorkletProcessor {
     constructor() {
         super();
-        this.bufferSize = 8192; // Larger buffer
-        this.buffer = new Float32Array(this.bufferSize);
+        this.bufferSize = 8192;
+        // Separate buffers for stereo
+        this.bufferL = new Float32Array(this.bufferSize);
+        this.bufferR = new Float32Array(this.bufferSize);
         this.writePos = 0;
-
-        this.readPosA = 0;
-        this.readPosB = 0; // Not used in simple logic but needed for overlaps
-
-        // We use a phasor phase (0..1) to control grains
         this.phase = 0;
     }
 
@@ -149,40 +146,32 @@ class JungleProcessor extends AudioWorkletProcessor {
     process(inputs, outputs, parameters) {
         const input = inputs[0];
         const output = outputs[0];
-        const pitch = parameters.pitch.length > 1 ? parameters.pitch[0] : parameters.pitch[0];
+        const pitch = parameters.pitch[0];
+
+        if (!input || !input.length) return true;
+
+        const inputL = input[0];
+        const inputR = input[1] || input[0];
+        const outputL = output[0];
+        const outputR = output[1] || output[0];
+
+        // Passthrough mode when pitch is 0 (no processing needed)
+        if (Math.abs(pitch) < 0.01) {
+            for (let i = 0; i < inputL.length; i++) {
+                outputL[i] = inputL[i];
+                if (output.length > 1) outputR[i] = inputR[i];
+            }
+            return true;
+        }
 
         // 2^(semitones/12)
         const ratio = Math.pow(2, pitch / 12);
-
-        // In a delay-line pitch shifter, the grain rate is related to the pitch shift.
-        // read_speed = 1.0;
-        // The *delay* modulation speed is (1 - ratio).
-
-        if (!input || !input.length) return true;
-        const inputL = input[0];
-        const outputL = output[0];
-        const outputR = output[1] || outputL;
-
-        const grainSize = 2048; // Size of window
+        const grainSize = 2048;
 
         for (let i = 0; i < inputL.length; i++) {
-            // Write
-            this.buffer[this.writePos] = inputL[i];
-
-            // Phasor frequency determines how fast we scan through the delay line
-            // Frequency = (1 - ratio) / grain_duration_in_samples ?
-            // Actually, we want the delay to change by (1-ratio) samples per sample.
-            // So the 'delay head' moves at speed (ratio - 1).
-
-            // If ratio = 1, speed = 0 (constant delay).
-            // If ratio = 2, speed = 1 (delay increases by 1 sample per sample, effectively reading at 0 speed? No.)
-
-            // Let's use the rotating tape head analogy.
-            // Read Pointer = Write Pointer - Delay
-            // Delay varies.
-
-            // Delay is modulated by a sawtooth wave (phasor).
-            // When phasor wraps, we crossfade.
+            // Write to both channel buffers
+            this.bufferL[this.writePos] = inputL[i];
+            this.bufferR[this.writePos] = inputR[i];
 
             const speed = (1.0 - ratio);
             this.phase += speed / grainSize;
@@ -194,7 +183,7 @@ class JungleProcessor extends AudioWorkletProcessor {
             let phaseA = this.phase;
             let phaseB = (this.phase + 0.5) % 1.0;
 
-            // Delay in samples (0 to grainSize)
+            // Delay in samples
             let delayA = phaseA * grainSize;
             let delayB = phaseB * grainSize;
 
@@ -202,31 +191,27 @@ class JungleProcessor extends AudioWorkletProcessor {
             let posA = (this.writePos - delayA + this.bufferSize) % this.bufferSize;
             let posB = (this.writePos - delayB + this.bufferSize) % this.bufferSize;
 
-            // Interpolated Read A
+            // Interpolated Read - Left Channel
             let idxA = Math.floor(posA);
             const fracA = posA - idxA;
-            const valA = this.buffer[idxA] * (1 - fracA) + this.buffer[(idxA + 1) % this.bufferSize] * fracA;
+            const valLA = this.bufferL[idxA] * (1 - fracA) + this.bufferL[(idxA + 1) % this.bufferSize] * fracA;
+            const valRA = this.bufferR[idxA] * (1 - fracA) + this.bufferR[(idxA + 1) % this.bufferSize] * fracA;
 
             // Interpolated Read B
             let idxB = Math.floor(posB);
             const fracB = posB - idxB;
-            const valB = this.buffer[idxB] * (1 - fracB) + this.buffer[(idxB + 1) % this.bufferSize] * fracB;
+            const valLB = this.bufferL[idxB] * (1 - fracB) + this.bufferL[(idxB + 1) % this.bufferSize] * fracB;
+            const valRB = this.bufferR[idxB] * (1 - fracB) + this.bufferR[(idxB + 1) % this.bufferSize] * fracB;
 
-            // Window (Triangle or Hanning)
-            // Triangle window for 0..1 phase, centered at 0.5?
-            // Actually the "fades" happen at the wrap points of the delay.
-            // The tape head jump happens when delay wraps from max to 0.
-            // So we want volume 0 at phase 0 and 1. Volume 1 at phase 0.5.
-
-            // Triangle window based on phase (0->0, 0.5->1, 1->0)
+            // Triangle window
             let gainA = 1.0 - 2.0 * Math.abs(phaseA - 0.5);
             let gainB = 1.0 - 2.0 * Math.abs(phaseB - 0.5);
 
-            // Output
-            let outSample = (valA * gainA + valB * gainB);
-
-            outputL[i] = outSample;
-            if (output.length > 1) outputR[i] = outSample;
+            // Output - preserve stereo
+            outputL[i] = valLA * gainA + valLB * gainB;
+            if (output.length > 1) {
+                outputR[i] = valRA * gainA + valRB * gainB;
+            }
 
             // Increment write
             this.writePos = (this.writePos + 1) % this.bufferSize;
