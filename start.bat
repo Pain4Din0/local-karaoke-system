@@ -28,16 +28,16 @@ if exist "%CONFIG_FILE%" (
 :: First run - ask user to select mirror
 cls
 echo ============================================================
-echo    Download Source Selection / 下载源选择
+echo               Download Source Selection
 echo ============================================================
 echo.
-echo [1] China Mainland (中国大陆镜像 - 推荐国内用户)
+echo [1] China Mainland
 echo     npmmirror, Huawei Cloud, Aliyun, ghfast
 echo.
-echo [2] International (官方源 - For users outside China)
+echo [2] Original
 echo     nodejs.org, python.org, github.com
 echo.
-set /p MIRROR_CHOICE="Enter choice / 输入选择 [1/2]: "
+set /p MIRROR_CHOICE="Enter choice [1/2]: "
 
 :: Validate and save choice
 if "%MIRROR_CHOICE%"=="1" (
