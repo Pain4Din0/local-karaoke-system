@@ -13,6 +13,8 @@
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="/socket.io/socket.io.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/driver.js@1.0.1/dist/driver.js.iife.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/driver.js@1.0.1/dist/driver.css" />
     <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
     <style>
         body {
@@ -100,8 +102,13 @@
                     class="w-full bg-white text-black py-4 rounded-xl font-bold btn-press mb-4">{{
                     isRenaming ? t('save') : t('join') }}</button>
                 <button v-if="isRenaming" @click="cancelRename"
-                    class="w-full bg-zinc-800 text-zinc-400 py-3 rounded-xl font-bold btn-press">{{
+                    class="w-full bg-zinc-800 text-zinc-400 py-3 rounded-xl font-bold btn-press mb-4">{{
                     t('cancel') }}</button>
+
+                <button v-if="isRenaming" @click="restartTutorial"
+                    class="w-full bg-blue-900/30 text-blue-400 py-3 rounded-xl font-bold btn-press border border-blue-900/50">
+                    <i class="ri-question-line mr-1"></i> {{ t('tutorial_restart') }}
+                </button>
             </div>
 
             <!-- Copyright / GitHub Badge -->
@@ -223,7 +230,7 @@
                 </div>
 
                 <!-- Vocal Removal -->
-                <div class="space-y-3 pb-4 border-b border-zinc-800">
+                <div class="space-y-3 pb-4 border-b border-zinc-800" id="tuning-vocal">
                     <div class="flex justify-between items-center text-xs text-zinc-500 uppercase tracking-wider">
                         <span>{{ t('vocal_removal') }}</span>
                         <span v-if="currentPlaying && currentPlaying.karaokeProcessing"
@@ -255,7 +262,7 @@
                     <p class="text-[10px] text-zinc-600 text-center">{{ t('vocal_hint') }}</p>
 
                     <!-- Auto-Process Toggle (sub-item) -->
-                    <div class="flex justify-between items-center pt-2">
+                    <div class="flex justify-between items-center pt-2" id="tuning-auto">
                         <div>
                             <span class="text-xs text-zinc-600">{{ t('auto_process') }}</span>
                         </div>
@@ -269,7 +276,7 @@
                 </div>
 
                 <!-- Volume -->
-                <div class="space-y-3">
+                <div class="space-y-3" id="tuning-volume">
                     <div class="flex justify-between text-xs text-zinc-500 uppercase tracking-wider">
                         <span>{{ t('volume') }}</span>
                         <span>{{ localVolumeDisplay }}%</span>
@@ -283,7 +290,7 @@
                     </div>
 
                     <!-- Loudness Normalization Toggle (sub-item under volume) -->
-                    <div class="flex justify-between items-center pt-2">
+                    <div class="flex justify-between items-center pt-2" id="tuning-loudness">
                         <div>
                             <span class="text-xs text-zinc-600">{{ t('loudness_norm') }}</span>
                         </div>
@@ -297,7 +304,7 @@
                 </div>
 
                 <!-- Pitch -->
-                <div class="space-y-4">
+                <div class="space-y-4" id="tuning-pitch">
                     <div class="flex justify-between items-center text-xs text-zinc-500 uppercase tracking-wider">
                         <div class="flex items-center gap-1.5">
                             <span>{{ t('pitch') }}</span>
@@ -342,7 +349,7 @@
                         <i class="ri-restart-line"></i>
                     </button>
 
-                    <button @click="openShare"
+                    <button @click="openShare" id="btn-share"
                         class="text-zinc-400 hover:text-white border border-zinc-700 bg-zinc-800 w-8 h-8 rounded-full flex items-center justify-center transition">
                         <i class="ri-qr-code-line"></i>
                     </button>
@@ -351,13 +358,14 @@
                         class="h-8 px-3 rounded-full border border-zinc-700 bg-zinc-800 flex items-center justify-center text-xs font-mono text-zinc-500 hover:text-white transition">{{
                         lang.toUpperCase() }}</button>
 
-                    <div @click="startRename"
+                    <div @click="startRename" id="display-nickname"
                         class="h-8 px-3 rounded-full border border-zinc-700 bg-zinc-800 flex items-center justify-center text-xs text-zinc-400 cursor-pointer hover:text-white transition">
                         {{ nickname }}</div>
                 </div>
             </div>
             <div class="flex gap-6 border-b border-zinc-800">
-                <button @click="activeTab = 'playlist'" class="pb-2 text-sm font-medium transition-colors relative"
+                <button @click="activeTab = 'playlist'" id="tab-playlist"
+                    class="pb-2 text-sm font-medium transition-colors relative"
                     :class="activeTab === 'playlist' ? 'text-white' : 'text-zinc-500'">
                     {{ t('playlist') }} <span v-if="activeTab === 'playlist'"
                         class="absolute bottom-0 left-0 w-full h-[1px] bg-white"></span>
@@ -372,7 +380,8 @@
 
         <main class="flex-1 min-h-0 overflow-y-auto no-scrollbar p-4 space-y-4 bg-[#09090b]">
 
-            <div v-if="currentPlaying" class="bg-zinc-900 p-5 rounded-2xl border border-zinc-800 shadow-sm">
+            <div v-if="currentPlaying" class="bg-zinc-900 p-5 rounded-2xl border border-zinc-800 shadow-sm"
+                id="player-card">
                 <div class="flex items-center justify-between mb-3">
                     <div class="flex items-center gap-2">
                         <div class="w-2 h-2 rounded-full" :class="[
@@ -434,7 +443,8 @@
 
             <div v-if="activeTab === 'playlist'" class="space-y-4">
                 <div class="flex gap-3">
-                    <div class="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl flex items-center px-3"><i
+                    <div id="input-add-song"
+                        class="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl flex items-center px-3"><i
                             class="ri-link text-zinc-500"></i><input v-model="addUrl" type="text"
                             class="bg-transparent w-full p-3 text-sm text-white outline-none placeholder-zinc-600"
                             :placeholder="t('pasteLink')"></div>
@@ -511,7 +521,7 @@
         <footer class="flex-none bg-zinc-900 border-t border-zinc-800 pb-safe z-20">
             <div class="px-6 py-3 border-b border-zinc-800/50 flex items-center justify-between">
                 <!-- Tuning Button -->
-                <button @click="showTuning = true"
+                <button @click="showTuning = true" id="btn-tuning"
                     class="w-10 h-10 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-white flex items-center justify-center transition btn-press relative">
                     <i class="ri-music-2-fill"></i>
                     <div v-if="localPitch !== 0"
@@ -541,7 +551,7 @@
                 <div class="flex justify-start"><button @click="control('replay')"
                         class="flex flex-col items-center gap-1 text-zinc-500 hover:text-white btn-press"><i
                             class="ri-restart-line text-2xl"></i></button></div>
-                <div class="flex justify-center"><button @click="control('toggle')"
+                <div class="flex justify-center"><button @click="control('toggle')" id="btn-play-pause"
                         class="w-16 h-16 rounded-full flex items-center justify-center bg-white text-black shadow-lg shadow-white/10 btn-press transition-all"><i
                             :class="localPlaying ? 'ri-pause-fill' : 'ri-play-fill'" class="text-3xl"></i></button>
                 </div>
@@ -591,7 +601,35 @@
                 select_all: "Select All",
                 selected: "selected",
                 add_selected: "Add Selected",
-                select_songs_first: "Select at least one song"
+                select_songs_first: "Select at least one song",
+                tutorial_restart: "Show Tutorial",
+                // Tutorial Steps
+                tut_welcome_title: "Welcome to Local Karaoke!",
+                tut_welcome_desc: "Let's take a quick tour to show you how to control the system.",
+                tut_add_title: "Add Songs",
+                tut_add_desc: "Paste Bilibili/YouTube links here. You can also paste a Playlist or Favorites link to add multiple songs!",
+                tut_player_title: "Status Indicators",
+                tut_player_desc: "Green=Playing, White Pulse=Downloading, Cyan Pulse=Separating Vocals.",
+                tut_playlist_title: "Playlist & History",
+                tut_playlist_desc: "Switch between the current queue and your request history here.",
+                tut_tuning_title: "Audio Settings",
+                tut_tuning_desc: "Open audio settings menu.",
+                tut_vocal_title: "Vocal Remover",
+                tut_vocal_desc: "Remove vocals from the track. First-time use may take longer to load the model.",
+                tut_auto_title: "Auto-Process",
+                tut_auto_desc: "Automatically remove vocals for all new songs added to the queue. Please note the increased CPU usage.",
+                tut_vol_title: "Volume Control",
+                tut_vol_desc: "Master volume adjustment.",
+                tut_loudness_title: "Loudness Normalization",
+                tut_loudness_desc: "Keep volume consistent across different songs.",
+                tut_pitch_title: "Key Shift",
+                tut_pitch_desc: "Adjust the song key to match your vocal range.",
+                tut_control_title: "Playback Control",
+                tut_control_desc: "Play, pause, or skip the current song.",
+                tut_share_title: "Share",
+                tut_share_desc: "Show the QR code for friends to join.",
+                tut_nick_title: "Your Nickname",
+                tut_nick_desc: "Tap here to change your name or view this tutorial again."
             },
             zh: {
                 enterName: "输入您的昵称",
@@ -627,7 +665,35 @@
                 select_all: "全选",
                 selected: "已选",
                 add_selected: "添加选中歌曲",
-                select_songs_first: "请至少选择一首歌曲"
+                select_songs_first: "请至少选择一首歌曲",
+                tutorial_restart: "重新观看教学",
+                // Tutorial Steps
+                tut_welcome_title: "欢迎使用点歌台！",
+                tut_welcome_desc: "让我们花一点时间了解如何使用本系统。",
+                tut_add_title: "点歌",
+                tut_add_desc: "粘贴链接点歌。支持 Bilibili 收藏夹和 YouTube 播放列表批量导入！",
+                tut_player_title: "状态指示灯",
+                tut_player_desc: "绿色=播放中，白色闪烁=下载中，青色闪烁=人声分离处理中。",
+                tut_playlist_title: "列表切换",
+                tut_playlist_desc: "在此切换当前待播队列和您的点歌历史。",
+                tut_tuning_title: "调音台",
+                tut_tuning_desc: "打开音频设置菜单。",
+                tut_vocal_title: "人声消除",
+                tut_vocal_desc: "消除人声制作伴奏。首次使用加载模型时间可能较长。",
+                tut_auto_title: "自动处理",
+                tut_auto_desc: "开启后，后续点歌将自动进行人声消除处理。请注意电脑资源消耗。",
+                tut_vol_title: "音量调节",
+                tut_vol_desc: "调节系统音量。",
+                tut_loudness_title: "响度均衡",
+                tut_loudness_desc: "默认开启，以统一不同歌曲的音量大小。",
+                tut_pitch_title: "升降调",
+                tut_pitch_desc: "调节歌曲音调以适合您的音域。",
+                tut_control_title: "播放控制",
+                tut_control_desc: "暂停、播放或切歌。",
+                tut_share_title: "分享",
+                tut_share_desc: "显示二维码，邀请朋友一起点歌。",
+                tut_nick_title: "个人中心",
+                tut_nick_desc: "点击此处修改昵称或重新观看本教学。"
             },
             ja: {
                 enterName: "ニックネームを入力",
@@ -663,7 +729,35 @@
                 select_all: "すべて選択",
                 selected: "選択済み",
                 add_selected: "選択した曲を追加",
-                select_songs_first: "曲を選択してください"
+                select_songs_first: "曲を選択してください",
+                tutorial_restart: "チュートリアルを表示",
+                // Tutorial Steps
+                tut_welcome_title: "ようこそ！",
+                tut_welcome_desc: "使い方の簡単なツアーを始めましょう。",
+                tut_add_title: "曲を追加",
+                tut_add_desc: "リンクを貼り付けて追加。プレイリストやマイリストのURLで一括追加も可能です！",
+                tut_player_title: "ステータス表示",
+                tut_player_desc: "緑=再生中、白点滅=ダウンロード中、水色点滅=ボーカル分離処理中。",
+                tut_playlist_title: "プレイリスト",
+                tut_playlist_desc: "再生待ちリストと履歴を切り替えます。",
+                tut_tuning_title: "オーディオ設定",
+                tut_tuning_desc: "オーディオ設定メニューを開きます。",
+                tut_vocal_title: "ボーカル除去",
+                tut_vocal_desc: "ボーカルを消します。初回使用時はモデルの読み込みに時間がかかる場合があります。",
+                tut_auto_title: "自動処理",
+                tut_auto_desc: "オンにすると、今後の曲すべてから自動でボーカルを除去します。PCの負荷が高くなるので注意してください。",
+                tut_vol_title: "音量",
+                tut_vol_desc: "全体の音量を調整します。",
+                tut_loudness_title: "ラウドネス正規化",
+                tut_loudness_desc: "曲ごとの音量差をなくすため、オンにすることをお勧めします。",
+                tut_pitch_title: "キー変更",
+                tut_pitch_desc: "歌いやすいキーに調整できます。",
+                tut_control_title: "再生コントロール",
+                tut_control_desc: "再生、一時停止、スキップができます。",
+                tut_share_title: "共有",
+                tut_share_desc: "QRコードを表示して友達を招待しよう。",
+                tut_nick_title: "ニックネーム",
+                tut_nick_desc: "ここをタップして名前を変更したり、チュートリアルを再度表示したりできます。"
             }
         };
 
@@ -678,9 +772,20 @@
 
         createApp({
             setup() {
-                const lang = ref('zh');
+                const lang = ref('zh'); // Default lang, logic can be improved to detect browser lang if needed
+
+                // Load saved language if available
+                const savedLang = localStorage.getItem('ktv_lang');
+                if (savedLang && messages[savedLang]) {
+                    lang.value = savedLang;
+                }
+
                 const t = (key) => messages[lang.value][key];
-                const toggleLang = () => { const keys = Object.keys(messages); lang.value = keys[(keys.indexOf(lang.value) + 1) % keys.length]; };
+                const toggleLang = () => {
+                    const keys = Object.keys(messages);
+                    lang.value = keys[(keys.indexOf(lang.value) + 1) % keys.length];
+                    localStorage.setItem('ktv_lang', lang.value);
+                };
 
                 const nickname = ref(localStorage.getItem('ktv_nickname') || "");
                 const tempNick = ref("");
@@ -724,6 +829,11 @@
                     nickname.value = tempNick.value;
                     localStorage.setItem('ktv_nickname', nickname.value);
                     isRenaming.value = false;
+
+                    // Check if tutorial should be shown
+                    if (!localStorage.getItem('ktv_tutorial_completed')) {
+                        startTutorial();
+                    }
                 };
                 const startRename = () => {
                     tempNick.value = nickname.value;
@@ -798,6 +908,147 @@
 
                 // Only update UI during drag, send seek command on release
                 const onSeekInput = () => { isDragging.value = true; };
+
+                // Tutorial Logic
+                let driverObj = null;
+
+                const startTutorial = () => {
+                    nextTick(() => {
+                        const driver = window.driver.js.driver;
+
+                        const steps = [
+                            {
+                                popover: {
+                                    title: t('tut_welcome_title'),
+                                    description: t('tut_welcome_desc')
+                                }
+                            },
+                            {
+                                element: '#input-add-song',
+                                popover: {
+                                    title: t('tut_add_title'),
+                                    description: t('tut_add_desc'),
+                                    side: "bottom",
+                                    align: 'start'
+                                }
+                            },
+                            {
+                                element: '#player-card',
+                                popover: {
+                                    title: t('tut_player_title'),
+                                    description: t('tut_player_desc'),
+                                    side: "bottom"
+                                }
+                            },
+                            {
+                                element: '#tab-playlist',
+                                popover: {
+                                    title: t('tut_playlist_title'),
+                                    description: t('tut_playlist_desc'),
+                                    side: "bottom"
+                                }
+                            },
+                            {
+                                element: '#btn-tuning',
+                                popover: {
+                                    title: t('tut_tuning_title'),
+                                    description: t('tut_tuning_desc'),
+                                    side: "top"
+                                }
+                            },
+                            {
+                                element: '#tuning-vocal',
+                                popover: {
+                                    title: t('tut_vocal_title'),
+                                    description: t('tut_vocal_desc'),
+                                    side: "top"
+                                },
+                                onHighlightStarted: () => { showTuning.value = true; nextTick(); }
+                            },
+                            {
+                                element: '#tuning-auto',
+                                popover: {
+                                    title: t('tut_auto_title'),
+                                    description: t('tut_auto_desc'),
+                                    side: "top"
+                                }
+                            },
+                            {
+                                element: '#tuning-volume',
+                                popover: {
+                                    title: t('tut_vol_title'),
+                                    description: t('tut_vol_desc'),
+                                    side: "top"
+                                }
+                            },
+                            {
+                                element: '#tuning-loudness',
+                                popover: {
+                                    title: t('tut_loudness_title'),
+                                    description: t('tut_loudness_desc'),
+                                    side: "top"
+                                }
+                            },
+                            {
+                                element: '#tuning-pitch',
+                                popover: {
+                                    title: t('tut_pitch_title'),
+                                    description: t('tut_pitch_desc'),
+                                    side: "top"
+                                },
+                                onDeselected: () => { showTuning.value = false; }
+                            },
+                            {
+                                element: '#btn-play-pause',
+                                popover: {
+                                    title: t('tut_control_title'),
+                                    description: t('tut_control_desc'),
+                                    side: "top"
+                                }
+                            },
+                            {
+                                element: '#btn-share',
+                                popover: {
+                                    title: t('tut_share_title'),
+                                    description: t('tut_share_desc'),
+                                    side: "bottom"
+                                }
+                            },
+                            {
+                                element: '#display-nickname',
+                                popover: {
+                                    title: t('tut_nick_title'),
+                                    description: t('tut_nick_desc'),
+                                    side: "bottom"
+                                }
+                            }
+                        ];
+
+                        driverObj = driver({
+                            showProgress: true,
+                            steps: steps,
+                            onDestroyed: () => {
+                                localStorage.setItem('ktv_tutorial_completed', 'true');
+                            },
+                            prevBtnText: '←',
+                            nextBtnText: '→',
+                            doneBtnText: 'Done'
+                        });
+
+                        driverObj.drive();
+                    });
+                };
+
+                const restartTutorial = () => {
+                    isRenaming.value = false; // Close modal
+                    startTutorial();
+                };
+
+                // Auto start tutorial if nickname exists but tutorial not completed
+                if (nickname.value && !localStorage.getItem('ktv_tutorial_completed')) {
+                    // Slight delay to ensure DOM is ready
+                    setTimeout(() => startTutorial(), 500);
+                }
                 const onSeekEnd = () => { isDragging.value = false; sendSeek(localCurrentTime.value); };
                 const onVolumeInput = () => sendVolume(localVolumeDisplay.value);
 
@@ -929,7 +1180,7 @@
                     reAddHistory, exportHistory,
                     onSeekInput, onSeekEnd, onVolumeInput, formatTime,
 
-                    lang, t, toggleLang, isRenaming, startRename, cancelRename,
+                    lang, t, toggleLang, isRenaming, startRename, cancelRename, restartTutorial,
                     showShareModal, openShare, networks, currentNetwork, nextNetwork, systemSSID, systemPort,
                     showTuning, changePitch, resetPitch, localPitch,
                     localVocalRemoval, toggleVocalRemoval,
