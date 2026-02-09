@@ -246,6 +246,19 @@
                             class="flex-1 h-2 bg-zinc-800 rounded-lg appearance-none cursor-pointer">
                         <i class="ri-volume-up-line text-zinc-500"></i>
                     </div>
+
+                    <!-- Loudness Normalization Toggle (sub-item under volume) -->
+                    <div class="flex justify-between items-center pt-2">
+                        <div>
+                            <span class="text-xs text-zinc-600">{{ t('loudness_norm') }}</span>
+                        </div>
+                        <button @click="toggleLoudnessNorm"
+                            class="w-12 h-6 rounded-full relative transition-colors duration-200"
+                            :class="localLoudnessNorm ? 'bg-blue-500' : 'bg-zinc-700'">
+                            <div class="w-5 h-5 bg-white rounded-full absolute top-0.5 transition-all duration-200"
+                                :class="localLoudnessNorm ? 'right-0.5' : 'left-0.5'"></div>
+                        </button>
+                    </div>
                 </div>
 
                 <!-- Pitch -->
@@ -482,6 +495,7 @@
                 start_process: "Remove Vocals",
                 auto_process: "Auto-process new songs",
                 auto_process_hint: "Automatically prepare instrumental tracks",
+                loudness_norm: "Loudness Normalization",
                 select_songs: "Select Songs",
                 select_all: "Select All",
                 selected: "selected",
@@ -517,6 +531,7 @@
                 start_process: "消除人声",
                 auto_process: "自动处理新歌曲",
                 auto_process_hint: "自动为歌曲准备纯伴奏",
+                loudness_norm: "响度均衡",
                 select_songs: "选择歌曲",
                 select_all: "全选",
                 selected: "已选",
@@ -552,6 +567,7 @@
                 start_process: "ボーカル除去",
                 auto_process: "新曲を自動処理",
                 auto_process_hint: "自動的にインストを準備",
+                loudness_norm: "ラウドネス正規化",
                 select_songs: "曲を選択",
                 select_all: "すべて選択",
                 selected: "選択済み",
@@ -591,6 +607,7 @@
                 const localVolumeDisplay = ref(80);
                 const localPitch = ref(0);
                 const localVocalRemoval = ref(false);
+                const localLoudnessNorm = ref(true); // Loudness normalization on by default
                 const isDragging = ref(false);
                 const showTuning = ref(false);
                 const autoProcessKaraoke = ref(false);
@@ -717,6 +734,11 @@
                     socket.emit('set_auto_process', autoProcessKaraoke.value);
                 };
 
+                const toggleLoudnessNorm = () => {
+                    localLoudnessNorm.value = !localLoudnessNorm.value;
+                    socket.emit('control_action', { type: 'loudness_norm', value: localLoudnessNorm.value });
+                };
+
                 // --- Network / Share Logic ---
                 socket.on('system_info', (info) => {
                     networks.value = info.networks;
@@ -764,6 +786,7 @@
                     if (Math.abs(localVolumeDisplay.value - Math.round(status.volume * 100)) > 2) localVolumeDisplay.value = Math.round(status.volume * 100);
                     if (status.pitch !== undefined) localPitch.value = status.pitch;
                     if (status.vocalRemoval !== undefined) localVocalRemoval.value = status.vocalRemoval;
+                    if (status.loudnessNorm !== undefined) localLoudnessNorm.value = status.loudnessNorm;
                 });
                 socket.on('update_progress', ({ id, progress }) => {
                     const item = playlist.value.find(p => p.id === id); if (item) item.progress = progress;
@@ -811,6 +834,7 @@
                     showShareModal, openShare, networks, currentNetwork, nextNetwork, systemSSID, systemPort,
                     showTuning, changePitch, resetPitch, localPitch,
                     localVocalRemoval, toggleVocalRemoval,
+                    localLoudnessNorm, toggleLoudnessNorm,
                     autoProcessKaraoke, toggleAutoProcess, karaokeAvailable,
                     showPlaylistModal, playlistItems, selectedItems, isAllSelected,
                     closePlaylistModal, toggleItem, toggleSelectAll, confirmAddBatch

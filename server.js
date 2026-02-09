@@ -36,8 +36,9 @@ const activeKaraokeProcesses = new Map(); // songId -> { proc, song }
 const activeDownloads = new Map(); // songId -> proc
 
 const cleanupSeparatedFiles = (songId) => {
-    // Clean up the separated folder for a specific song
-    const songSeparatedDir = path.join(SEPARATED_DIR, 'htdemucs', songId.toString());
+    // Cleanup function to remove Demucs-generated files
+    // Demucs creates folder based on input filename without extension (ID_audio)
+    const songSeparatedDir = path.join(SEPARATED_DIR, 'htdemucs', `${songId}_audio`);
     if (fs.existsSync(songSeparatedDir)) {
         try {
             fs.rmSync(songSeparatedDir, { recursive: true, force: true });
@@ -74,12 +75,14 @@ const terminateKaraokeProcess = (songId) => {
 
 const processVocalSeparation = (song) => {
 
-    if (!song || !song.localPath || !fs.existsSync(song.localPath)) return;
+    // Use audio-only file for faster Demucs processing
+    const audioPath = song.localAudioPath;
+    if (!song || !audioPath || !fs.existsSync(audioPath)) return;
     if (song.karaokeReady || song.karaokeProcessing) return;
 
     song.karaokeProcessing = true;
     song.karaokeProgress = 0;
-    console.log(`[Karaoke] Processing: ${song.title}`);
+    console.log(`[Karaoke] Processing audio: ${path.basename(audioPath)}`);
     io.emit('sync_state', { playlist, currentPlaying, playerStatus, history, autoProcessKaraoke });
 
     const args = [
@@ -88,7 +91,7 @@ const processVocalSeparation = (song) => {
         '--mp3',
         '-d', 'cpu',
         '-o', SEPARATED_DIR,
-        song.localPath
+        audioPath
     ];
 
     // Use python -m demucs to ensure it works with portable Python
@@ -114,7 +117,8 @@ const processVocalSeparation = (song) => {
         song.karaokeProcessing = false;
 
         if (code === 0) {
-            const noVocalsPath = path.join(SEPARATED_DIR, 'htdemucs', song.id.toString(), 'no_vocals.mp3');
+            // Demucs creates folder based on input filename without extension (e.g., ID_audio)
+            const noVocalsPath = path.join(SEPARATED_DIR, 'htdemucs', `${song.id}_audio`, 'no_vocals.mp3');
             if (fs.existsSync(noVocalsPath)) {
                 const karaokePath = path.join(DOWNLOAD_DIR, `${song.id}_karaoke.mp3`);
                 fs.copyFileSync(noVocalsPath, karaokePath);
@@ -144,6 +148,7 @@ const processVocalSeparation = (song) => {
         processNextKaraoke();
     });
 };
+
 
 const processNextKaraoke = () => {
     if (karaokeProcessingQueue.length === 0) {
@@ -237,90 +242,197 @@ const getCookiesPath = (url) => {
 
 const startDownload = (song) => {
     isDownloading = true;
-    currentDownloadingId = song.id; // Set current download ID
+    currentDownloadingId = song.id;
     song.status = 'downloading';
     song.progress = 0;
     io.emit('sync_state', { playlist, currentPlaying, playerStatus, history });
 
     console.log(`[System] Downloading: ${song.title}`);
-    const outputFilename = `${song.id}.mp4`;
-    const outputPath = path.join(DOWNLOAD_DIR, outputFilename);
 
-    const args = [
-        '-f', 'bestvideo+bestaudio/best',
-        '--merge-output-format', 'mp4',
-        '-o', outputPath,
+    // New file structure: separate video and audio
+    const videoFilename = `${song.id}_video.mp4`;
+    const audioFilename = `${song.id}_audio.m4a`;
+    const videoPath = path.join(DOWNLOAD_DIR, videoFilename);
+    const audioPath = path.join(DOWNLOAD_DIR, audioFilename);
+
+    const cookies = getCookiesPath(song.originalUrl);
+
+    // Step 1: Download video-only (no audio)
+    const videoArgs = [
+        '-f', 'bestvideo[ext=mp4]/bestvideo',
+        '-o', videoPath,
         '--no-playlist',
         '-N', '16', '--http-chunk-size', '10M'
     ];
+    if (cookies) videoArgs.push('--cookies', cookies);
+    videoArgs.push(song.originalUrl);
 
-    const cookies = getCookiesPath(song.originalUrl);
-    if (cookies) args.push('--cookies', cookies);
+    const videoProcess = spawn('yt-dlp.exe', videoArgs);
+    activeDownloads.set(song.id, videoProcess);
 
-    args.push(song.originalUrl);
-
-    const dlProcess = spawn('yt-dlp.exe', args);
-    activeDownloads.set(song.id, dlProcess);
-
-    dlProcess.stdout.on('data', (data) => {
-        const match = data.toString().match(/(\d+\.\d+)%/);
+    videoProcess.stdout.on('data', (data) => {
+        const match = data.toString().match(/(\d+\.?\d*)%/);
         if (match) {
-            const percent = parseFloat(match[1]);
+            // Video download counts as 0-50% progress
+            const percent = parseFloat(match[1]) * 0.5;
             if (percent > song.progress) {
                 song.progress = percent;
-                if (Math.floor(percent) % 5 === 0 || percent >= 100) {
+                io.emit('update_progress', { id: song.id, progress: percent });
+            }
+        }
+    });
+
+    videoProcess.on('close', (code) => {
+        if (code !== 0) {
+            handleDownloadError(song, `Video download failed with code ${code}`);
+            return;
+        }
+        console.log(`[System] Video downloaded: ${videoFilename}`);
+
+        // Step 2: Download audio-only
+        const audioArgs = [
+            '-f', 'bestaudio[ext=m4a]/bestaudio',
+            '-o', audioPath,
+            '--no-playlist',
+            '-N', '16'
+        ];
+        if (cookies) audioArgs.push('--cookies', cookies);
+        audioArgs.push(song.originalUrl);
+
+        const audioProcess = spawn('yt-dlp.exe', audioArgs);
+        activeDownloads.set(song.id, audioProcess);
+
+        audioProcess.stdout.on('data', (data) => {
+            const match = data.toString().match(/(\d+\.?\d*)%/);
+            if (match) {
+                // Audio download counts as 50-80% progress
+                const percent = 50 + parseFloat(match[1]) * 0.3;
+                if (percent > song.progress) {
+                    song.progress = percent;
                     io.emit('update_progress', { id: song.id, progress: percent });
                 }
             }
-        }
-    });
+        });
 
-    dlProcess.on('close', (code) => {
-        activeDownloads.delete(song.id);
-
-        // Critical: Only proceed if this process corresponds to the officially active download
-        if (currentDownloadingId === song.id) {
-            currentDownloadingId = null;
-            isDownloading = false;
-
-            if (code === 0) {
-                console.log(`[System] Ready: ${song.title}`);
-                song.status = 'ready';
-                song.progress = 100;
-                song.src = `/downloads/${outputFilename}`;
-                song.localPath = outputPath;
-                song.karaokeReady = false; // Initialize karaoke status
-                song.karaokeSrc = null;
-
-                // Queue for karaoke processing if enabled
-                if (autoProcessKaraoke) {
-                    queueKaraokeProcessing(song);
-                }
-
-                playerStatus.playing = true;
-                io.emit('sync_state', { playlist, currentPlaying, playerStatus, history, autoProcessKaraoke });
-                processDownloadQueue();
-            } else {
-                console.error(`[System] Failed/Cancelled: ${code}`);
-                song.status = 'error';
-                io.emit('sync_state', { playlist, currentPlaying, playerStatus, history, autoProcessKaraoke });
-                processDownloadQueue();
+        audioProcess.on('close', (audioCode) => {
+            if (audioCode !== 0) {
+                handleDownloadError(song, `Audio download failed with code ${audioCode}`);
+                return;
             }
-        }
+            console.log(`[System] Audio downloaded: ${audioFilename}`);
+            song.progress = 80;
+            io.emit('update_progress', { id: song.id, progress: 80 });
+
+            // Step 3: Analyze loudness with FFmpeg (quick, ~1-2 seconds)
+            analyzeLoudness(audioPath, (loudnessGain) => {
+                song.progress = 95;
+                io.emit('update_progress', { id: song.id, progress: 95 });
+
+                activeDownloads.delete(song.id);
+
+                if (currentDownloadingId === song.id) {
+                    currentDownloadingId = null;
+                    isDownloading = false;
+
+                    console.log(`[System] Ready: ${song.title} (Loudness Gain: ${loudnessGain.toFixed(2)} dB)`);
+                    song.status = 'ready';
+                    song.progress = 100;
+
+                    // New path structure
+                    song.src = `/downloads/${videoFilename}`;
+                    song.audioSrc = `/downloads/${audioFilename}`;
+                    song.localVideoPath = videoPath;
+                    song.localAudioPath = audioPath;
+                    song.loudnessGain = loudnessGain; // dB adjustment for normalization
+                    song.karaokeReady = false;
+                    song.karaokeSrc = null;
+
+                    if (autoProcessKaraoke) {
+                        queueKaraokeProcessing(song);
+                    }
+
+                    playerStatus.playing = true;
+                    io.emit('sync_state', { playlist, currentPlaying, playerStatus, history, autoProcessKaraoke });
+                    processDownloadQueue();
+                }
+            });
+        });
+
+        audioProcess.on('error', (err) => {
+            handleDownloadError(song, `Audio spawn error: ${err.message}`);
+        });
     });
 
-    dlProcess.on('error', (err) => {
-        activeDownloads.delete(song.id);
-        if (currentDownloadingId === song.id) {
-            currentDownloadingId = null;
-            isDownloading = false;
-        }
-        console.error(`[System] Download spawn error for ${song.title}: ${err.message}`);
-        song.status = 'error';
-        io.emit('sync_state', { playlist, currentPlaying, playerStatus, history, autoProcessKaraoke });
-        processDownloadQueue();
+    videoProcess.on('error', (err) => {
+        handleDownloadError(song, `Video spawn error: ${err.message}`);
     });
 };
+
+// Helper: Handle download errors
+const handleDownloadError = (song, message) => {
+    activeDownloads.delete(song.id);
+    if (currentDownloadingId === song.id) {
+        currentDownloadingId = null;
+        isDownloading = false;
+    }
+    console.error(`[System] ${message}`);
+    song.status = 'error';
+    io.emit('sync_state', { playlist, currentPlaying, playerStatus, history, autoProcessKaraoke });
+    processDownloadQueue();
+};
+
+// Analyze audio loudness using FFmpeg loudnorm filter
+// Returns gain adjustment in dB to normalize to -16 LUFS
+const analyzeLoudness = (audioPath, callback) => {
+    const ffmpegArgs = [
+        '-i', audioPath,
+        '-af', 'loudnorm=I=-16:TP=-1.5:LRA=11:print_format=json',
+        '-f', 'null',
+        '-'
+    ];
+
+    console.log(`[Loudness] Analyzing: ${path.basename(audioPath)}`);
+
+    const proc = spawn('ffmpeg', ffmpegArgs);
+    let stderr = '';
+
+    proc.stderr.on('data', (data) => {
+        stderr += data.toString();
+    });
+
+    proc.on('close', (code) => {
+        if (code !== 0) {
+            console.error('[Loudness] FFmpeg analysis failed, using default gain');
+            callback(0);
+            return;
+        }
+
+        try {
+            const jsonMatch = stderr.match(/\{[\s\S]*"input_i"[\s\S]*\}/);
+            if (jsonMatch) {
+                const loudnessData = JSON.parse(jsonMatch[0]);
+                const inputLUFS = parseFloat(loudnessData.input_i);
+                const targetLUFS = -16;
+                const gain = targetLUFS - inputLUFS;
+                const clampedGain = Math.max(-12, Math.min(12, gain));
+                console.log(`[Loudness] Input: ${inputLUFS.toFixed(1)} LUFS, Gain: ${clampedGain.toFixed(2)} dB`);
+                callback(clampedGain);
+            } else {
+                console.error('[Loudness] Could not parse FFmpeg output');
+                callback(0);
+            }
+        } catch (e) {
+            console.error('[Loudness] Parse error:', e.message);
+            callback(0);
+        }
+    });
+
+    proc.on('error', (err) => {
+        console.error('[Loudness] Spawn error:', err.message);
+        callback(0);
+    });
+};
+
 
 const deleteSongFile = (song) => {
     if (!song) return;
@@ -361,7 +473,9 @@ const deleteSongFile = (song) => {
         }
     };
 
-    if (song.localPath) tryDelete(song.localPath);
+    // Delete separate video and audio files
+    if (song.localVideoPath) tryDelete(song.localVideoPath);
+    if (song.localAudioPath) tryDelete(song.localAudioPath);
     if (song.id) {
         const karaokePath = path.join(DOWNLOAD_DIR, `${song.id}_karaoke.mp3`);
         tryDelete(karaokePath);
