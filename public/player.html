@@ -142,6 +142,293 @@
         let art = null;
         let tickInterval = null;
 
+        // ============================================================
+        // PRECISION AUDIO MANAGER - AudioBuffer-based Sync System
+        // ============================================================
+        // This replaces the old HTML Audio element approach.
+        // Audio is decoded into memory buffers and scheduled with
+        // sample-accurate precision using Web Audio API.
+        // Video element is the SINGLE source of truth for playback time.
+        // ============================================================
+
+        class PrecisionAudioManager {
+            constructor() {
+                this.ctx = null;
+                this.pitchNode = null;
+
+                // AudioBuffers (decoded audio data in memory)
+                this.originalBuffer = null;
+                this.karaokeBuffer = null;
+
+                // Active source nodes (recreated on each play/seek)
+                this.originalSource = null;
+                this.karaokeSource = null;
+
+                // Playback state tracking
+                this.isPlaying = false;
+                this.startOffset = 0;         // Audio offset when playback started
+                this.startContextTime = 0;    // AudioContext.currentTime when playback started
+
+                // Audio mode
+                this.isKaraokeMode = false;
+
+                // Gain nodes (persistent across playback)
+                this.originalGain = null;
+                this.karaokeGain = null;
+                this.volumeGain = null;
+                this.loudnessGain = null;
+
+                // Settings
+                this.volume = 0.8;
+                this.loudnessAdjustment = 0;  // dB
+                this.isLoudnessNormEnabled = true;
+
+                // Crossfade settings
+                this.CROSSFADE_TIME = 0.1;    // 100ms crossfade
+            }
+
+            // Initialize AudioContext and processing chain
+            async init() {
+                if (this.ctx) return;
+
+                try {
+                    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+
+                    // Load pitch processor worklet
+                    await this.ctx.audioWorklet.addModule('pitch-processor.js');
+                    this.pitchNode = new AudioWorkletNode(this.ctx, 'pitch-processor');
+
+                    // Create gain nodes
+                    this.originalGain = this.ctx.createGain();
+                    this.karaokeGain = this.ctx.createGain();
+                    this.volumeGain = this.ctx.createGain();
+                    this.loudnessGain = this.ctx.createGain();
+
+                    // Initial gain values
+                    this.originalGain.gain.value = 1.0;
+                    this.karaokeGain.gain.value = 0.0;
+                    this.volumeGain.gain.value = this.volume;
+                    this.loudnessGain.gain.value = 1.0;
+
+                    // Connect processing chain:
+                    // [OriginalGain + KaraokeGain] -> VolumeGain -> LoudnessGain -> PitchNode -> Destination
+                    this.originalGain.connect(this.volumeGain);
+                    this.karaokeGain.connect(this.volumeGain);
+                    this.volumeGain.connect(this.loudnessGain);
+                    this.loudnessGain.connect(this.pitchNode);
+                    this.pitchNode.connect(this.ctx.destination);
+
+                    // Expose globally for pitch control
+                    window.audioCtx = this.ctx;
+                    window.pitchNode = this.pitchNode;
+
+                    console.log('[AudioManager] Initialized successfully');
+                } catch (e) {
+                    console.error('[AudioManager] Init failed:', e);
+                }
+            }
+
+            // Decode audio file URL into AudioBuffer
+            async loadBuffer(url) {
+                if (!this.ctx) await this.init();
+                try {
+                    console.log('[AudioManager] Loading:', url);
+                    const response = await fetch(url);
+                    const arrayBuffer = await response.arrayBuffer();
+                    const audioBuffer = await this.ctx.decodeAudioData(arrayBuffer);
+                    console.log('[AudioManager] Decoded:', url, `(${audioBuffer.duration.toFixed(1)}s)`);
+                    return audioBuffer;
+                } catch (e) {
+                    console.error('[AudioManager] Load failed:', url, e);
+                    return null;
+                }
+            }
+
+            // Load both original and karaoke buffers for a song
+            async loadSong(originalUrl, karaokeUrl, loudnessGain) {
+                this.cleanup();
+
+                this.loudnessAdjustment = loudnessGain || 0;
+                this.isKaraokeMode = false;
+
+                // Reset gain states
+                if (this.originalGain) this.originalGain.gain.value = 1.0;
+                if (this.karaokeGain) this.karaokeGain.gain.value = 0.0;
+
+                // Load original buffer
+                if (originalUrl) {
+                    this.originalBuffer = await this.loadBuffer(originalUrl);
+                }
+
+                // Load karaoke buffer if available
+                if (karaokeUrl) {
+                    this.karaokeBuffer = await this.loadBuffer(karaokeUrl);
+                }
+
+                this.updateLoudness();
+                this.updateVolume();
+            }
+
+            // Add karaoke track after it becomes ready (mid-playback)
+            async addKaraokeBuffer(karaokeUrl) {
+                if (this.karaokeBuffer) return; // Already loaded
+                if (!karaokeUrl) return;
+
+                this.karaokeBuffer = await this.loadBuffer(karaokeUrl);
+                console.log('[AudioManager] Karaoke track added');
+            }
+
+            // Start or resume playback from a specific time offset
+            startPlayback(offset) {
+                if (!this.ctx || !this.originalBuffer) return;
+
+                // Stop any existing sources
+                this.stopSources();
+
+                // Clamp offset to valid range
+                const maxDuration = Math.max(
+                    this.originalBuffer?.duration || 0,
+                    this.karaokeBuffer?.duration || 0
+                );
+                offset = Math.max(0, Math.min(offset, maxDuration - 0.1));
+
+                this.startOffset = offset;
+                this.startContextTime = this.ctx.currentTime;
+                this.isPlaying = true;
+
+                // Create and start original source
+                if (this.originalBuffer) {
+                    this.originalSource = this.ctx.createBufferSource();
+                    this.originalSource.buffer = this.originalBuffer;
+                    this.originalSource.connect(this.originalGain);
+                    this.originalSource.start(0, offset);
+                }
+
+                // Create and start karaoke source (if available, plays in background)
+                if (this.karaokeBuffer) {
+                    this.karaokeSource = this.ctx.createBufferSource();
+                    this.karaokeSource.buffer = this.karaokeBuffer;
+                    this.karaokeSource.connect(this.karaokeGain);
+                    this.karaokeSource.start(0, offset);
+                }
+
+                console.log('[AudioManager] Started at:', offset.toFixed(2) + 's');
+            }
+
+            // Stop all active sources (for pause/seek)
+            stopSources() {
+                if (this.originalSource) {
+                    try { this.originalSource.stop(); } catch (e) { }
+                    this.originalSource = null;
+                }
+                if (this.karaokeSource) {
+                    try { this.karaokeSource.stop(); } catch (e) { }
+                    this.karaokeSource = null;
+                }
+                this.isPlaying = false;
+            }
+
+            // Pause playback
+            pause() {
+                this.stopSources();
+            }
+
+            // Seek to a new position (stop and restart at new offset)
+            seek(newTime) {
+                if (!this.isPlaying) {
+                    // Not playing, just update offset for next play
+                    this.startOffset = newTime;
+                    return;
+                }
+                // Stop current playback and restart at new position
+                this.startPlayback(newTime);
+            }
+
+            // Switch between original and karaoke mode with crossfade
+            switchMode(useKaraoke) {
+                if (!this.ctx) return;
+
+                this.isKaraokeMode = useKaraoke;
+                const now = this.ctx.currentTime;
+
+                if (useKaraoke && this.karaokeBuffer) {
+                    // Crossfade to karaoke
+                    this.originalGain.gain.setValueAtTime(this.originalGain.gain.value, now);
+                    this.originalGain.gain.linearRampToValueAtTime(0.0, now + this.CROSSFADE_TIME);
+                    this.karaokeGain.gain.setValueAtTime(this.karaokeGain.gain.value, now);
+                    this.karaokeGain.gain.linearRampToValueAtTime(1.0, now + this.CROSSFADE_TIME);
+                } else {
+                    // Crossfade to original
+                    this.originalGain.gain.setValueAtTime(this.originalGain.gain.value, now);
+                    this.originalGain.gain.linearRampToValueAtTime(1.0, now + this.CROSSFADE_TIME);
+                    this.karaokeGain.gain.setValueAtTime(this.karaokeGain.gain.value, now);
+                    this.karaokeGain.gain.linearRampToValueAtTime(0.0, now + this.CROSSFADE_TIME);
+                }
+
+                console.log('[AudioManager] Mode:', useKaraoke ? 'Karaoke' : 'Original');
+            }
+
+            // Update volume gain
+            setVolume(value) {
+                this.volume = value;
+                this.updateVolume();
+            }
+
+            updateVolume() {
+                if (this.volumeGain && this.ctx) {
+                    this.volumeGain.gain.setValueAtTime(this.volume, this.ctx.currentTime);
+                }
+            }
+
+            // Update loudness normalization
+            setLoudnessNorm(enabled) {
+                this.isLoudnessNormEnabled = enabled;
+                this.updateLoudness();
+            }
+
+            updateLoudness() {
+                if (!this.loudnessGain || !this.ctx) return;
+                const linearGain = this.isLoudnessNormEnabled ?
+                    Math.pow(10, this.loudnessAdjustment / 20) : 1.0;
+                this.loudnessGain.gain.setValueAtTime(linearGain, this.ctx.currentTime);
+            }
+
+            // Set pitch shift
+            setPitch(semitones) {
+                if (this.pitchNode && this.ctx) {
+                    const param = this.pitchNode.parameters.get('pitch');
+                    if (param) {
+                        param.setValueAtTime(semitones, this.ctx.currentTime);
+                    }
+                }
+            }
+
+            // Resume AudioContext if suspended (browser autoplay policy)
+            async resume() {
+                if (this.ctx && this.ctx.state === 'suspended') {
+                    await this.ctx.resume();
+                }
+            }
+
+            // Complete cleanup for song change
+            cleanup() {
+                this.stopSources();
+                this.originalBuffer = null;
+                this.karaokeBuffer = null;
+                this.isKaraokeMode = false;
+                this.startOffset = 0;
+            }
+
+            // Get current playback position (for UI sync verification only)
+            getCurrentTime() {
+                if (!this.isPlaying || !this.ctx) return this.startOffset;
+                return this.startOffset + (this.ctx.currentTime - this.startContextTime);
+            }
+        }
+
+        // Global audio manager instance
+        const audioManager = new PrecisionAudioManager();
+
         createApp({
             setup() {
                 const currentSong = ref(null);
@@ -157,6 +444,11 @@
 
                 const currentNetwork = computed(() => networks.value[currentNetIndex.value] || networks.value[0]);
 
+                // State variables for UI reporting
+                let currentVolume = 0.8;
+                let isVocalRemovalActive = false;
+                let isLoudnessNormEnabled = true;
+
                 watch(isPlayingVideo, (playing) => {
                     if (playing) {
                         document.body.classList.add('hide-cursor');
@@ -171,243 +463,18 @@
                     nextTick(() => generateQR());
                 };
 
-                // --- Dual Audio Crossfade Architecture ---
-                // Both original and karaoke audio play simultaneously, synced to video
-                // Switching is instant via gain crossfade - no loading delay
-                // Audio chain: [OriginalAudio → OriginalGain] + [KaraokeAudio → KaraokeGain] → VolumeGain → LoudnessGain → PitchNode → Destination
-
-                let originalAudio = null;
-                let karaokeAudio = null;
-                let originalSourceNode = null;
-                let karaokeSourceNode = null;
-                let originalGainNode = null;
-                let karaokeGainNode = null;
-                let volumeGainNode = null;
-                let loudnessGainNode = null;
-                let isVocalRemovalActive = false;
-                let isLoudnessNormEnabled = true;
-                let currentLoudnessGain = 0;
-                let currentVolume = 0.8;
-                const CROSSFADE_TIME = 0.1; // 100ms crossfade
-
-                const dbToLinear = (db) => Math.pow(10, db / 20);
-
-                const initAudioContext = async () => {
-                    if (window.audioCtx) return;
-                    try {
-                        window.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                        await window.audioCtx.audioWorklet.addModule('pitch-processor.js');
-                        window.pitchNode = new AudioWorkletNode(window.audioCtx, 'pitch-processor');
-
-                        // Create gain nodes for crossfade and processing
-                        originalGainNode = window.audioCtx.createGain();
-                        karaokeGainNode = window.audioCtx.createGain();
-                        volumeGainNode = window.audioCtx.createGain();
-                        loudnessGainNode = window.audioCtx.createGain();
-
-                        originalGainNode.gain.value = 1.0; // Original on
-                        karaokeGainNode.gain.value = 0.0;  // Karaoke off
-                        volumeGainNode.gain.value = currentVolume;
-                        loudnessGainNode.gain.value = 1.0;
-
-                        // Connect processing chain (sources connect later)
-                        // Original and Karaoke both go through: their gain → volume → loudness → pitch → destination
-                        originalGainNode.connect(volumeGainNode);
-                        karaokeGainNode.connect(volumeGainNode);
-                        volumeGainNode.connect(loudnessGainNode);
-                        loudnessGainNode.connect(window.pitchNode);
-                        window.pitchNode.connect(window.audioCtx.destination);
-                    } catch (e) {
-                        console.error("AudioContext Init Failed", e);
-                    }
-                };
-
-                // Create and connect an audio element
-                const createAudioElement = (src, isKaraoke) => {
-                    const audio = new Audio();
-                    audio.crossOrigin = 'anonymous';
-                    audio.preload = 'auto';
-                    audio.src = src;
-                    audio.load();
-                    return audio;
-                };
-
-                // Connect audio element to Web Audio
-                const connectAudioSource = (audio, gainNode) => {
-                    if (!audio || !window.audioCtx || !gainNode) return null;
-                    try {
-                        const sourceNode = window.audioCtx.createMediaElementSource(audio);
-                        sourceNode.connect(gainNode);
-                        return sourceNode;
-                    } catch (e) {
-                        console.error('[Audio] Source connection failed:', e);
-                        return null;
-                    }
-                };
-
-                // Initialize both audio tracks for a song
-                const initDualAudio = (originalSrc, karaokeSrc, loudnessGain) => {
-                    // Cleanup previous audio elements completely
-                    if (originalAudio) { originalAudio.pause(); originalAudio.src = ''; }
-                    if (karaokeAudio) { karaokeAudio.pause(); karaokeAudio.src = ''; }
-                    if (originalSourceNode) { try { originalSourceNode.disconnect(); } catch (e) { } }
-                    if (karaokeSourceNode) { try { karaokeSourceNode.disconnect(); } catch (e) { } }
-
-                    // Must null out all references so new ones can be created
-                    originalAudio = null;
-                    karaokeAudio = null;
-                    originalSourceNode = null;
-                    karaokeSourceNode = null;
-
-                    currentLoudnessGain = loudnessGain || 0;
-                    isVocalRemovalActive = false;
-
-                    // Reset gains
-                    if (originalGainNode) originalGainNode.gain.value = 1.0;
-                    if (karaokeGainNode) karaokeGainNode.gain.value = 0.0;
-
-                    // Create original audio
-                    originalAudio = createAudioElement(originalSrc, false);
-                    originalAudio.addEventListener('canplaythrough', () => {
-                        if (!originalSourceNode) {
-                            originalSourceNode = connectAudioSource(originalAudio, originalGainNode);
-                        }
-                        updateLoudnessGain();
-                        updateVolume();
-                        if (art && !art.video.paused) {
-                            originalAudio.currentTime = art.currentTime;
-                            originalAudio.play().catch(() => { });
-                        }
-                    }, { once: true });
-
-                    // Create karaoke audio if available (pre-load for seamless switch)
-                    if (karaokeSrc) {
-                        karaokeAudio = createAudioElement(karaokeSrc, true);
-                        karaokeAudio.addEventListener('canplaythrough', () => {
-                            if (!karaokeSourceNode) {
-                                karaokeSourceNode = connectAudioSource(karaokeAudio, karaokeGainNode);
-                            }
-                            // Sync time but don't play yet (gain is 0)
-                            if (art) karaokeAudio.currentTime = art.currentTime;
-                            // Keep synced and playing (muted via gain)
-                            karaokeAudio.play().catch(() => { });
-                        }, { once: true });
-                    }
-                };
-
-                // Add karaoke track after processing completes
-                const addKaraokeTrack = (karaokeSrc) => {
-                    if (karaokeAudio) return; // Already exists
-                    if (!karaokeSrc) return;
-
-                    karaokeAudio = createAudioElement(karaokeSrc, true);
-                    karaokeAudio.addEventListener('canplaythrough', () => {
-                        if (!karaokeSourceNode) {
-                            karaokeSourceNode = connectAudioSource(karaokeAudio, karaokeGainNode);
-                        }
-                        // Sync to current position and play (muted via gain)
-                        if (art) karaokeAudio.currentTime = art.currentTime;
-                        if (originalAudio && !originalAudio.paused) {
-                            karaokeAudio.play().catch(() => { });
-                        }
-                    }, { once: true });
-                };
-
-                const updateLoudnessGain = () => {
-                    if (!loudnessGainNode || !window.audioCtx) return;
-                    const linearGain = isLoudnessNormEnabled ? dbToLinear(currentLoudnessGain) : 1.0;
-                    loudnessGainNode.gain.setValueAtTime(linearGain, window.audioCtx.currentTime);
-                };
-
-                const updateVolume = () => {
-                    if (!volumeGainNode || !window.audioCtx) return;
-                    volumeGainNode.gain.setValueAtTime(currentVolume, window.audioCtx.currentTime);
-                };
-
-                const toggleLoudnessNorm = (enabled) => {
-                    isLoudnessNormEnabled = enabled;
-                    updateLoudnessGain();
-                };
-
-                // Seamless crossfade switch between original and karaoke
-                const switchAudioSource = (karaokeSrc, karaokeMode) => {
-                    if (!window.audioCtx || !originalGainNode || !karaokeGainNode) return;
-
-                    isVocalRemovalActive = karaokeMode;
-                    const now = window.audioCtx.currentTime;
-
-                    // Ensure karaoke track is loaded
-                    if (karaokeMode && !karaokeAudio && karaokeSrc) {
-                        addKaraokeTrack(karaokeSrc);
-                    }
-
-                    // Crossfade gains
-                    if (karaokeMode && karaokeAudio) {
-                        // Sync karaoke time precisely before crossfade
-                        if (originalAudio) {
-                            karaokeAudio.currentTime = originalAudio.currentTime;
-                        }
-                        if (karaokeAudio.paused) karaokeAudio.play().catch(() => { });
-
-                        // Fade out original, fade in karaoke
-                        originalGainNode.gain.setValueAtTime(originalGainNode.gain.value, now);
-                        originalGainNode.gain.linearRampToValueAtTime(0.0, now + CROSSFADE_TIME);
-                        karaokeGainNode.gain.setValueAtTime(karaokeGainNode.gain.value, now);
-                        karaokeGainNode.gain.linearRampToValueAtTime(1.0, now + CROSSFADE_TIME);
-                    } else {
-                        // Fade in original, fade out karaoke
-                        originalGainNode.gain.setValueAtTime(originalGainNode.gain.value, now);
-                        originalGainNode.gain.linearRampToValueAtTime(1.0, now + CROSSFADE_TIME);
-                        karaokeGainNode.gain.setValueAtTime(karaokeGainNode.gain.value, now);
-                        karaokeGainNode.gain.linearRampToValueAtTime(0.0, now + CROSSFADE_TIME);
-                    }
-                };
-
-                // Sync both audio elements with video - tighter threshold for precision
-                // Using 20ms threshold (0.02s) for imperceptible sync
-                const SYNC_THRESHOLD = 0.02;
-
-                const syncAudio = () => {
-                    if (!art || !art.video) return;
-                    const videoTime = art.currentTime;
-                    const videoPaused = art.video.paused;
-
-                    // Sync original audio to video
-                    if (originalAudio) {
-                        if (Math.abs(originalAudio.currentTime - videoTime) > SYNC_THRESHOLD) {
-                            originalAudio.currentTime = videoTime;
-                        }
-                        if (!videoPaused && originalAudio.paused) {
-                            originalAudio.play().catch(() => { });
-                        } else if (videoPaused && !originalAudio.paused) {
-                            originalAudio.pause();
-                        }
-                    }
-
-                    // Sync karaoke to original audio (more precise than syncing to video)
-                    if (karaokeAudio && originalAudio) {
-                        if (Math.abs(karaokeAudio.currentTime - originalAudio.currentTime) > SYNC_THRESHOLD) {
-                            karaokeAudio.currentTime = originalAudio.currentTime;
-                        }
-                        if (!originalAudio.paused && karaokeAudio.paused) {
-                            karaokeAudio.play().catch(() => { });
-                        } else if (originalAudio.paused && !karaokeAudio.paused) {
-                            karaokeAudio.pause();
-                        }
-                    }
-                };
-
                 const startInteraction = () => {
-
                     hasInteracted.value = true;
-                    initAudioContext().then(() => {
+                    audioManager.init().then(() => {
+                        audioManager.resume();
                         if (art) {
                             art.play().catch(() => { });
-                            connectAudioNode();
                         }
                     });
 
-                    if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => { });
+                    if (document.documentElement.requestFullscreen) {
+                        document.documentElement.requestFullscreen().catch(() => { });
+                    }
                     nextTick(() => generateQR());
                 };
 
@@ -427,32 +494,49 @@
                     }
                 };
 
+                // ============================================================
+                // HEARTBEAT - Reports player state to controller
+                // No longer performs sync corrections (audio is sample-accurate)
+                // ============================================================
                 const startHeartbeat = () => {
                     if (tickInterval) clearInterval(tickInterval);
                     tickInterval = setInterval(() => {
                         if (art && art.video) {
-                            syncAudio(); // Keep audio in sync with video
+                            const currentPitch = window.pitchNode?.parameters?.get('pitch')?.value || 0;
                             socket.emit('player_tick', {
                                 playing: !art.video.paused,
                                 currentTime: art.currentTime,
                                 duration: art.duration,
                                 volume: currentVolume,
-                                pitch: window.pitchNode && window.pitchNode.parameters.get('pitch') ? window.pitchNode.parameters.get('pitch').value : 0,
+                                pitch: currentPitch,
                                 vocalRemoval: isVocalRemovalActive,
                                 loudnessNorm: isLoudnessNormEnabled
                             });
                         }
-                    }, 200); // 200ms interval for precise sync
+                    }, 250); // 250ms interval (just for UI, not sync)
                 };
 
-                const initPlayer = (videoUrl, audioSrc, loudnessGain) => {
-                    if (art) { art.destroy(false); art = null; }
+                // ============================================================
+                // PLAYER INITIALIZATION
+                // Video is master clock, audio follows via events
+                // ============================================================
+                const initPlayer = async (videoUrl, audioSrc, karaokeSrc, loudnessGain) => {
+                    // Destroy old player
+                    if (art) {
+                        art.destroy(false);
+                        art = null;
+                    }
+
+                    // Load audio buffers first (decode into memory)
+                    await audioManager.loadSong(audioSrc, karaokeSrc, loudnessGain);
+
+                    // Create video player
                     art = new Artplayer({
                         container: '#artplayer',
                         url: videoUrl,
                         autoplay: true,
-                        volume: 0.8, // Volume controlled via Web Audio
-                        muted: true, // Video always muted, audio from separate element
+                        volume: 0.8,
+                        muted: true,     // Video always muted - audio from Web Audio
                         isLive: false,
                         autoSize: true,
                         fullscreen: true,
@@ -460,33 +544,66 @@
                     });
 
                     art.on('video:ended', () => socket.emit('next_song'));
+
                     art.on('ready', () => {
                         if (hasInteracted.value) {
-                            if (window.audioCtx && window.audioCtx.state === 'suspended') window.audioCtx.resume();
+                            audioManager.resume();
                             art.play().catch(() => { });
-                            art.video.muted = true; // Ensure video stays muted
-
-                            // Initialize dual audio for seamless crossfade
-                            if (audioSrc) {
-                                const karaokeSrc = currentSong.value?.karaokeSrc || null;
-                                initDualAudio(audioSrc, karaokeSrc, loudnessGain);
-                            }
-
-                            // Reset vocal removal on new song
-                            isVocalRemovalActive = false;
+                            art.video.muted = true;
                         }
 
-                        // Add event listeners for audio sync
-                        art.video.addEventListener('play', () => syncAudio());
-                        art.video.addEventListener('pause', () => syncAudio());
-                        art.video.addEventListener('seeked', () => syncAudio());
+                        // Reset mode on new song
+                        isVocalRemovalActive = false;
 
                         startHeartbeat();
-                        socket.emit('player_tick', { playing: true, currentTime: 0, duration: art.duration, volume: currentVolume, pitch: 0, vocalRemoval: false, loudnessNorm: isLoudnessNormEnabled });
+                        socket.emit('player_tick', {
+                            playing: true,
+                            currentTime: 0,
+                            duration: art.duration,
+                            volume: currentVolume,
+                            pitch: 0,
+                            vocalRemoval: false,
+                            loudnessNorm: isLoudnessNormEnabled
+                        });
+                    });
+
+                    // ============================================================
+                    // VIDEO EVENT HANDLERS - Audio follows video precisely
+                    // ============================================================
+                    art.on('video:play', () => {
+                        console.log('[Video] Play at', art.currentTime.toFixed(2));
+                        audioManager.startPlayback(art.currentTime);
+                    });
+
+                    art.on('video:pause', () => {
+                        console.log('[Video] Pause');
+                        audioManager.pause();
+                    });
+
+                    art.on('video:seeked', () => {
+                        console.log('[Video] Seeked to', art.currentTime.toFixed(2));
+                        // Only restart if video is playing
+                        if (!art.video.paused) {
+                            audioManager.seek(art.currentTime);
+                        } else {
+                            // Just update the offset for when play resumes
+                            audioManager.startOffset = art.currentTime;
+                        }
+                    });
+
+                    // Handle video stalling/buffering (rare, but handle gracefully)
+                    art.on('video:waiting', () => {
+                        console.log('[Video] Buffering...');
+                        audioManager.pause();
+                    });
+
+                    art.on('video:playing', () => {
+                        console.log('[Video] Resumed from buffer');
+                        audioManager.startPlayback(art.currentTime);
                     });
                 };
 
-                // Remove existing references to ensure clean setup
+                // Socket handlers
                 socket.on('system_info', (info) => {
                     networks.value = info.networks;
                     systemSSID.value = info.ssid;
@@ -506,103 +623,121 @@
                         const wasReady = oldSong && oldSong.status === 'ready';
 
                         if (!isSameSong || !wasReady || !art) {
-                            // Initialize with separate video and audio sources
-                            initPlayer(newSong.src, newSong.audioSrc, newSong.loudnessGain);
+                            // New song - initialize player
+                            initPlayer(
+                                newSong.src,
+                                newSong.audioSrc,
+                                newSong.karaokeSrc || null,
+                                newSong.loudnessGain
+                            );
                             showInfo.value = true;
                             setTimeout(() => showInfo.value = false, 8000);
-                        } else if (isSameSong && newSong.karaokeReady && !karaokeAudio && newSong.karaokeSrc) {
-                            // Karaoke just became ready - pre-load it for seamless switching
-                            addKaraokeTrack(newSong.karaokeSrc);
+                        } else if (isSameSong && newSong.karaokeReady && !audioManager.karaokeBuffer && newSong.karaokeSrc) {
+                            // Karaoke just became ready - load it
+                            audioManager.addKaraokeBuffer(newSong.karaokeSrc);
                         }
                     } else if (!newSong) {
-                        if (art) { art.destroy(); art = null; }
+                        // No song playing
+                        if (art) {
+                            art.destroy();
+                            art = null;
+                        }
                         if (tickInterval) clearInterval(tickInterval);
-                        if (originalAudio) { originalAudio.pause(); originalAudio.src = ''; }
-                        if (karaokeAudio) { karaokeAudio.pause(); karaokeAudio.src = ''; }
+                        audioManager.cleanup();
                         if (hasInteracted.value) nextTick(() => generateQR());
                     }
                 });
 
                 socket.on('update_progress', ({ id, progress }) => {
-                    if (currentSong.value && currentSong.value.id === id) currentSong.value.progress = progress;
+                    if (currentSong.value && currentSong.value.id === id) {
+                        currentSong.value.progress = progress;
+                    }
                 });
 
+                // ============================================================
+                // CONTROL HANDLER - Responds to controller commands
+                // ============================================================
                 socket.on('exec_control', (action) => {
                     if (!art) return;
+
                     switch (action.type) {
                         case 'toggle':
                             art.toggle();
-                            setTimeout(() => syncAudio(), 50);
+                            // Audio will follow via play/pause events
                             break;
+
                         case 'seek':
+                            // Just set video time - audio follows via 'seeked' event
                             art.currentTime = action.value;
-                            if (originalAudio) originalAudio.currentTime = action.value;
-                            if (karaokeAudio) karaokeAudio.currentTime = action.value;
                             art.notice.show = `${formatTime(action.value)}`;
                             break;
+
                         case 'volume':
                             currentVolume = action.value;
-                            updateVolume();
+                            audioManager.setVolume(action.value);
                             art.notice.show = `VOL ${Math.round(action.value * 100)}`;
                             break;
+
                         case 'seek_fwd':
                             art.forward = 5;
-                            setTimeout(() => syncAudio(), 50);
+                            // Audio follows via 'seeked' event
                             break;
+
                         case 'seek_rew':
                             art.backward = 5;
-                            setTimeout(() => syncAudio(), 50);
+                            // Audio follows via 'seeked' event
                             break;
+
                         case 'replay':
                             art.currentTime = 0;
-                            if (originalAudio) originalAudio.currentTime = 0;
-                            if (karaokeAudio) karaokeAudio.currentTime = 0;
                             art.play();
-                            syncAudio();
+                            // Audio follows via seek + play events
                             break;
-                        case 'reload': location.reload(); break;
+
+                        case 'reload':
+                            location.reload();
+                            break;
+
                         case 'pitch':
-                            if (window.pitchNode) {
-                                const param = window.pitchNode.parameters.get('pitch');
-                                if (param) param.setValueAtTime(action.value, window.audioCtx.currentTime);
-                                art.notice.show = `KEY ${action.value > 0 ? '+' : ''}${action.value}`;
-                            }
+                            audioManager.setPitch(action.value);
+                            art.notice.show = `KEY ${action.value > 0 ? '+' : ''}${action.value}`;
                             break;
+
                         case 'vocal_removal':
-                            if (currentSong.value && currentSong.value.karaokeReady && currentSong.value.karaokeSrc) {
-                                switchAudioSource(currentSong.value.karaokeSrc, action.value);
+                            if (currentSong.value?.karaokeReady && currentSong.value?.karaokeSrc) {
+                                isVocalRemovalActive = action.value;
+                                audioManager.switchMode(action.value);
                                 art.notice.show = `VOCAL ${action.value ? 'OFF' : 'ON'}`;
                             } else if (action.value) {
                                 art.notice.show = 'Karaoke not ready';
                             } else {
-                                // Switching back to original audio
-                                if (currentSong.value && currentSong.value.audioSrc) {
-                                    switchAudioSource(null, false);
-                                    art.notice.show = 'VOCAL ON';
-                                }
+                                isVocalRemovalActive = false;
+                                audioManager.switchMode(false);
+                                art.notice.show = 'VOCAL ON';
                             }
                             break;
+
                         case 'loudness_norm':
-                            toggleLoudnessNorm(action.value);
+                            isLoudnessNormEnabled = action.value;
+                            audioManager.setLoudnessNorm(action.value);
                             art.notice.show = `LOUDNESS ${action.value ? 'ON' : 'OFF'}`;
                             break;
                     }
-                    setTimeout(() => {
-                        let currentPitch = 0;
-                        if (window.pitchNode) {
-                            const p = window.pitchNode.parameters.get('pitch');
-                            if (p) currentPitch = p.value;
-                        }
 
-                        if (art) socket.emit('player_tick', {
-                            playing: !art.video.paused,
-                            currentTime: art.currentTime,
-                            duration: art.duration,
-                            volume: currentVolume,
-                            pitch: currentPitch,
-                            vocalRemoval: isVocalRemovalActive,
-                            loudnessNorm: isLoudnessNormEnabled
-                        });
+                    // Send immediate tick after control action
+                    setTimeout(() => {
+                        const currentPitch = window.pitchNode?.parameters?.get('pitch')?.value || 0;
+                        if (art) {
+                            socket.emit('player_tick', {
+                                playing: !art.video.paused,
+                                currentTime: art.currentTime,
+                                duration: art.duration,
+                                volume: currentVolume,
+                                pitch: currentPitch,
+                                vocalRemoval: isVocalRemovalActive,
+                                loudnessNorm: isLoudnessNormEnabled
+                            });
+                        }
                     }, 50);
                 });
 
@@ -612,7 +747,10 @@
                     return `${m}:${s.toString().padStart(2, '0')}`;
                 };
 
-                return { currentSong, isPlayingVideo, showInfo, hasInteracted, startInteraction, networks, currentNetwork, currentNetIndex, nextNetwork, systemSSID, systemPort };
+                return {
+                    currentSong, isPlayingVideo, showInfo, hasInteracted, startInteraction,
+                    networks, currentNetwork, currentNetIndex, nextNetwork, systemSSID, systemPort
+                };
             }
         }).mount('#app');
     </script>

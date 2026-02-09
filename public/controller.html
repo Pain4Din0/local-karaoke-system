@@ -336,8 +336,11 @@
             <div v-if="currentPlaying" class="bg-zinc-900 p-5 rounded-2xl border border-zinc-800 shadow-sm">
                 <div class="flex items-center justify-between mb-3">
                     <div class="flex items-center gap-2">
-                        <div class="w-2 h-2 rounded-full"
-                            :class="[currentPlaying.status === 'ready' ? (localPlaying ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]' : 'bg-yellow-500') : 'bg-blue-500 animate-pulse']">
+                        <div class="w-2 h-2 rounded-full" :class="[
+                                currentPlaying.status === 'ready' 
+                                    ? (localPlaying ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]' : 'bg-amber-500') 
+                                    : 'bg-zinc-300 animate-pulse'
+                            ]">
                         </div>
                         <span class="text-xs font-mono text-zinc-400 uppercase tracking-wider">{{ currentPlaying.status
                             === 'ready' ? (localPlaying ? 'Playing' : 'Paused') : `DL
@@ -383,11 +386,13 @@
                             <div class="flex-1 min-w-0 z-10">
                                 <h4 class="text-sm font-medium text-zinc-200 truncate">{{ item.title }}</h4>
                                 <div class="flex items-center gap-2 mt-1">
-                                    <!-- Status indicator: blue=downloading, yellow=processing karaoke, green=karaoke ready, gray=ready -->
-                                    <div class="w-1.5 h-1.5 rounded-full" :class="item.status==='downloading' ? 'bg-blue-500 animate-pulse' : 
-                                                item.karaokeProcessing ? 'bg-yellow-500 animate-pulse' : 
-                                                item.karaokeReady ? 'bg-green-500' : 
-                                                item.status==='ready' ? 'bg-zinc-500' : 'bg-zinc-800'">
+                                    <!-- Status indicator: pending=dark gray, downloading=bright gray blink, ready=bright gray solid, processing karaoke=cyan blink, karaoke ready=cyan solid -->
+                                    <div class="w-1.5 h-1.5 rounded-full" :class="
+                                        item.status==='downloading' ? 'bg-zinc-300 animate-pulse' : 
+                                        item.karaokeProcessing ? 'bg-cyan-400 animate-pulse' : 
+                                        item.karaokeReady ? 'bg-cyan-400' : 
+                                        item.status==='ready' ? 'bg-zinc-300' : 'bg-zinc-700'
+                                    ">
                                     </div><span class="text-xs text-zinc-500 truncate">{{ item.requester }}</span>
                                 </div>
                             </div>
@@ -436,11 +441,19 @@
                     </div>
                 </button>
 
-                <!-- Current Song Status (Replacing the volume slider space) -->
-                <div class="flex-1 text-center px-4 overflow-hidden">
+                <!-- Current Settings Status Indicators -->
+                <div class="flex-1 flex items-center justify-center gap-2 px-4 overflow-hidden flex-wrap">
+                    <span v-if="localVocalRemoval"
+                        class="text-xs font-mono font-bold text-purple-400 bg-purple-400/10 px-2 py-0.5 rounded whitespace-nowrap">
+                        {{ t('vocal_removal') }}
+                    </span>
                     <span v-if="localPitch !== 0"
-                        class="text-xs font-mono font-bold text-blue-400 bg-blue-400/10 px-2 py-0.5 rounded">
+                        class="text-xs font-mono font-bold text-blue-400 bg-blue-400/10 px-2 py-0.5 rounded whitespace-nowrap">
                         KEY {{ localPitch > 0 ? '+' : '' }}{{ localPitch }}
+                    </span>
+                    <span
+                        class="text-xs font-mono font-bold text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded whitespace-nowrap">
+                        <i class="ri-volume-up-line mr-1"></i>{{ localVolumeDisplay }}%
                     </span>
                 </div>
 
@@ -701,12 +714,13 @@
                     const a = document.createElement('a'); a.href = url; a.download = `playlist_${new Date().toISOString().slice(0, 10)}.txt`; a.click();
                 };
 
-                const sendSeek = throttle((val) => socket.emit('control_action', { type: 'seek', value: val }), 100);
+                const sendSeek = (val) => socket.emit('control_action', { type: 'seek', value: val });
                 const sendVolume = throttle((val) => socket.emit('control_action', { type: 'volume', value: val / 100 }), 100);
                 const sendPitch = throttle((val) => socket.emit('control_action', { type: 'pitch', value: val }), 100);
 
-                const onSeekInput = () => { isDragging.value = true; sendSeek(localCurrentTime.value); };
-                const onSeekEnd = () => { isDragging.value = false; socket.emit('control_action', { type: 'seek', value: localCurrentTime.value }); };
+                // Only update UI during drag, send seek command on release
+                const onSeekInput = () => { isDragging.value = true; };
+                const onSeekEnd = () => { isDragging.value = false; sendSeek(localCurrentTime.value); };
                 const onVolumeInput = () => sendVolume(localVolumeDisplay.value);
 
                 const changePitch = (delta) => {
