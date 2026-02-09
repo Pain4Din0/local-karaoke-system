@@ -56,6 +56,32 @@
             transform: scale(0.96);
             opacity: 0.8;
         }
+
+        /* Progress Bar Animation for Processing Phase */
+        @keyframes fill-processing {
+            0% {
+                width: 0%;
+            }
+
+            100% {
+                width: 95%;
+            }
+        }
+
+        /* Progress Bar Animation for Processing Phase */
+        @keyframes fill-processing {
+            0% {
+                width: 0%;
+            }
+
+            100% {
+                width: 95%;
+            }
+        }
+
+        .animate-fill-processing {
+            animation: fill-processing 5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+        }
     </style>
 </head>
 
@@ -76,6 +102,15 @@
                 <button v-if="isRenaming" @click="cancelRename"
                     class="w-full bg-zinc-800 text-zinc-400 py-3 rounded-xl font-bold btn-press">{{
                     t('cancel') }}</button>
+            </div>
+
+            <!-- Copyright / GitHub Badge -->
+            <div class="absolute bottom-10 left-0 w-full flex justify-center pb-safe">
+                <a href="https://github.com/Pain4Din0/local-karaoke-system" target="_blank"
+                    class="flex items-center gap-2 px-4 py-2 bg-zinc-900/80 backdrop-blur border border-zinc-800 rounded-full text-xs text-zinc-500 hover:text-zinc-300 hover:border-zinc-700 transition-all group">
+                    <i class="ri-github-fill text-lg group-hover:text-white transition-colors"></i>
+                    <span>Pain4Din0 / local-karaoke-system</span>
+                </a>
             </div>
         </div>
 
@@ -264,7 +299,11 @@
                 <!-- Pitch -->
                 <div class="space-y-4">
                     <div class="flex justify-between items-center text-xs text-zinc-500 uppercase tracking-wider">
-                        <span>{{ t('pitch') }}</span>
+                        <div class="flex items-center gap-1.5">
+                            <span>{{ t('pitch') }}</span>
+                            <span
+                                class="text-xs font-bold text-yellow-500 bg-yellow-500/10 px-1.5 py-0.5 rounded uppercase tracking-wider">Beta</span>
+                        </div>
                         <button @click="resetPitch" class="text-xs text-blue-400 hover:text-blue-300">{{ t('reset')
                             }}</button>
                     </div>
@@ -343,8 +382,9 @@
                             ]">
                         </div>
                         <span class="text-xs font-mono text-zinc-400 uppercase tracking-wider">{{ currentPlaying.status
-                            === 'ready' ? (localPlaying ? 'Playing' : 'Paused') : `DL
-                            ${Math.floor(currentPlaying.progress || 0)}%` }}</span>
+                            === 'ready' ? (localPlaying ? 'Playing' : 'Paused') : (currentPlaying.status ===
+                            'downloading' ? 'DOWNLOADING' : (currentPlaying.karaokeProcessing ? 'SEPARATING' : ''))
+                            }}</span>
                     </div>
                     <span class="text-xs text-zinc-500 font-medium">{{ currentPlaying.requester }}</span>
                 </div>
@@ -356,6 +396,35 @@
                         @change="onSeekEnd" @touchend="onSeekEnd" @mouseup="onSeekEnd" class="w-full cursor-pointer">
                     <div class="flex justify-between text-[10px] font-mono text-zinc-500"><span>{{
                             formatTime(localCurrentTime) }}</span><span>{{ formatTime(localDuration) }}</span></div>
+                </div>
+                <div v-else-if="currentPlaying.status === 'downloading'" class="space-y-1 pt-2">
+                    <div class="w-full h-2 flex gap-1 opacity-80">
+                        <!-- Segment 1: Video (50%) -->
+                        <div class="h-full w-[50%] bg-zinc-800 rounded-l-full overflow-hidden">
+                            <div class="h-full bg-blue-500 transition-all duration-300"
+                                :style="{ width: Math.min(100, Math.max(0, (currentPlaying.progress || 0) / 50 * 100)) + '%' }">
+                            </div>
+                        </div>
+                        <!-- Segment 2: Audio (30%) -->
+                        <div class="h-full w-[30%] bg-zinc-800 overflow-hidden">
+                            <div class="h-full bg-purple-500 transition-all duration-300"
+                                :style="{ width: Math.min(100, Math.max(0, ((currentPlaying.progress || 0) - 50) / 30 * 100)) + '%' }">
+                            </div>
+                        </div>
+                        <!-- Segment 3: Analysis (20%) -->
+                        <div class="h-full w-[20%] bg-zinc-800 rounded-r-full overflow-hidden">
+                            <div class="h-full bg-green-500 transition-all duration-300"
+                                :class="{ 'animate-fill-processing': (currentPlaying.progress || 0) >= 80 && (currentPlaying.progress || 0) < 100 }"
+                                :style="{ width: (currentPlaying.progress || 0) >= 100 ? '100%' : ((currentPlaying.progress || 0) < 80 ? '0%' : 'auto') }">
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Aligned Labels -->
+                    <div class="flex text-[10px] text-zinc-600 font-mono tracking-wider gap-0.5">
+                        <span class="w-[50%]">VIDEO</span>
+                        <span class="w-[30%]">AUDIO</span>
+                        <span class="w-[20%]">PROCESSING</span>
+                    </div>
                 </div>
             </div>
             <div v-else
@@ -380,9 +449,18 @@
                     <transition-group name="list" tag="div" class="space-y-2">
                         <div v-for="item in playlist" :key="item.id"
                             class="group bg-zinc-900 border border-zinc-800 p-3 rounded-xl flex gap-3 items-center relative overflow-hidden">
+
+                            <!-- Background Progress Overlay (Downloading) -->
                             <div v-if="item.status === 'downloading'"
-                                class="absolute left-0 top-0 bottom-0 bg-zinc-800/50 transition-all duration-300"
-                                :style="{width: item.progress + '%'}"></div>
+                                class="absolute left-0 top-0 bottom-0 bg-zinc-200/20 pointer-events-none"
+                                :style="getQueueProgressStyle(item)">
+                            </div>
+
+                            <!-- Background Progress Overlay (Karaoke Processing) -->
+                            <div v-if="item.karaokeProcessing"
+                                class="absolute left-0 top-0 bottom-0 bg-cyan-400/20 transition-all duration-300 pointer-events-none"
+                                :style="{width: (item.karaokeProgress || 0) + '%'}"></div>
+
                             <div class="flex-1 min-w-0 z-10">
                                 <h4 class="text-sm font-medium text-zinc-200 truncate">{{ item.title }}</h4>
                                 <div class="flex items-center gap-2 mt-1">
@@ -452,7 +530,7 @@
                         KEY {{ localPitch > 0 ? '+' : '' }}{{ localPitch }}
                     </span>
                     <span
-                        class="text-xs font-mono font-bold text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded whitespace-nowrap">
+                        class="text-xs font-mono font-bold text-cyan-400 bg-cyan-400/10 px-2 py-0.5 rounded whitespace-nowrap">
                         <i class="ri-volume-up-line mr-1"></i>{{ localVolumeDisplay }}%
                     </span>
                 </div>
@@ -835,6 +913,13 @@
                     }
                 });
 
+                const getQueueProgressStyle = (item) => {
+                    const progress = item.progress || 0;
+                    if (progress >= 100) return { width: '100%', transition: 'width 0.5s ease-out' };
+                    if (progress >= 80) return { width: '100%', transition: 'width 10s cubic-bezier(0.4, 0, 0.2, 1)' };
+                    return { width: `${progress}%`, transition: 'width 0.3s linear' };
+                };
+
                 return {
                     nickname, tempNick, saveNickname,
                     playlist, currentPlaying, history, activeTab,
@@ -851,7 +936,8 @@
                     localLoudnessNorm, toggleLoudnessNorm,
                     autoProcessKaraoke, toggleAutoProcess, karaokeAvailable,
                     showPlaylistModal, playlistItems, selectedItems, isAllSelected,
-                    closePlaylistModal, toggleItem, toggleSelectAll, confirmAddBatch
+                    closePlaylistModal, toggleItem, toggleSelectAll, confirmAddBatch,
+                    getQueueProgressStyle
                 };
             }
         }).mount('#app');

@@ -20,18 +20,30 @@
             font-family: 'Inter', 'Noto Sans SC', 'Noto Sans JP', sans-serif;
         }
 
-        body.hide-cursor {
-            cursor: none;
-        }
 
         .fade-enter-active,
         .fade-leave-active {
-            transition: opacity 0.5s ease;
+            transition: opacity 0.3s ease;
         }
 
         .fade-enter-from,
         .fade-leave-to {
             opacity: 0;
+        }
+
+        /* Progress Bar Animation */
+        @keyframes fill-processing {
+            0% {
+                width: 0%;
+            }
+
+            100% {
+                width: 95%;
+            }
+        }
+
+        .animate-fill-processing {
+            animation: fill-processing 5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
         }
     </style>
 </head>
@@ -55,13 +67,35 @@
 
                 <div v-if="currentSong && currentSong.status !== 'ready'"
                     class="space-y-6 text-center max-w-2xl mx-auto">
-                    <div class="flex justify-between items-end mb-2">
-                        <span class="text-xs font-mono text-gray-400">DOWNLOADING</span>
-                        <span class="text-xs font-mono text-white">{{ Math.floor(currentSong.progress || 0) }}%</span>
-                    </div>
-                    <div class="w-full h-[1px] bg-gray-800 overflow-hidden">
-                        <div class="h-full bg-white transition-all duration-300 ease-out"
-                            :style="{width: (currentSong.progress || 0) + '%'}"></div>
+                    <!-- Segmented Progress Bar -->
+                    <div class="space-y-2">
+                        <div class="w-full h-1.5 flex gap-1 opacity-80">
+                            <!-- Segment 1: Video (50%) -->
+                            <div class="h-full w-[50%] bg-zinc-800 rounded-l-full overflow-hidden">
+                                <div class="h-full bg-blue-500 transition-all duration-300"
+                                    :style="{ width: Math.min(100, Math.max(0, (currentSong.progress || 0) / 50 * 100)) + '%' }">
+                                </div>
+                            </div>
+                            <!-- Segment 2: Audio (30%) -->
+                            <div class="h-full w-[30%] bg-zinc-800 overflow-hidden">
+                                <div class="h-full bg-purple-500 transition-all duration-300"
+                                    :style="{ width: Math.min(100, Math.max(0, ((currentSong.progress || 0) - 50) / 30 * 100)) + '%' }">
+                                </div>
+                            </div>
+                            <!-- Segment 3: Analysis (20%) -->
+                            <div class="h-full w-[20%] bg-zinc-800 rounded-r-full overflow-hidden">
+                                <div class="h-full bg-green-500 transition-all duration-300"
+                                    :class="{ 'animate-fill-processing': (currentSong.progress || 0) >= 80 && (currentSong.progress || 0) < 100 }"
+                                    :style="{ width: (currentSong.progress || 0) >= 100 ? '100%' : ((currentSong.progress || 0) < 80 ? '0%' : 'auto') }">
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Aligned Labels -->
+                        <div class="flex text-[10px] text-zinc-500 font-mono tracking-widest uppercase gap-1">
+                            <span class="w-[50%]">Video</span>
+                            <span class="w-[30%]">Audio</span>
+                            <span class="w-[20%]">Processing</span>
+                        </div>
                     </div>
                     <p class="text-3xl font-light text-white truncate mt-8 opacity-80">{{ currentSong.title }}</p>
                 </div>
@@ -156,6 +190,9 @@
                 this.ctx = null;
                 this.pitchNode = null;
 
+                // Session management for async ops
+                this.currentSessionId = 0;
+
                 // AudioBuffers (decoded audio data in memory)
                 this.originalBuffer = null;
                 this.karaokeBuffer = null;
@@ -247,6 +284,7 @@
             // Load both original and karaoke buffers for a song
             async loadSong(originalUrl, karaokeUrl, loudnessGain) {
                 this.cleanup();
+                const sessionId = this.currentSessionId;
 
                 this.loudnessAdjustment = loudnessGain || 0;
                 this.isKaraokeMode = false;
@@ -257,12 +295,16 @@
 
                 // Load original buffer
                 if (originalUrl) {
-                    this.originalBuffer = await this.loadBuffer(originalUrl);
+                    const buffer = await this.loadBuffer(originalUrl);
+                    if (this.currentSessionId !== sessionId) return;
+                    this.originalBuffer = buffer;
                 }
 
                 // Load karaoke buffer if available
                 if (karaokeUrl) {
-                    this.karaokeBuffer = await this.loadBuffer(karaokeUrl);
+                    const buffer = await this.loadBuffer(karaokeUrl);
+                    if (this.currentSessionId !== sessionId) return;
+                    this.karaokeBuffer = buffer;
                 }
 
                 this.updateLoudness();
@@ -274,8 +316,28 @@
                 if (this.karaokeBuffer) return; // Already loaded
                 if (!karaokeUrl) return;
 
-                this.karaokeBuffer = await this.loadBuffer(karaokeUrl);
+                const sessionId = this.currentSessionId;
+                const buffer = await this.loadBuffer(karaokeUrl);
+
+                if (!buffer || this.currentSessionId !== sessionId) return;
+
+                this.karaokeBuffer = buffer;
                 console.log('[AudioManager] Karaoke track added');
+
+                // If currently playing, start the karaoke source immediately synchronized
+                if (this.isPlaying && this.ctx) {
+                    const currentPos = this.getCurrentTime();
+
+                    // Create new source
+                    this.karaokeSource = this.ctx.createBufferSource();
+                    this.karaokeSource.buffer = this.karaokeBuffer;
+                    this.karaokeSource.connect(this.karaokeGain);
+
+                    // Start playback at current position
+                    this.karaokeSource.start(0, currentPos);
+
+                    console.log('[AudioManager] Karaoke source hot-started at:', currentPos.toFixed(2));
+                }
             }
 
             // Start or resume playback from a specific time offset
@@ -412,6 +474,7 @@
 
             // Complete cleanup for song change
             cleanup() {
+                this.currentSessionId++;
                 this.stopSources();
                 this.originalBuffer = null;
                 this.karaokeBuffer = null;
@@ -449,13 +512,6 @@
                 let isVocalRemovalActive = false;
                 let isLoudnessNormEnabled = true;
 
-                watch(isPlayingVideo, (playing) => {
-                    if (playing) {
-                        document.body.classList.add('hide-cursor');
-                    } else {
-                        document.body.classList.remove('hide-cursor');
-                    }
-                });
 
                 const nextNetwork = () => {
                     if (networks.value.length <= 1) return;
