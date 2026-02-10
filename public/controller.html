@@ -230,11 +230,11 @@
                 </div>
 
                 <!-- Vocal Removal -->
-                <div class="space-y-3 pb-4 border-b border-zinc-800" id="tuning-vocal">
+                <div class="space-y-3 pb-4 border-b border-zinc-800">
                     <div class="flex justify-between items-center text-xs text-zinc-500 uppercase tracking-wider">
                         <span>{{ t('vocal_removal') }}</span>
                         <span v-if="currentPlaying && currentPlaying.karaokeProcessing"
-                            class="text-yellow-500 animate-pulse">{{ t('processing') }} {{
+                            class="text-purple-500 animate-pulse">{{ t('processing') }} {{
                             currentPlaying.karaokeProgress || 0 }}%</span>
                         <span v-else-if="currentPlaying && currentPlaying.karaokeReady" class="text-green-500">{{
                             t('ready') }}</span>
@@ -244,12 +244,12 @@
                     <!-- Progress Bar (simplified) -->
                     <div v-if="currentPlaying && currentPlaying.karaokeProcessing"
                         class="w-full h-1.5 bg-zinc-800 rounded-full overflow-hidden">
-                        <div class="h-full bg-yellow-500 transition-all duration-300"
+                        <div class="h-full bg-purple-500 transition-all duration-300"
                             :style="{ width: (currentPlaying.karaokeProgress || 0) + '%' }"></div>
                     </div>
-                    <button @click="toggleVocalRemoval"
+                    <button @click="toggleVocalRemoval" id="tuning-vocal"
                         class="w-full py-4 rounded-xl font-bold flex items-center justify-center gap-3 transition-all duration-200"
-                        :class="karaokeAvailable ? (localVocalRemoval ? 'bg-blue-500 text-white shadow-lg shadow-blue-500/20' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700') : (currentPlaying && currentPlaying.karaokeProcessing ? 'bg-zinc-800 text-yellow-500' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700')"
+                        :class="karaokeAvailable ? (localVocalRemoval ? 'bg-blue-500 text-white shadow-lg shadow-blue-500/20' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700') : (currentPlaying && currentPlaying.karaokeProcessing ? 'bg-zinc-800 text-purple-500' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700')"
                         :disabled="currentPlaying && currentPlaying.karaokeProcessing">
                         <i v-if="currentPlaying && currentPlaying.karaokeProcessing"
                             class="ri-loader-4-line animate-spin text-xl"></i>
@@ -468,7 +468,7 @@
 
                             <!-- Background Progress Overlay (Karaoke Processing) -->
                             <div v-if="item.karaokeProcessing"
-                                class="absolute left-0 top-0 bottom-0 bg-cyan-400/20 transition-all duration-300 pointer-events-none"
+                                class="absolute left-0 top-0 bottom-0 bg-purple-500/20 transition-all duration-300 pointer-events-none"
                                 :style="{width: (item.karaokeProgress || 0) + '%'}"></div>
 
                             <div class="flex-1 min-w-0 z-10">
@@ -476,10 +476,10 @@
                                 <div class="flex items-center gap-2 mt-1">
                                     <!-- Status indicator: pending=dark gray, downloading=bright gray blink, ready=bright gray solid, processing karaoke=cyan blink, karaoke ready=cyan solid -->
                                     <div class="w-1.5 h-1.5 rounded-full" :class="
-                                        item.status==='downloading' ? 'bg-zinc-300 animate-pulse' : 
-                                        item.karaokeProcessing ? 'bg-cyan-400 animate-pulse' : 
-                                        item.karaokeReady ? 'bg-cyan-400' : 
-                                        item.status==='ready' ? 'bg-zinc-300' : 'bg-zinc-700'
+                                        item.status==='downloading' ? 'bg-blue-500 animate-pulse' : 
+                                        item.karaokeProcessing ? 'bg-purple-500 animate-pulse' : 
+                                        item.karaokeReady ? 'bg-purple-500' : 
+                                        item.status==='ready' ? 'bg-blue-500' : 'bg-zinc-700'
                                     ">
                                     </div><span class="text-xs text-zinc-500 truncate">{{ item.requester }}</span>
                                 </div>
@@ -540,14 +540,14 @@
                         KEY {{ localPitch > 0 ? '+' : '' }}{{ localPitch }}
                     </span>
                     <span
-                        class="text-xs font-mono font-bold text-cyan-400 bg-cyan-400/10 px-2 py-0.5 rounded whitespace-nowrap">
+                        class="text-xs font-mono font-bold text-zinc-400 bg-zinc-400/10 px-2 py-0.5 rounded whitespace-nowrap">
                         <i class="ri-volume-up-line mr-1"></i>{{ localVolumeDisplay }}%
                     </span>
                 </div>
 
                 <div class="w-10"></div> <!-- Spacer for balance -->
             </div>
-            <div class="grid grid-cols-[1fr_auto_1fr] items-center px-6 py-4">
+            <div class="grid grid-cols-[1fr_auto_1fr] items-center px-6 py-4" id="playback-controls">
                 <div class="flex justify-start"><button @click="control('replay')"
                         class="flex flex-col items-center gap-1 text-zinc-500 hover:text-white btn-press"><i
                             class="ri-restart-line text-2xl"></i></button></div>
@@ -609,7 +609,7 @@
                 tut_add_title: "Add Songs",
                 tut_add_desc: "Paste Bilibili/YouTube links here. You can also paste a Playlist or Favorites link to add multiple songs!",
                 tut_player_title: "Status Indicators",
-                tut_player_desc: "Green=Playing, White Pulse=Downloading, Cyan Pulse=Separating Vocals.",
+                tut_player_desc: "Green=Playing, Blue Pulse=Downloading, Purple Pulse=Separating Vocals.",
                 tut_playlist_title: "Playlist & History",
                 tut_playlist_desc: "Switch between the current queue and your request history here.",
                 tut_tuning_title: "Audio Settings",
@@ -673,7 +673,7 @@
                 tut_add_title: "点歌",
                 tut_add_desc: "粘贴链接点歌。支持 Bilibili 收藏夹和 YouTube 播放列表批量导入！",
                 tut_player_title: "状态指示灯",
-                tut_player_desc: "绿色=播放中，白色闪烁=下载中，青色闪烁=人声分离处理中。",
+                tut_player_desc: "绿色=播放中，蓝色闪烁=下载中，紫色闪烁=人声分离处理中。",
                 tut_playlist_title: "列表切换",
                 tut_playlist_desc: "在此切换当前待播队列和您的点歌历史。",
                 tut_tuning_title: "调音台",
@@ -737,7 +737,7 @@
                 tut_add_title: "曲を追加",
                 tut_add_desc: "リンクを貼り付けて追加。プレイリストやマイリストのURLで一括追加も可能です！",
                 tut_player_title: "ステータス表示",
-                tut_player_desc: "緑=再生中、白点滅=ダウンロード中、水色点滅=ボーカル分離処理中。",
+                tut_player_desc: "緑=再生中、青点滅=ダウンロード中、紫点滅=ボーカル分離処理中。",
                 tut_playlist_title: "プレイリスト",
                 tut_playlist_desc: "再生待ちリストと履歴を切り替えます。",
                 tut_tuning_title: "オーディオ設定",
@@ -999,7 +999,7 @@
                                 onDeselected: () => { showTuning.value = false; }
                             },
                             {
-                                element: '#btn-play-pause',
+                                element: '#playback-controls',
                                 popover: {
                                     title: t('tut_control_title'),
                                     description: t('tut_control_desc'),

@@ -7,16 +7,17 @@ A robust, locally hosted karaoke solution that enables seamless queuing and play
 ## ✨ Features
 
 - **Universal Content Support**: Queue songs directly via URL from YouTube, Bilibili, and any platform supported by `yt-dlp`.
-- **Playlist & Batch Import**: Seamless import of **Bilibili Favorites/Collections** and **YouTube Playlists**. Select multiple tracks to queue in bulk.
-- **AI-Powered Vocal Removal**: Remove vocals from any song using [Demucs](https://github.com/facebookresearch/demucs) for studio-quality karaoke. Enable auto-processing to prepare instrumental tracks as songs are queued.
+- **Pro Audio Experience**:
+  - **AI Vocal Removal**: Real-time source separation using [Demucs](https://github.com/facebookresearch/demucs).
+  - **Pitch Shifting (Beta)**: Adjust key in real-time to match your vocal range.
+  - **Seamless Crossfade**: Smooth transitions between original and karaoke tracks.
+  - **Loudness Normalization**: Consistent volume levels across different sources.
+- **Interactive UX**:
+  - **Smart Controller**: Mobile-first interface with intuitive status indicators and interactive tutorials for new users.
+  - **Batch Import**: One-click import for Bilibili Collections and YouTube Playlists.
 - **Intelligent Queue System**:
-  - **Sequential Downloading**: Strict one-at-a-time downloading prevents bandwidth congestion and ensures stability.
-  - **Robust Deletion**: Instantly terminates active downloads and cleans up files when a song is removed.
-  - **Priority Queuing**: Move urgent requests to the top.
-  - **Auto-Play & History**: Automatically plays the next track and allows quick re-queuing.
-- **Dual-Interface System**:
-  - **Player View**: A clean, distraction-free interface for TV or projector output.
-  - **Controller View**: A responsive mobile web app for guests to search, queue, and control playback.
+  - **Reliable Downloading**: Sequential processing queue with auto-retry and robust error handling.
+  - **Priority Management**: Move urgent requests to the top of the queue.
 - **Automated Deployment**: The included `start.bat` handles all dependencies (Node.js, yt-dlp, FFmpeg, Demucs) automatically.
 
 ## 🛠 Prerequisites
@@ -83,6 +84,8 @@ Place the cookie files directly in the **root directory** of the project. The sy
 -   **FFmpeg**: Media Processing
 -   **Python**: AI Processing Runtime
 -   **Demucs**: AI-Powered Audio Source Separation
+-   **Web Audio API**: Precision Audio Processing
+-   **Driver.js**: Interactive User Guides
 
 ## 📄 License
 
