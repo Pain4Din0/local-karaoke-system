@@ -13,13 +13,12 @@
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="/socket.io/socket.io.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/driver.js@1.0.1/dist/driver.js.iife.js"></script>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/driver.js@1.0.1/dist/driver.css" />
     <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
     <style>
         body {
             font-family: 'Inter', 'Noto Sans SC', 'Noto Sans JP', sans-serif;
             background-color: #09090b;
+            scroll-behavior: smooth;
         }
 
         .no-scrollbar::-webkit-scrollbar {
@@ -45,6 +44,11 @@
             margin-top: -7px;
             box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
             border: 1px solid #e4e4e7;
+            transition: transform 0.15s ease;
+        }
+
+        input[type=range]::-webkit-slider-thumb:active {
+            transform: scale(1.3);
         }
 
         input[type=range]::-webkit-slider-runnable-track {
@@ -54,23 +58,100 @@
             border-radius: 1px;
         }
 
-        .btn-press:active {
-            transform: scale(0.96);
-            opacity: 0.8;
+        .btn-press {
+            transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.15s ease;
         }
 
-        /* Progress Bar Animation for Processing Phase */
-        @keyframes fill-processing {
+        .btn-press:active {
+            transform: scale(0.95);
+            opacity: 0.85;
+        }
+
+        /* ── Core Animations ── */
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes fadeSlideUp {
+            from {
+                opacity: 0;
+                transform: translateY(16px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes scaleIn {
+            from {
+                opacity: 0;
+                transform: scale(0.92);
+            }
+
+            to {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+
+        @keyframes slideUp {
+            from {
+                transform: translateY(100%);
+            }
+
+            to {
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes gentleFloat {
+
+            0%,
+            100% {
+                transform: translateY(0);
+            }
+
+            50% {
+                transform: translateY(-6px);
+            }
+        }
+
+        @keyframes pulseGlow {
+
+            0%,
+            100% {
+                box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.1), 0 4px 15px rgba(255, 255, 255, 0.08);
+            }
+
+            50% {
+                box-shadow: 0 0 0 6px rgba(255, 255, 255, 0.04), 0 4px 20px rgba(255, 255, 255, 0.12);
+            }
+        }
+
+        @keyframes shimmerBorder {
             0% {
-                width: 0%;
+                border-color: rgba(63, 63, 70, 0.6);
+            }
+
+            50% {
+                border-color: rgba(113, 113, 122, 0.4);
             }
 
             100% {
-                width: 95%;
+                border-color: rgba(63, 63, 70, 0.6);
             }
         }
 
-        /* Progress Bar Animation for Processing Phase */
         @keyframes fill-processing {
             0% {
                 width: 0%;
@@ -84,15 +165,601 @@
         .animate-fill-processing {
             animation: fill-processing 5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
         }
+
+        .animate-fade-slide-up {
+            animation: fadeSlideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+        }
+
+        .animate-scale-in {
+            animation: scaleIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+        }
+
+        .animate-slide-up {
+            animation: slideUp 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+        }
+
+        .animate-gentle-float {
+            animation: gentleFloat 3s ease-in-out infinite;
+        }
+
+        .animate-pulse-glow {
+            animation: pulseGlow 2.5s ease-in-out infinite;
+        }
+
+        .animate-shimmer-border {
+            animation: shimmerBorder 3s ease-in-out infinite;
+        }
+
+        /* ── Staggered entrance for children ── */
+        .stagger-children>*:nth-child(1) {
+            animation-delay: 0ms;
+        }
+
+        .stagger-children>*:nth-child(2) {
+            animation-delay: 60ms;
+        }
+
+        .stagger-children>*:nth-child(3) {
+            animation-delay: 120ms;
+        }
+
+        .stagger-children>*:nth-child(4) {
+            animation-delay: 180ms;
+        }
+
+        .stagger-children>*:nth-child(5) {
+            animation-delay: 240ms;
+        }
+
+        /* ── Vue Transition Group (Queue list) ── */
+        .list-move,
+        .list-enter-active,
+        .list-leave-active {
+            transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .list-enter-from {
+            opacity: 0;
+            transform: translateX(-20px) scale(0.96);
+        }
+
+        .list-leave-to {
+            opacity: 0;
+            transform: translateX(20px) scale(0.96);
+        }
+
+        .list-leave-active {
+            position: absolute;
+            width: 100%;
+        }
+
+        /* ── Queue Item Hover Lift ── */
+        .queue-item {
+            transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+        }
+
+        .queue-item:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            border-color: rgba(63, 63, 70, 0.8);
+        }
+
+        .queue-item:active {
+            transform: scale(0.98);
+        }
+
+        /* ── Input Focus Glow ── */
+        .input-glow {
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .input-glow:focus-within {
+            border-color: rgba(161, 161, 170, 0.5) !important;
+            box-shadow: 0 0 0 3px rgba(161, 161, 170, 0.08);
+        }
+
+        /* ── Header Button Hover Ring ── */
+        .header-btn {
+            transition: all 0.2s ease;
+        }
+
+        .header-btn:hover {
+            box-shadow: 0 0 0 3px rgba(113, 113, 122, 0.15);
+        }
+
+        /* ── Status Badge Pill Entrance ── */
+        .status-badge {
+            animation: scaleIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
+        }
+
+        /* ── Play Button ── */
+        .play-btn {
+            transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s ease;
+        }
+
+        .play-btn:active {
+            transform: scale(0.92);
+        }
+
+        /* ── History Item ── */
+        .history-item {
+            transition: opacity 0.2s ease, transform 0.2s ease, background-color 0.2s ease;
+        }
+
+        .history-item:hover {
+            transform: translateY(-1px);
+        }
+
+        .history-item:active {
+            transform: scale(0.98);
+        }
+
+        /* ── Accessibility: Reduce Motion ── */
+        @media (prefers-reduced-motion: reduce) {
+
+            *,
+            *::before,
+            *::after {
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.01ms !important;
+            }
+        }
+
+        /* ── Tutorial Overlay Styles ── */
+        .tutorial-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 9999;
+            background-color: #09090b;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .tutorial-slide {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 24px;
+            overflow-y: auto;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        .mock-component {
+            pointer-events: none;
+            user-select: none;
+            transform: scale(0.95);
+            transition: all 0.3s ease;
+            opacity: 0.9;
+        }
+
+        .mock-component.interactive {
+            pointer-events: auto;
+            cursor: pointer;
+            opacity: 1;
+            transform: scale(1);
+            box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
+        }
+
+        .tutorial-nav {
+            padding: 16px 24px;
+            background: rgba(9, 9, 11, 0.8);
+            backdrop-filter: blur(10px);
+            border-top: 1px solid #27272a;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            width: 100%;
+        }
+
+        .tutorial-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: #3f3f46;
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .tutorial-dot.active {
+            background-color: #3b82f6;
+            width: 24px;
+            border-radius: 4px;
+        }
     </style>
 </head>
 
 <body class="text-zinc-100 h-[100dvh] flex flex-col overflow-hidden">
     <div id="app" class="flex flex-col h-full w-full">
 
+        <!-- TUTORIAL OVERLAY -->
+        <div v-if="showTutorialOverlay" class="tutorial-overlay animate-fade-in">
+
+            <!-- Step 1: Welcome -->
+            <div v-if="tutorialStep === 1" class="tutorial-slide">
+                <div class="max-w-xs space-y-6">
+                    <div
+                        class="w-20 h-20 bg-blue-500 rounded-3xl mx-auto flex items-center justify-center shadow-2xl shadow-blue-500/20 mb-4">
+                        <i class="ri-music-2-fill text-4xl text-white leading-none translate-y-[2px]"></i>
+                    </div>
+                    <h2 class="text-3xl font-bold text-white">{{ t('tut_welcome_title') }}</h2>
+                    <p class="text-zinc-400 leading-relaxed">{{ t('tut_welcome_desc') }}</p>
+                </div>
+            </div>
+
+            <!-- Step 2: Main Interface -->
+            <div v-if="tutorialStep === 2" class="tutorial-slide">
+                <div class="space-y-6 w-full max-w-sm">
+                    <div class="text-left space-y-2">
+                        <h3 class="text-xl font-bold text-white">{{ t('tut_interface_title') }}</h3>
+                        <p class="text-sm text-zinc-400">{{ t('tut_interface_desc') }}</p>
+                    </div>
+
+                    <!-- Mock Player Card - Faithful Replication -->
+                    <div
+                        class="mock-component bg-zinc-900 p-5 rounded-2xl border border-zinc-800 shadow-xl text-left relative overflow-hidden">
+                        <div class="flex items-center justify-between mb-3">
+                            <div class="flex items-center gap-2">
+                                <div class="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]">
+                                </div>
+                                <span class="text-xs font-mono text-zinc-400 uppercase tracking-wider">PLAYING</span>
+                            </div>
+                            <span class="text-xs text-zinc-500 font-medium">User A</span>
+                        </div>
+                        <h3 class="text-lg font-medium leading-snug text-white mb-6 line-clamp-2">Never Gonna Give You
+                            Up
+                        </h3>
+                        <div class="space-y-2">
+                            <!-- Faithful Seek Bar -->
+                            <input type="range" min="0" max="245" step="1" value="83"
+                                class="w-full cursor-pointer pointer-events-none appearance-none bg-zinc-800 h-1 rounded-full slider-thumb-mock">
+                            <div class="flex justify-between text-[10px] font-mono text-zinc-500">
+                                <span>01:23</span><span>04:05</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Mock Queue Item - Faithful Replication -->
+                    <div
+                        class="mock-component group bg-zinc-900 border border-zinc-800 p-3 rounded-xl flex gap-3 items-center relative overflow-hidden text-left">
+                        <div class="flex-1 min-w-0 z-10">
+                            <h4 class="text-sm font-medium text-zinc-200 truncate">Dream Believers</h4>
+                            <div class="flex items-center gap-2 mt-1">
+                                <div class="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></div>
+                                <span class="text-xs text-zinc-500 truncate">User B</span>
+                            </div>
+                        </div>
+                        <div
+                            class="flex gap-1 z-10 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button
+                                class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-zinc-800 text-zinc-400"><i
+                                    class="ri-arrow-up-line"></i></button>
+                            <button
+                                class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-red-400"><i
+                                    class="ri-close-line"></i></button>
+                        </div>
+                    </div>
+
+                    <!-- Mock Footer - Fixed Interaction -->
+                    <div
+                        class="mock-component bg-zinc-900 border border-zinc-800 rounded-2xl p-4 flex items-center justify-between">
+                        <button
+                            class="interactive flex flex-col items-center gap-1 text-zinc-500 active:scale-95 transition"
+                            @click.stop="mockAction('replay')">
+                            <i class="ri-restart-line text-2xl"></i>
+                        </button>
+                        <button
+                            class="interactive w-14 h-14 rounded-full flex items-center justify-center bg-white text-black shadow-lg active:scale-95 transition"
+                            @click.stop="mockAction('toggle_play')">
+                            <i :class="mockPlaying ? 'ri-pause-fill' : 'ri-play-fill'" class="text-3xl"></i>
+                        </button>
+                        <button
+                            class="interactive flex flex-col items-center gap-1 text-zinc-500 active:scale-95 transition"
+                            @click.stop="mockAction('skip')">
+                            <i class="ri-skip-forward-fill text-2xl"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 3: Add Songs - Completely Redone -->
+            <div v-if="tutorialStep === 3" class="tutorial-slide">
+                <div class="space-y-6 w-full max-w-sm">
+                    <div class="text-left space-y-2">
+                        <h3 class="text-xl font-bold text-white">{{ t('tut_add_title') }}</h3>
+                        <p class="text-sm text-zinc-400">{{ t('tut_add_desc') }}</p>
+                    </div>
+
+                    <!-- Faithful Add Song Bar -->
+                    <div class="mock-component flex gap-3">
+                        <div class="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl flex items-center px-3">
+                            <i class="ri-link text-zinc-500"></i>
+                            <input type="text"
+                                class="bg-transparent w-full p-3 text-sm text-white outline-none placeholder-zinc-600"
+                                :placeholder="t('pasteLink')" disabled>
+                        </div>
+                        <button class="bg-white text-black w-12 rounded-xl flex items-center justify-center font-bold">
+                            <i class="ri-add-line"></i>
+                        </button>
+                    </div>
+
+                    <!-- Mock Batch Modal Trigger/Demo -->
+                    <button
+                        class="mock-component interactive bg-zinc-800/50 border border-dashed border-zinc-700 rounded-xl p-6 text-center space-y-4 w-full"
+                        @click="mockAction('open_batch')">
+                        <div class="flex justify-center gap-4">
+                            <i class="ri-bilibili-line text-3xl text-pink-400"></i>
+                            <i class="ri-youtube-line text-3xl text-red-500"></i>
+                            <i class="ri-play-list-2-line text-3xl text-blue-400"></i>
+                        </div>
+                        <div>
+                            <p class="text-sm font-bold text-zinc-300">{{ t('tut_add_hint') }}</p>
+                            <p class="text-xs text-zinc-500 mt-1">{{ t('click_to_see_batch') }}</p>
+                        </div>
+                    </button>
+
+                    <!-- Mock Batch Modal (Inner) -->
+                    <div v-if="mockShowBatch"
+                        class="fixed inset-0 z-10 flex flex-col pt-safe pb-safe bg-[#09090b]/95 backdrop-blur-md animate-fade-in"
+                        @click.self="mockShowBatch = false">
+                        <div class="px-4 py-3 border-b border-zinc-800 flex justify-between items-center bg-zinc-900">
+                            <div class="font-bold text-lg text-white">{{ t('select_songs') }}</div>
+                            <button @click="mockShowBatch = false"
+                                class="w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-400"><i
+                                    class="ri-close-line"></i></button>
+                        </div>
+                        <div
+                            class="px-4 py-2 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/50">
+                            <label
+                                class="flex items-center gap-2 text-sm text-zinc-300 pointer-events-auto cursor-pointer"><input
+                                    type="checkbox" v-model="mockBatchAllSelected"
+                                    class="w-4 h-4 rounded border-zinc-600 bg-zinc-800 accent-blue-500"> {{
+                                t('select_all') }} ({{ mockBatchList.length }})</label>
+                            <span class="text-xs text-zinc-500">{{ mockBatchSelectedCount }} {{ t('selected') }}</span>
+                        </div>
+                        <div class="p-4 space-y-2">
+                            <div v-for="(item, index) in mockBatchList" :key="index"
+                                class="flex items-center gap-3 p-3 rounded-xl border border-zinc-800 bg-zinc-900/50 pointer-events-auto cursor-pointer"
+                                @click="item.selected = !item.selected">
+                                <input type="checkbox" v-model="item.selected" @click.stop
+                                    class="w-5 h-5 rounded border-zinc-600 bg-zinc-800 accent-blue-500">
+                                <div class="min-w-0 flex-1">
+                                    <div class="text-sm font-medium text-zinc-200 truncate">{{ item.title }}
+                                    </div>
+                                    <div class="text-xs text-zinc-500">
+                                        {{ item.artist }}</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="p-4 border-t border-zinc-800 bg-zinc-900 mt-auto">
+                            <button @click="mockShowBatch = false" :disabled="mockBatchSelectedCount === 0"
+                                class="w-full bg-blue-600 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 disabled:opacity-50 disabled:bg-zinc-800 pointer-events-auto">
+                                {{ t('add_selected') }} ({{ mockBatchSelectedCount }})
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 4: Song Status -->
+            <div v-if="tutorialStep === 4" class="tutorial-slide">
+                <div class="space-y-6 w-full max-w-sm text-left">
+                    <div>
+                        <h3 class="text-xl font-bold text-white mb-2">{{ t('tut_status_title') }}</h3>
+                        <p class="text-sm text-zinc-400">{{ t('tut_status_desc') }}</p>
+                    </div>
+
+                    <div class="space-y-3">
+                        <!-- Downloading -->
+                        <div class="flex items-center gap-4 bg-zinc-900 p-3 rounded-xl border border-zinc-800">
+                            <div class="w-3 h-3 rounded-full bg-blue-500 animate-pulse"></div>
+                            <div>
+                                <div class="text-sm font-bold text-blue-400">{{ t('status_downloading') }}</div>
+                                <div class="text-xs text-zinc-500">{{ t('status_downloading_desc') }}</div>
+                            </div>
+                        </div>
+
+                        <!-- Ready to Play -->
+                        <div class="flex items-center gap-4 bg-zinc-900 p-3 rounded-xl border border-zinc-800">
+                            <div class="w-3 h-3 rounded-full bg-blue-500"></div>
+                            <div>
+                                <div class="text-sm font-bold text-blue-500">{{ t('status_ready') }}</div>
+                                <div class="text-xs text-zinc-500">{{ t('status_ready_desc') }}</div>
+                            </div>
+                        </div>
+
+                        <!-- Processing -->
+                        <div class="flex items-center gap-4 bg-zinc-900 p-3 rounded-xl border border-zinc-800">
+                            <div class="w-3 h-3 rounded-full bg-purple-500 animate-pulse"></div>
+                            <div>
+                                <div class="text-sm font-bold text-purple-400">{{ t('status_processing') }}</div>
+                                <div class="text-xs text-zinc-500">{{ t('status_processing_desc') }}</div>
+                            </div>
+                        </div>
+
+                        <!-- Fully Ready -->
+                        <div class="flex items-center gap-4 bg-zinc-900 p-3 rounded-xl border border-zinc-800">
+                            <div class="w-3 h-3 rounded-full bg-purple-500"></div>
+                            <div>
+                                <div class="text-sm font-bold text-purple-500">{{ t('status_full_ready') }}</div>
+                                <div class="text-xs text-zinc-500">{{ t('status_full_ready_desc') }}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 5: Audio Settings -->
+            <div v-if="tutorialStep === 5" class="tutorial-slide">
+                <div class="space-y-6 w-full max-w-sm">
+                    <div class="text-left space-y-2">
+                        <h3 class="text-xl font-bold text-white">{{ t('tut_audio_title') }}</h3>
+                        <p class="text-sm text-zinc-400">{{ t('tut_audio_desc') }}</p>
+                    </div>
+
+                    <!-- Mock Audio Panel -->
+                    <div class="bg-zinc-900 rounded-2xl p-5 border border-zinc-700 shadow-xl space-y-6">
+                        <!-- Mock Vocal -->
+                        <div class="space-y-3 pb-4 border-b border-zinc-800">
+                            <div
+                                class="flex justify-between items-center text-xs text-zinc-500 uppercase tracking-wider">
+                                <span>{{ t('vocal_removal') }}</span>
+                                <span v-if="mockProcessing" class="text-purple-500 animate-pulse">{{ t('processing')
+                                    }}</span>
+                                <span v-else class="text-zinc-500">{{ mockVocalRemoved ? t('vocal_off') : t('vocal_on')
+                                    }}</span>
+                            </div>
+                            <div v-if="mockProcessing" class="w-full h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                                <div class="h-full bg-purple-500 w-2/3 animate-pulse"></div>
+                            </div>
+                            <button
+                                class="interactive w-full py-4 rounded-xl font-bold flex items-center justify-center gap-3 transition-all"
+                                :class="mockVocalRemoved ? 'bg-blue-500 text-white' : (mockProcessing ? 'bg-zinc-800 text-purple-500' : 'bg-zinc-800 text-zinc-400')"
+                                @click="mockAction('toggle_vocal')">
+                                <i v-if="mockProcessing" class="ri-loader-4-line animate-spin text-xl"></i>
+                                <i v-else :class="mockVocalRemoved ? 'ri-mic-off-fill' : 'ri-mic-line'"
+                                    class="text-xl"></i>
+                                <span>{{ mockProcessing ? t('processing') : (mockVocalRemoved ? t('vocal_off') :
+                                    t('start_process')) }}</span>
+                            </button>
+                            <div class="mt-2 p-2 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
+                                <p class="text-[10px] text-yellow-500/80 leading-snug"><i
+                                        class="ri-alert-line mr-1"></i>{{
+                                    t('vocal_warning') }}</p>
+                            </div>
+                        </div>
+
+                        <!-- Mock Volume -->
+                        <div class="space-y-3">
+                            <div class="flex justify-between text-xs text-zinc-500 uppercase tracking-wider">
+                                <span>{{ t('volume') }}</span>
+                                <span>{{ mockVolume }}%</span>
+                            </div>
+                            <div class="flex items-center gap-3">
+                                <i class="ri-volume-down-line text-zinc-500"></i>
+                                <input type="range" v-model="mockVolume"
+                                    class="flex-1 h-2 bg-zinc-800 rounded-lg appearance-none cursor-pointer">
+                                <i class="ri-volume-up-line text-zinc-500"></i>
+                            </div>
+                        </div>
+
+                        <!-- Mock Pitch - Faithful -->
+                        <div class="space-y-4">
+                            <div
+                                class="flex justify-between items-center text-xs text-zinc-500 uppercase tracking-wider">
+                                <div class="flex items-center gap-1.5">
+                                    <span>{{ t('pitch') }}</span>
+                                    <span
+                                        class="text-xs font-bold text-yellow-500 bg-yellow-500/10 px-1.5 py-0.5 rounded uppercase tracking-wider">Beta</span>
+                                </div>
+                                <button @click="mockPitch = 0"
+                                    class="text-xs text-blue-400 hover:text-blue-300 pointer-events-auto">{{ t('reset')
+                                    }}</button>
+                            </div>
+                            <div class="flex items-center justify-between gap-4">
+                                <button
+                                    class="interactive w-14 h-14 rounded-2xl bg-zinc-800 border border-zinc-700 flex items-center justify-center text-2xl text-zinc-300 active:scale-95 transition"
+                                    @click="mockPitch--"><i class="ri-subtract-line"></i></button>
+                                <div
+                                    class="flex-1 flex flex-col items-center justify-center h-14 bg-black/20 rounded-2xl border border-zinc-800">
+                                    <span class="text-2xl font-bold font-mono"
+                                        :class="mockPitch !== 0 ? 'text-blue-400' : 'text-zinc-500'">{{ mockPitch > 0 ?
+                                        '+' : '' }}{{ mockPitch }}</span>
+                                    <span class="text-[10px] text-zinc-600 uppercase tracking-widest">Semitones</span>
+                                </div>
+                                <button
+                                    class="interactive w-14 h-14 rounded-2xl bg-zinc-800 border border-zinc-700 flex items-center justify-center text-2xl text-zinc-300 active:scale-95 transition"
+                                    @click="mockPitch++"><i class="ri-add-line"></i></button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 6: Misc -->
+            <div v-if="tutorialStep === 6" class="tutorial-slide">
+                <div class="space-y-6 w-full max-w-sm text-left">
+                    <div>
+                        <h3 class="text-xl font-bold text-white mb-2">{{ t('tut_misc_title') }}</h3>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <div
+                            class="bg-zinc-900 p-4 rounded-2xl border border-zinc-800 flex flex-col items-center text-center gap-2">
+                            <div
+                                class="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-400 border border-zinc-700">
+                                <i class="ri-restart-line"></i>
+                            </div>
+                            <div class="font-bold text-sm text-white">{{ t('reset') }}</div>
+                            <div class="text-[10px] text-zinc-500">{{ t('tut_reset_desc') }}</div>
+                        </div>
+                        <!-- Fixed Share with Title -->
+                        <div
+                            class="bg-zinc-900 p-4 rounded-2xl border border-zinc-800 flex flex-col items-center text-center gap-2">
+                            <div
+                                class="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-400 border border-zinc-700">
+                                <i class="ri-qr-code-line"></i>
+                            </div>
+                            <div class="font-bold text-sm text-white">{{ t('tut_share_title') }}</div>
+                            <div class="text-[10px] text-zinc-500">{{ t('tut_share_desc') }}</div>
+                        </div>
+                    </div>
+
+                    <div class="bg-zinc-900 p-4 rounded-2xl border border-zinc-800 flex items-center gap-4">
+                        <div
+                            class="h-8 px-3 rounded-full border border-zinc-700 bg-zinc-800 flex items-center justify-center text-xs text-zinc-400">
+                            {{ nickname }}</div>
+                        <div>
+                            <div class="font-bold text-sm text-white">{{ t('tut_nick_title') }}</div>
+                            <div class="text-[10px] text-zinc-500">{{ t('tut_nick_desc') }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 7: Final -->
+            <div v-if="tutorialStep === 7" class="tutorial-slide">
+                <div class="max-w-xs space-y-6">
+                    <div
+                        class="w-20 h-20 bg-green-500 rounded-full mx-auto flex items-center justify-center shadow-2xl shadow-green-500/20 mb-4 animate-bounce">
+                        <i class="ri-check-line text-4xl text-white"></i>
+                    </div>
+                    <h2 class="text-3xl font-bold text-white">{{ t('tut_final_title') }}</h2>
+                    <p class="text-zinc-400 leading-relaxed">{{ t('tut_final_desc') }}</p>
+
+                    <button @click="endTutorial"
+                        class="w-full bg-white text-black py-4 rounded-xl font-bold text-lg shadow-lg hover:scale-105 transition-transform">
+                        {{ t('tut_start_btn') }}
+                    </button>
+                </div>
+            </div>
+
+
+            <!-- Navigation Bottom Bar (Sticky) -->
+            <div class="tutorial-nav">
+                <!-- Dots -->
+                <div class="flex gap-2">
+                    <div v-for="i in 7" :key="i" class="tutorial-dot" :class="{ 'active': tutorialStep === i }"></div>
+                </div>
+
+                <!-- Buttons -->
+                <div class="flex gap-4">
+                    <button v-if="tutorialStep > 1" @click="prevStep"
+                        class="text-zinc-400 font-medium hover:text-white transition">{{ t('back') }}</button>
+                    <button v-if="tutorialStep < 7" @click="nextStep"
+                        class="bg-blue-600 text-white px-6 py-2 rounded-full font-bold shadow-lg shadow-blue-600/20 hover:scale-105 transition-transform">{{
+                        t('next') }}</button>
+                </div>
+            </div>
+        </div>
+
+
         <div v-if="!nickname || isRenaming"
             class="fixed inset-0 z-50 bg-black/95 flex items-center justify-center p-6 backdrop-blur-md">
-            <div class="w-full max-w-sm text-center">
+            <div class="w-full max-w-sm text-center animate-scale-in">
                 <div class="mb-8"><i class="ri-disc-line text-4xl text-zinc-500"></i></div>
                 <h3 v-if="isRenaming" class="text-white text-lg font-bold mb-4">{{ t('modify_nick') }}</h3>
                 <input v-model="tempNick" type="text" :placeholder="t('enterName')"
@@ -124,7 +791,7 @@
 
         <!-- SHARE MODAL (Existing) -->
         <div v-if="showShareModal"
-            class="fixed inset-0 z-50 bg-[#09090b] flex flex-col items-center justify-center p-6 animate-fade-in">
+            class="fixed inset-0 z-50 bg-[#09090b] flex flex-col items-center justify-center p-6 animate-scale-in">
             <div class="w-full max-w-sm flex flex-col items-center space-y-8">
                 <button @click="showShareModal = false"
                     class="absolute top-6 right-6 p-2 text-zinc-400 hover:text-white">
@@ -217,10 +884,10 @@
 
 
         <div v-if="showTuning"
-            class="fixed inset-0 z-50 bg-[#09090b]/80 backdrop-blur-sm flex items-end sm:items-center justify-center animate-fade-in"
+            class="fixed inset-0 z-50 bg-[#09090b]/80 backdrop-blur-sm flex items-end sm:items-center justify-center"
             @click.self="showTuning = false">
             <div
-                class="bg-zinc-900 w-full sm:w-[400px] sm:rounded-2xl rounded-t-2xl p-6 border-t sm:border border-zinc-700 shadow-2xl space-y-8 pb-10 sm:pb-6">
+                class="animate-slide-up bg-zinc-900 w-full sm:w-[400px] sm:rounded-2xl rounded-t-2xl p-6 border-t sm:border border-zinc-700 shadow-2xl space-y-8 pb-10 sm:pb-6">
                 <div class="flex justify-between items-center">
                     <h3 class="text-white font-bold text-lg">{{ t('tuning') }}</h3>
                     <button @click="showTuning = false"
@@ -260,6 +927,7 @@
                         <span v-else>{{ t('start_process') }}</span>
                     </button>
                     <p class="text-[10px] text-zinc-600 text-center">{{ t('vocal_hint') }}</p>
+
 
                     <!-- Auto-Process Toggle (sub-item) -->
                     <div class="flex justify-between items-center pt-2" id="tuning-auto">
@@ -345,42 +1013,44 @@
                 </div>
                 <div class="flex items-center gap-3">
                     <button @click="resetSystem"
-                        class="text-zinc-400 hover:text-red-500 border border-zinc-700 bg-zinc-800 w-8 h-8 rounded-full flex items-center justify-center transition">
+                        class="header-btn text-zinc-400 hover:text-red-500 border border-zinc-700 bg-zinc-800 w-8 h-8 rounded-full flex items-center justify-center">
                         <i class="ri-restart-line"></i>
                     </button>
 
                     <button @click="openShare" id="btn-share"
-                        class="text-zinc-400 hover:text-white border border-zinc-700 bg-zinc-800 w-8 h-8 rounded-full flex items-center justify-center transition">
+                        class="header-btn text-zinc-400 hover:text-white border border-zinc-700 bg-zinc-800 w-8 h-8 rounded-full flex items-center justify-center">
                         <i class="ri-qr-code-line"></i>
                     </button>
 
                     <button @click="toggleLang"
-                        class="h-8 px-3 rounded-full border border-zinc-700 bg-zinc-800 flex items-center justify-center text-xs font-mono text-zinc-500 hover:text-white transition">{{
+                        class="header-btn h-8 px-3 rounded-full border border-zinc-700 bg-zinc-800 flex items-center justify-center text-xs font-mono text-zinc-500 hover:text-white">{{
                         lang.toUpperCase() }}</button>
 
                     <div @click="startRename" id="display-nickname"
-                        class="h-8 px-3 rounded-full border border-zinc-700 bg-zinc-800 flex items-center justify-center text-xs text-zinc-400 cursor-pointer hover:text-white transition">
+                        class="header-btn h-8 px-3 rounded-full border border-zinc-700 bg-zinc-800 flex items-center justify-center text-xs text-zinc-400 cursor-pointer hover:text-white">
                         {{ nickname }}</div>
                 </div>
             </div>
             <div class="flex gap-6 border-b border-zinc-800">
                 <button @click="activeTab = 'playlist'" id="tab-playlist"
-                    class="pb-2 text-sm font-medium transition-colors relative"
+                    class="pb-2 text-sm font-medium transition-colors duration-200 relative"
                     :class="activeTab === 'playlist' ? 'text-white' : 'text-zinc-500'">
                     {{ t('playlist') }} <span v-if="activeTab === 'playlist'"
-                        class="absolute bottom-0 left-0 w-full h-[1px] bg-white"></span>
+                        class="absolute bottom-0 left-0 w-full h-[2px] bg-white rounded-full transition-all duration-300"></span>
                 </button>
-                <button @click="activeTab = 'history'" class="pb-2 text-sm font-medium transition-colors relative"
+                <button @click="activeTab = 'history'"
+                    class="pb-2 text-sm font-medium transition-colors duration-200 relative"
                     :class="activeTab === 'history' ? 'text-white' : 'text-zinc-500'">
                     {{ t('history') }} <span v-if="activeTab === 'history'"
-                        class="absolute bottom-0 left-0 w-full h-[1px] bg-white"></span>
+                        class="absolute bottom-0 left-0 w-full h-[2px] bg-white rounded-full transition-all duration-300"></span>
                 </button>
             </div>
         </header>
 
         <main class="flex-1 min-h-0 overflow-y-auto no-scrollbar p-4 space-y-4 bg-[#09090b]">
 
-            <div v-if="currentPlaying" class="bg-zinc-900 p-5 rounded-2xl border border-zinc-800 shadow-sm"
+            <div v-if="currentPlaying"
+                class="animate-fade-slide-up bg-zinc-900 p-5 rounded-2xl border border-zinc-800 shadow-sm animate-shimmer-border"
                 id="player-card">
                 <div class="flex items-center justify-between mb-3">
                     <div class="flex items-center gap-2">
@@ -438,14 +1108,15 @@
             </div>
             <div v-else
                 class="h-40 flex flex-col items-center justify-center border border-dashed border-zinc-800 rounded-2xl text-zinc-600">
-                <i class="ri-music-2-line text-2xl mb-2 opacity-50"></i><span class="text-xs">{{ t('idle') }}</span>
+                <i class="ri-music-2-line text-2xl mb-2 opacity-50 animate-gentle-float"></i><span class="text-xs">{{
+                    t('idle') }}</span>
             </div>
 
             <div v-if="activeTab === 'playlist'" class="space-y-4">
                 <div class="flex gap-3">
                     <div id="input-add-song"
-                        class="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl flex items-center px-3"><i
-                            class="ri-link text-zinc-500"></i><input v-model="addUrl" type="text"
+                        class="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl flex items-center px-3 input-glow">
+                        <i class="ri-link text-zinc-500"></i><input v-model="addUrl" type="text"
                             class="bg-transparent w-full p-3 text-sm text-white outline-none placeholder-zinc-600"
                             :placeholder="t('pasteLink')"></div>
                     <button @click="addSong" :disabled="isAdding"
@@ -458,7 +1129,7 @@
                     </div>
                     <transition-group name="list" tag="div" class="space-y-2">
                         <div v-for="item in playlist" :key="item.id"
-                            class="group bg-zinc-900 border border-zinc-800 p-3 rounded-xl flex gap-3 items-center relative overflow-hidden">
+                            class="queue-item group bg-zinc-900 border border-zinc-800 p-3 rounded-xl flex gap-3 items-center relative overflow-hidden">
 
                             <!-- Background Progress Overlay (Downloading) -->
                             <div v-if="item.status === 'downloading'"
@@ -506,7 +1177,7 @@
                 </div>
                 <div class="space-y-2">
                     <div v-for="item in history" :key="item.id"
-                        class="bg-zinc-900 border border-zinc-800/50 p-3 rounded-xl flex items-center justify-between opacity-60 hover:opacity-100 transition-opacity">
+                        class="history-item bg-zinc-900 border border-zinc-800/50 p-3 rounded-xl flex items-center justify-between opacity-60 hover:opacity-100">
                         <div class="flex-1 min-w-0 pr-3">
                             <h4 class="text-sm text-zinc-300 truncate">{{ item.title }}</h4>
                             <div class="text-xs text-zinc-600 mt-0.5">{{ item.uploader }}</div>
@@ -522,7 +1193,7 @@
             <div class="px-6 py-3 border-b border-zinc-800/50 flex items-center justify-between">
                 <!-- Tuning Button -->
                 <button @click="showTuning = true" id="btn-tuning"
-                    class="w-10 h-10 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-white flex items-center justify-center transition btn-press relative">
+                    class="header-btn w-10 h-10 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-white flex items-center justify-center btn-press relative">
                     <i class="ri-music-2-fill"></i>
                     <div v-if="localPitch !== 0"
                         class="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full border-2 border-[#09090b]">
@@ -532,15 +1203,15 @@
                 <!-- Current Settings Status Indicators -->
                 <div class="flex-1 flex items-center justify-center gap-2 px-4 overflow-hidden flex-wrap">
                     <span v-if="localVocalRemoval"
-                        class="text-xs font-mono font-bold text-purple-400 bg-purple-400/10 px-2 py-0.5 rounded whitespace-nowrap">
+                        class="status-badge text-xs font-mono font-bold text-purple-400 bg-purple-400/10 px-2 py-0.5 rounded whitespace-nowrap">
                         {{ t('vocal_removal') }}
                     </span>
                     <span v-if="localPitch !== 0"
-                        class="text-xs font-mono font-bold text-blue-400 bg-blue-400/10 px-2 py-0.5 rounded whitespace-nowrap">
+                        class="status-badge text-xs font-mono font-bold text-blue-400 bg-blue-400/10 px-2 py-0.5 rounded whitespace-nowrap">
                         KEY {{ localPitch > 0 ? '+' : '' }}{{ localPitch }}
                     </span>
                     <span
-                        class="text-xs font-mono font-bold text-zinc-400 bg-zinc-400/10 px-2 py-0.5 rounded whitespace-nowrap">
+                        class="status-badge text-xs font-mono font-bold text-zinc-400 bg-zinc-400/10 px-2 py-0.5 rounded whitespace-nowrap">
                         <i class="ri-volume-up-line mr-1"></i>{{ localVolumeDisplay }}%
                     </span>
                 </div>
@@ -552,8 +1223,9 @@
                         class="flex flex-col items-center gap-1 text-zinc-500 hover:text-white btn-press"><i
                             class="ri-restart-line text-2xl"></i></button></div>
                 <div class="flex justify-center"><button @click="control('toggle')" id="btn-play-pause"
-                        class="w-16 h-16 rounded-full flex items-center justify-center bg-white text-black shadow-lg shadow-white/10 btn-press transition-all"><i
-                            :class="localPlaying ? 'ri-pause-fill' : 'ri-play-fill'" class="text-3xl"></i></button>
+                        class="play-btn animate-pulse-glow w-16 h-16 rounded-full flex items-center justify-center bg-white text-black"><i
+                            :class="localPlaying ? 'ri-pause-fill' : 'ri-play-fill'"
+                            class="text-3xl transition-transform duration-200"></i></button>
                 </div>
                 <div class="flex justify-end"><button @click="skipSong"
                         class="flex flex-col items-center gap-1 text-zinc-500 hover:text-white btn-press"><i
@@ -572,7 +1244,7 @@
                 join: "Join System",
                 playlist: "Queue",
                 history: "History",
-                pasteLink: "Paste Link (Bilibili/YouTbe)",
+                pasteLink: "Paste Link (Bilibili/YouTube)",
                 queue: "Up Next",
                 export: "Export List",
                 idle: "Ready to play",
@@ -589,6 +1261,7 @@
                 vocal_on: "Vocals On",
                 vocal_off: "Vocals Off",
                 vocal_hint: "Processing may take 1-2 minutes",
+                vocal_warning: "Uses Demucs AI model. May cause high system load. First-time model loading might be slow (stuck at 99%), please wait.",
                 vocal_unavailable: "Not Available",
                 processing: "Processing",
                 ready: "Ready",
@@ -604,32 +1277,39 @@
                 select_songs_first: "Select at least one song",
                 tutorial_restart: "Show Tutorial",
                 // Tutorial Steps
-                tut_welcome_title: "Welcome to Local Karaoke!",
-                tut_welcome_desc: "Let's take a quick tour to show you how to control the system.",
+                tut_start_btn: "Get Started",
+                tut_welcome_title: "Welcome!",
+                tut_welcome_desc: "Let's take a quick tour to learn how to use the Local Karaoke System.",
+                tut_interface_title: "Main Interface",
+                tut_interface_desc: "This is your main control center.",
                 tut_add_title: "Add Songs",
-                tut_add_desc: "Paste Bilibili/YouTube links here. You can also paste a Playlist or Favorites link to add multiple songs!",
-                tut_player_title: "Status Indicators",
-                tut_player_desc: "Green=Playing, Blue Pulse=Downloading, Purple Pulse=Separating Vocals.",
-                tut_playlist_title: "Playlist & History",
-                tut_playlist_desc: "Switch between the current queue and your request history here.",
-                tut_tuning_title: "Audio Settings",
-                tut_tuning_desc: "Open audio settings menu.",
-                tut_vocal_title: "Vocal Remover",
-                tut_vocal_desc: "Remove vocals from the track. First-time use may take longer to load the model.",
-                tut_auto_title: "Auto-Process",
-                tut_auto_desc: "Automatically remove vocals for all new songs added to the queue. Please note the increased CPU usage.",
-                tut_vol_title: "Volume Control",
-                tut_vol_desc: "Master volume adjustment.",
-                tut_loudness_title: "Loudness Normalization",
-                tut_loudness_desc: "Keep volume consistent across different songs.",
-                tut_pitch_title: "Key Shift",
-                tut_pitch_desc: "Adjust the song key to match your vocal range.",
-                tut_control_title: "Playback Control",
-                tut_control_desc: "Play, pause, or skip the current song.",
+                tut_add_desc: "Paste Bilibili or YouTube links here. We support single videos, Favorites, and Playlists!",
+                tut_add_hint: "Supports Bilibili Favorites & YouTube Playlists",
+                click_to_see_batch: "Click to simulate batch import",
+                tut_status_title: "Status Indicators",
+                tut_status_desc: "Understand what each color means.",
+                status_downloading: "Blinking Blue",
+                status_downloading_desc: "Downloading content...",
+                status_ready: "Solid Blue",
+                status_ready_desc: "Downloaded. Ready to play (original audio).",
+                status_processing: "Blinking Purple",
+                status_processing_desc: "Separating vocals (making instrumental)...",
+                status_full_ready: "Solid Purple",
+                status_full_ready_desc: "Instrumental track is ready!",
+                tut_audio_title: "Audio Settings",
+                tut_audio_desc: "Control vocal removal, volume, and pitch.",
+                tut_misc_title: "Miscellaneous",
+                tut_reset_desc: "Reset playlist & history",
                 tut_share_title: "Share",
-                tut_share_desc: "Show the QR code for friends to join.",
-                tut_nick_title: "Your Nickname",
-                tut_nick_desc: "Tap here to change your name or view this tutorial again."
+                tut_share_desc: "Invite friends via QR code",
+                tut_nick_title: "Profile",
+                tut_nick_desc: "Tap to rename or restart tutorial",
+                tut_final_title: "You're All Set!",
+                tut_final_desc: "You can now start adding songs and singing!",
+                back: "Back",
+                next: "Next",
+                mock_player: "PREVIEW PLAYER",
+                try_clicking: "(Try clicking the controls)"
             },
             zh: {
                 enterName: "输入您的昵称",
@@ -653,6 +1333,7 @@
                 vocal_on: "人声开启",
                 vocal_off: "人声已消除",
                 vocal_hint: "处理可能需要 1-2 分钟",
+                vocal_warning: "使用 Demucs AI 模型进行处理。可能会造成较大性能开销。首次加载模型时可能较慢（进度条卡在99%），请耐心等待或留意控制台输出。",
                 vocal_unavailable: "暂不可用",
                 processing: "处理中",
                 ready: "就绪",
@@ -668,32 +1349,39 @@
                 select_songs_first: "请至少选择一首歌曲",
                 tutorial_restart: "重新观看教学",
                 // Tutorial Steps
-                tut_welcome_title: "欢迎使用点歌台！",
+                tut_start_btn: "开始使用",
+                tut_welcome_title: "欢迎！",
                 tut_welcome_desc: "让我们花一点时间了解如何使用本系统。",
+                tut_interface_title: "主界面",
+                tut_interface_desc: "这里是您的主要控制中心。",
                 tut_add_title: "点歌",
-                tut_add_desc: "粘贴链接点歌。支持 Bilibili 收藏夹和 YouTube 播放列表批量导入！",
-                tut_player_title: "状态指示灯",
-                tut_player_desc: "绿色=播放中，蓝色闪烁=下载中，紫色闪烁=人声分离处理中。",
-                tut_playlist_title: "列表切换",
-                tut_playlist_desc: "在此切换当前待播队列和您的点歌历史。",
-                tut_tuning_title: "调音台",
-                tut_tuning_desc: "打开音频设置菜单。",
-                tut_vocal_title: "人声消除",
-                tut_vocal_desc: "消除人声制作伴奏。首次使用加载模型时间可能较长。",
-                tut_auto_title: "自动处理",
-                tut_auto_desc: "开启后，后续点歌将自动进行人声消除处理。请注意电脑资源消耗。",
-                tut_vol_title: "音量调节",
-                tut_vol_desc: "调节系统音量。",
-                tut_loudness_title: "响度均衡",
-                tut_loudness_desc: "默认开启，以统一不同歌曲的音量大小。",
-                tut_pitch_title: "升降调",
-                tut_pitch_desc: "调节歌曲音调以适合您的音域。",
-                tut_control_title: "播放控制",
-                tut_control_desc: "暂停、播放或切歌。",
+                tut_add_desc: "在此粘贴 Bilibili 或 YouTube 链接。我们支持单曲、收藏夹及播放列表导入！",
+                tut_add_hint: "支持 Bilibili 收藏夹和 YouTube 播放列表",
+                click_to_see_batch: "点击模拟批量导入",
+                tut_status_title: "状态指示灯",
+                tut_status_desc: "了解不同颜色代表的含义。",
+                status_downloading: "蓝色闪烁",
+                status_downloading_desc: "正在下载内容...",
+                status_ready: "蓝色常亮",
+                status_ready_desc: "下载完成。可以播放（原唱）。",
+                status_processing: "紫色闪烁",
+                status_processing_desc: "正在消除人声（制作伴奏）...",
+                status_full_ready: "紫色常亮",
+                status_full_ready_desc: "伴奏制作完成，已完全就绪！",
+                tut_audio_title: "音频设置",
+                tut_audio_desc: "控制人声消除、音量和升降调。",
+                tut_misc_title: "杂项功能",
+                tut_reset_desc: "重置播放列表和历史",
                 tut_share_title: "分享",
-                tut_share_desc: "显示二维码，邀请朋友一起点歌。",
+                tut_share_desc: "显示二维码邀请朋友",
                 tut_nick_title: "个人中心",
-                tut_nick_desc: "点击此处修改昵称或重新观看本教学。"
+                tut_nick_desc: "点击此处修改昵称或重看教学",
+                tut_final_title: "准备就绪！",
+                tut_final_desc: "您现在可以开始点歌并尽情歌唱了！",
+                back: "上一步",
+                next: "下一步",
+                mock_player: "演示播放器",
+                try_clicking: "（试着点击控件）"
             },
             ja: {
                 enterName: "ニックネームを入力",
@@ -717,6 +1405,7 @@
                 vocal_on: "ボーカルあり",
                 vocal_off: "ボーカルなし",
                 vocal_hint: "処理には 1～2 分かかります",
+                vocal_warning: "Demucs AIモデルを使用します。システム負荷が高くなる可能性があります。初回モデル読み込みは遅くなる場合があります（99%で停止）、お待ちください。",
                 vocal_unavailable: "利用不可",
                 processing: "処理中",
                 ready: "準備完了",
@@ -732,33 +1421,40 @@
                 select_songs_first: "曲を選択してください",
                 tutorial_restart: "チュートリアルを表示",
                 // Tutorial Steps
+                tut_start_btn: "始める",
                 tut_welcome_title: "ようこそ！",
                 tut_welcome_desc: "使い方の簡単なツアーを始めましょう。",
+                tut_interface_title: "メイン画面",
+                tut_interface_desc: "これがメインのコントロールセンターです。",
                 tut_add_title: "曲を追加",
-                tut_add_desc: "リンクを貼り付けて追加。プレイリストやマイリストのURLで一括追加も可能です！",
-                tut_player_title: "ステータス表示",
-                tut_player_desc: "緑=再生中、青点滅=ダウンロード中、紫点滅=ボーカル分離処理中。",
-                tut_playlist_title: "プレイリスト",
-                tut_playlist_desc: "再生待ちリストと履歴を切り替えます。",
-                tut_tuning_title: "オーディオ設定",
-                tut_tuning_desc: "オーディオ設定メニューを開きます。",
-                tut_vocal_title: "ボーカル除去",
-                tut_vocal_desc: "ボーカルを消します。初回使用時はモデルの読み込みに時間がかかる場合があります。",
-                tut_auto_title: "自動処理",
-                tut_auto_desc: "オンにすると、今後の曲すべてから自動でボーカルを除去します。PCの負荷が高くなるので注意してください。",
-                tut_vol_title: "音量",
-                tut_vol_desc: "全体の音量を調整します。",
-                tut_loudness_title: "ラウドネス正規化",
-                tut_loudness_desc: "曲ごとの音量差をなくすため、オンにすることをお勧めします。",
-                tut_pitch_title: "キー変更",
-                tut_pitch_desc: "歌いやすいキーに調整できます。",
-                tut_control_title: "再生コントロール",
-                tut_control_desc: "再生、一時停止、スキップができます。",
+                tut_add_desc: "BilibiliやYouTubeのリンクを貼り付けてください。リストやマイリストもサポートしています！",
+                tut_add_hint: "Bilibiliマイリスト & YouTubeプレイリスト対応",
+                click_to_see_batch: "クリックして一括インポートをシミュレート",
+                tut_status_title: "ステータス表示",
+                tut_status_desc: "色の意味を理解しましょう。",
+                status_downloading: "青点滅",
+                status_downloading_desc: "コンテンツをダウンロード中...",
+                status_ready: "青点灯",
+                status_ready_desc: "ダウンロード完了。再生可能（原曲）。",
+                status_processing: "紫点滅",
+                status_processing_desc: "ボーカル除去中（インスト作成中）...",
+                status_full_ready: "紫点灯",
+                status_full_ready_desc: "インストの準備が完了しました！",
+                tut_audio_title: "オーディオ設定",
+                tut_audio_desc: "ボーカル除去、音量、キー変更を操作します。",
+                tut_misc_title: "その他",
+                tut_reset_desc: "リストと履歴をリセット",
                 tut_share_title: "共有",
-                tut_share_desc: "QRコードを表示して友達を招待しよう。",
-                tut_nick_title: "ニックネーム",
-                tut_nick_desc: "ここをタップして名前を変更したり、チュートリアルを再度表示したりできます。"
-            }
+                tut_share_desc: "QRコードを表示",
+                tut_nick_title: "プロフィール",
+                tut_nick_desc: "タップして名前変更やチュートリアル再表示",
+                tut_final_title: "準備完了！",
+                tut_final_desc: "曲を追加して歌い始めましょう！",
+                back: "戻る",
+                next: "次へ",
+                mock_player: "プレビュー",
+                try_clicking: "（コントロールをクリックしてみてください）"
+            },
         };
 
         function throttle(func, limit) {
@@ -909,134 +1605,66 @@
                 // Only update UI during drag, send seek command on release
                 const onSeekInput = () => { isDragging.value = true; };
 
-                // Tutorial Logic
-                let driverObj = null;
+                // Tutorial Logic New
+                const showTutorialOverlay = ref(false);
+                const tutorialStep = ref(1);
+
+                // Mock State
+                const mockPlaying = ref(false);
+                const mockVocalRemoved = ref(false);
+                const mockProcessing = ref(false);
+                const mockVolume = ref(80);
+                const mockPitch = ref(0);
+                const mockShowBatch = ref(false);
+                const mockBatchList = ref([
+                    { title: '眩耀夜行', artist: 'スリーズブーケ', selected: true },
+                    { title: 'エウレカ', artist: '菅叶和', selected: true },
+                    { title: '自己肯定感爆上げ↑↑しゅきしゅきソング', artist: '藤田ことね (CV. 飯田ヒカル)', selected: true }
+                ]);
+                const mockBatchSelectedCount = computed(() => mockBatchList.value.filter(i => i.selected).length);
+                const mockBatchAllSelected = computed({
+                    get: () => mockBatchList.value.length > 0 && mockBatchList.value.every(i => i.selected),
+                    set: (val) => mockBatchList.value.forEach(i => i.selected = val)
+                });
 
                 const startTutorial = () => {
-                    nextTick(() => {
-                        const driver = window.driver.js.driver;
+                    tutorialStep.value = 1;
+                    showTutorialOverlay.value = true;
+                };
 
-                        const steps = [
-                            {
-                                popover: {
-                                    title: t('tut_welcome_title'),
-                                    description: t('tut_welcome_desc')
-                                }
-                            },
-                            {
-                                element: '#input-add-song',
-                                popover: {
-                                    title: t('tut_add_title'),
-                                    description: t('tut_add_desc'),
-                                    side: "bottom",
-                                    align: 'start'
-                                }
-                            },
-                            {
-                                element: '#player-card',
-                                popover: {
-                                    title: t('tut_player_title'),
-                                    description: t('tut_player_desc'),
-                                    side: "bottom"
-                                }
-                            },
-                            {
-                                element: '#tab-playlist',
-                                popover: {
-                                    title: t('tut_playlist_title'),
-                                    description: t('tut_playlist_desc'),
-                                    side: "bottom"
-                                }
-                            },
-                            {
-                                element: '#btn-tuning',
-                                popover: {
-                                    title: t('tut_tuning_title'),
-                                    description: t('tut_tuning_desc'),
-                                    side: "top"
-                                }
-                            },
-                            {
-                                element: '#tuning-vocal',
-                                popover: {
-                                    title: t('tut_vocal_title'),
-                                    description: t('tut_vocal_desc'),
-                                    side: "top"
-                                },
-                                onHighlightStarted: () => { showTuning.value = true; nextTick(); }
-                            },
-                            {
-                                element: '#tuning-auto',
-                                popover: {
-                                    title: t('tut_auto_title'),
-                                    description: t('tut_auto_desc'),
-                                    side: "top"
-                                }
-                            },
-                            {
-                                element: '#tuning-volume',
-                                popover: {
-                                    title: t('tut_vol_title'),
-                                    description: t('tut_vol_desc'),
-                                    side: "top"
-                                }
-                            },
-                            {
-                                element: '#tuning-loudness',
-                                popover: {
-                                    title: t('tut_loudness_title'),
-                                    description: t('tut_loudness_desc'),
-                                    side: "top"
-                                }
-                            },
-                            {
-                                element: '#tuning-pitch',
-                                popover: {
-                                    title: t('tut_pitch_title'),
-                                    description: t('tut_pitch_desc'),
-                                    side: "top"
-                                },
-                                onDeselected: () => { showTuning.value = false; }
-                            },
-                            {
-                                element: '#playback-controls',
-                                popover: {
-                                    title: t('tut_control_title'),
-                                    description: t('tut_control_desc'),
-                                    side: "top"
-                                }
-                            },
-                            {
-                                element: '#btn-share',
-                                popover: {
-                                    title: t('tut_share_title'),
-                                    description: t('tut_share_desc'),
-                                    side: "bottom"
-                                }
-                            },
-                            {
-                                element: '#display-nickname',
-                                popover: {
-                                    title: t('tut_nick_title'),
-                                    description: t('tut_nick_desc'),
-                                    side: "bottom"
-                                }
+                const endTutorial = () => {
+                    showTutorialOverlay.value = false;
+                    localStorage.setItem('ktv_tutorial_completed', 'true');
+                };
+
+                const nextStep = () => {
+                    mockShowBatch.value = false;
+                    if (tutorialStep.value < 7) tutorialStep.value++;
+                };
+
+                const prevStep = () => {
+                    mockShowBatch.value = false;
+                    if (tutorialStep.value > 1) tutorialStep.value--;
+                };
+
+                const mockAction = (action) => {
+                    if (action === 'toggle_play') {
+                        mockPlaying.value = !mockPlaying.value;
+                    } else if (action === 'toggle_vocal') {
+                        if (!mockProcessing.value) {
+                            if (mockVocalRemoved.value) {
+                                mockVocalRemoved.value = false;
+                            } else {
+                                mockProcessing.value = true;
+                                setTimeout(() => {
+                                    mockProcessing.value = false;
+                                    mockVocalRemoved.value = true;
+                                }, 1500);
                             }
-                        ];
-
-                        driverObj = driver({
-                            showProgress: true,
-                            steps: steps,
-                            onDestroyed: () => {
-                                localStorage.setItem('ktv_tutorial_completed', 'true');
-                            },
-                            prevBtnText: '←',
-                            nextBtnText: '→',
-                            doneBtnText: 'Done'
-                        });
-
-                        driverObj.drive();
-                    });
+                        }
+                    } else if (action === 'open_batch') {
+                        mockShowBatch.value = true;
+                    }
                 };
 
                 const restartTutorial = () => {
@@ -1188,7 +1816,11 @@
                     autoProcessKaraoke, toggleAutoProcess, karaokeAvailable,
                     showPlaylistModal, playlistItems, selectedItems, isAllSelected,
                     closePlaylistModal, toggleItem, toggleSelectAll, confirmAddBatch,
-                    getQueueProgressStyle
+                    getQueueProgressStyle,
+                    // Tutorial Exports
+                    showTutorialOverlay, tutorialStep, startTutorial, endTutorial, nextStep, prevStep,
+                    mockPlaying, mockVocalRemoved, mockProcessing, mockVolume, mockPitch,
+                    mockShowBatch, mockAction, mockBatchList, mockBatchSelectedCount, mockBatchAllSelected
                 };
             }
         }).mount('#app');
