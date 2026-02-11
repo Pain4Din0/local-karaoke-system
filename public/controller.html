@@ -1118,7 +1118,8 @@
                         class="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl flex items-center px-3 input-glow">
                         <i class="ri-link text-zinc-500"></i><input v-model="addUrl" type="text"
                             class="bg-transparent w-full p-3 text-sm text-white outline-none placeholder-zinc-600"
-                            :placeholder="t('pasteLink')"></div>
+                            :placeholder="t('pasteLink')">
+                    </div>
                     <button @click="addSong" :disabled="isAdding"
                         class="bg-white text-black w-12 rounded-xl flex items-center justify-center font-bold btn-press disabled:opacity-50"><i
                             v-if="isAdding" class="ri-loader-4-line animate-spin"></i><i v-else
@@ -1305,7 +1306,7 @@
                 tut_nick_title: "Profile",
                 tut_nick_desc: "Tap to rename or restart tutorial",
                 tut_final_title: "You're All Set!",
-                tut_final_desc: "You can now start adding songs and singing!",
+                tut_final_desc: "You can now start adding songs and singing! When you return from the background or lock screen, please remember to refresh the page to sync the status.",
                 back: "Back",
                 next: "Next",
                 mock_player: "PREVIEW PLAYER",
@@ -1377,7 +1378,7 @@
                 tut_nick_title: "个人中心",
                 tut_nick_desc: "点击此处修改昵称或重看教学",
                 tut_final_title: "准备就绪！",
-                tut_final_desc: "您现在可以开始点歌并尽情歌唱了！",
+                tut_final_desc: "您现在可以开始点歌并尽情歌唱了！当您从后台或锁屏回来时，请注意刷新网页以同步状态。",
                 back: "上一步",
                 next: "下一步",
                 mock_player: "演示播放器",
@@ -1449,7 +1450,7 @@
                 tut_nick_title: "プロフィール",
                 tut_nick_desc: "タップして名前変更やチュートリアル再表示",
                 tut_final_title: "準備完了！",
-                tut_final_desc: "曲を追加して歌い始めましょう！",
+                tut_final_desc: "曲を追加して歌い始めましょう！バックグラウンドやロック画面から戻ったときは、状態を同期するために「更新」ボタンをクリックしてください。",
                 back: "戻る",
                 next: "次へ",
                 mock_player: "プレビュー",

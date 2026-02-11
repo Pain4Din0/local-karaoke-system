@@ -45,6 +45,11 @@
         .animate-fill-processing {
             animation: fill-processing 5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
         }
+
+        /* Hide Artplayer Volume Button */
+        .art-control-volume {
+            display: none !important;
+        }
     </style>
 </head>
 
@@ -577,26 +582,67 @@
                 // Video is master clock, audio follows via events
                 // ============================================================
                 const initPlayer = async (videoUrl, audioSrc, karaokeSrc, loudnessGain) => {
-                    // Destroy old player
-                    if (art) {
-                        art.destroy(false);
-                        art = null;
-                    }
-
                     // Load audio buffers first (decode into memory)
                     await audioManager.loadSong(audioSrc, karaokeSrc, loudnessGain);
 
+                    if (art) {
+                        // Reuse existing player to maintain fullscreen status
+                        console.log('[Player] Switching video URL');
+                        await art.switchUrl(videoUrl);
+
+                        // Reset state for new song
+                        isVocalRemovalActive = false;
+
+                        if (hasInteracted.value) {
+                            audioManager.resume();
+                            art.play().catch(() => { });
+                            art.video.muted = true;
+                        }
+
+                        // Ensure heartbeat is running
+                        startHeartbeat();
+
+                        return;
+                    }
+
                     // Create video player
+                    // We set fullscreen: false to disable the default control and add our own
                     art = new Artplayer({
                         container: '#artplayer',
                         url: videoUrl,
                         autoplay: true,
                         volume: 0.8,
-                        muted: true,     // Video always muted - audio from Web Audio
+                        muted: true,
                         isLive: false,
-                        autoSize: true,
-                        fullscreen: true,
+                        autoSize: false,
+                        fullscreen: false,
                         theme: '#ffffff',
+                        controls: [
+                            {
+                                name: 'fullscreen',
+                                index: 100,
+                                position: 'right',
+                                html: '<div class="art-control-icon"><i class="ri-fullscreen-line text-xl"></i></div>',
+                                tooltip: 'Fullscreen',
+                                click: function () {
+                                    if (document.fullscreenElement) {
+                                        document.exitFullscreen();
+                                    } else {
+                                        document.getElementById('app').requestFullscreen();
+                                    }
+                                },
+                                mounted: function ($el) {
+                                    const updateIcon = () => {
+                                        const isFull = !!document.fullscreenElement;
+                                        $el.innerHTML = isFull
+                                            ? '<div class="art-control-icon"><i class="ri-fullscreen-exit-line text-xl"></i></div>'
+                                            : '<div class="art-control-icon"><i class="ri-fullscreen-line text-xl"></i></div>';
+                                    };
+                                    document.addEventListener('fullscreenchange', updateIcon);
+                                    updateIcon();
+                                }
+                            }
+                        ],
                     });
 
                     art.on('video:ended', () => socket.emit('next_song'));
@@ -692,6 +738,13 @@
                             // Karaoke just became ready - load it
                             audioManager.addKaraokeBuffer(newSong.karaokeSrc);
                         }
+                    } else if (newSong && newSong.status !== 'ready') {
+                        // Stop audio if switching to a song that is not ready (downloading/processing)
+                        if (oldSong && oldSong.id !== newSong.id) {
+                            // FULL CLEANUP to prevent resuming
+                            audioManager.cleanup();
+                            if (art) art.pause(); // Also stop the video player
+                        }
                     } else if (!newSong) {
                         // No song playing
                         if (art) {
@@ -714,6 +767,17 @@
                 // CONTROL HANDLER - Responds to controller commands
                 // ============================================================
                 socket.on('exec_control', (action) => {
+                    // Update internal state regardless of player readiness
+                    if (action.type === 'volume') {
+                        currentVolume = action.value;
+                        audioManager.setVolume(action.value);
+                        if (art) art.notice.show = `VOL ${Math.round(action.value * 100)}`;
+                    } else if (action.type === 'loudness_norm') {
+                        isLoudnessNormEnabled = action.value;
+                        audioManager.setLoudnessNorm(action.value);
+                        if (art) art.notice.show = `LOUDNESS ${action.value ? 'ON' : 'OFF'}`;
+                    }
+
                     if (!art) return;
 
                     switch (action.type) {
@@ -728,11 +792,7 @@
                             art.notice.show = `${formatTime(action.value)}`;
                             break;
 
-                        case 'volume':
-                            currentVolume = action.value;
-                            audioManager.setVolume(action.value);
-                            art.notice.show = `VOL ${Math.round(action.value * 100)}`;
-                            break;
+                        // Volume handled above
 
                         case 'seek_fwd':
                             art.forward = 5;
@@ -773,11 +833,7 @@
                             }
                             break;
 
-                        case 'loudness_norm':
-                            isLoudnessNormEnabled = action.value;
-                            audioManager.setLoudnessNorm(action.value);
-                            art.notice.show = `LOUDNESS ${action.value ? 'ON' : 'OFF'}`;
-                            break;
+                        // Loudness handled above
                     }
 
                     // Send immediate tick after control action
