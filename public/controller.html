@@ -1061,8 +1061,10 @@
                             ]">
                         </div>
                         <span class="text-xs font-mono text-zinc-400 uppercase tracking-wider">{{ currentPlaying.status
-                            === 'ready' ? (localPlaying ? 'Playing' : 'Paused') : (currentPlaying.status ===
-                            'downloading' ? 'DOWNLOADING' : (currentPlaying.karaokeProcessing ? 'SEPARATING' : ''))
+                            === 'ready' ? (localPlaying ? t('status_playing') : t('status_paused')) :
+                            (currentPlaying.status ===
+                            'downloading' ? t('status_downloading') : (currentPlaying.karaokeProcessing ?
+                            t('status_separating') : ''))
                             }}</span>
                     </div>
                     <span class="text-xs text-zinc-500 font-medium">{{ currentPlaying.requester }}</span>
@@ -1100,9 +1102,9 @@
                     </div>
                     <!-- Aligned Labels -->
                     <div class="flex text-[10px] text-zinc-600 font-mono tracking-wider gap-0.5">
-                        <span class="w-[50%]">VIDEO</span>
-                        <span class="w-[30%]">AUDIO</span>
-                        <span class="w-[20%]">PROCESSING</span>
+                        <span class="w-[50%]">{{ t('label_video') }}</span>
+                        <span class="w-[30%]">{{ t('label_audio') }}</span>
+                        <span class="w-[20%]">{{ t('label_processing') }}</span>
                     </div>
                 </div>
             </div>
@@ -1126,7 +1128,13 @@
                             class="ri-add-line"></i></button>
                 </div>
                 <div class="space-y-2 pb-8">
-                    <div class="text-xs font-mono text-zinc-500 px-1 uppercase">{{ t('queue') }} ({{ playlist.length }})
+                    <div class="flex items-center justify-between px-1 mb-2">
+                        <div class="text-xs font-mono text-zinc-500 uppercase">{{ t('queue') }} ({{ playlist.length }})
+                        </div>
+                        <button @click="shuffleQueue" :disabled="playlist.length < 2"
+                            class="text-xs flex items-center gap-1 text-zinc-400 border border-zinc-700 px-2 py-1 rounded hover:bg-zinc-800 hover:text-white transition disabled:opacity-30 disabled:cursor-not-allowed active:scale-95">
+                            <i class="ri-shuffle-fill"></i> {{ t('shuffle') }}
+                        </button>
                     </div>
                     <transition-group name="list" tag="div" class="space-y-2">
                         <div v-for="item in playlist" :key="item.id"
@@ -1270,6 +1278,7 @@
                 start_process: "Remove Vocals",
                 auto_process: "Auto-process new songs",
                 auto_process_hint: "Automatically prepare instrumental tracks",
+                shuffle: "Shuffle",
                 loudness_norm: "Loudness Normalization",
                 select_songs: "Select Songs",
                 select_all: "Select All",
@@ -1310,7 +1319,14 @@
                 back: "Back",
                 next: "Next",
                 mock_player: "PREVIEW PLAYER",
-                try_clicking: "(Try clicking the controls)"
+                try_clicking: "(Try clicking the controls)",
+                status_playing: "PLAYING",
+                status_paused: "PAUSED",
+                status_downloading: "DOWNLOADING",
+                status_separating: "SEPARATING",
+                label_video: "VIDEO",
+                label_audio: "AUDIO",
+                label_processing: "PROCESSING"
             },
             zh: {
                 enterName: "输入您的昵称",
@@ -1342,6 +1358,7 @@
                 start_process: "消除人声",
                 auto_process: "自动处理新歌曲",
                 auto_process_hint: "自动为歌曲准备纯伴奏",
+                shuffle: "随机打乱",
                 loudness_norm: "响度均衡",
                 select_songs: "选择歌曲",
                 select_all: "全选",
@@ -1382,7 +1399,14 @@
                 back: "上一步",
                 next: "下一步",
                 mock_player: "演示播放器",
-                try_clicking: "（试着点击控件）"
+                try_clicking: "（试着点击控件）",
+                status_playing: "播放中",
+                status_paused: "已暂停",
+                status_downloading: "下载中",
+                status_separating: "分离中",
+                label_video: "视频",
+                label_audio: "音频",
+                label_processing: "处理"
             },
             ja: {
                 enterName: "ニックネームを入力",
@@ -1414,6 +1438,7 @@
                 start_process: "ボーカル除去",
                 auto_process: "新曲を自動処理",
                 auto_process_hint: "自動的にインストを準備",
+                shuffle: "シャッフル",
                 loudness_norm: "ラウドネス正規化",
                 select_songs: "曲を選択",
                 select_all: "すべて選択",
@@ -1454,7 +1479,14 @@
                 back: "戻る",
                 next: "次へ",
                 mock_player: "プレビュー",
-                try_clicking: "（コントロールをクリックしてみてください）"
+                try_clicking: "（コントロールをクリックしてみてください）",
+                status_playing: "再生中",
+                status_paused: "停止中",
+                status_downloading: "DL中",
+                status_separating: "分離中",
+                label_video: "映像",
+                label_audio: "音声",
+                label_processing: "処理"
             },
         };
 
@@ -1582,6 +1614,7 @@
                 };
 
                 const manageQueue = (action, item) => socket.emit('manage_queue', { action, id: item.id });
+                const shuffleQueue = () => socket.emit('shuffle_queue');
                 const skipSong = () => socket.emit('next_song');
                 const control = (type) => socket.emit('control_action', { type });
                 const resetSystem = () => {
@@ -1805,7 +1838,7 @@
                     playlist, currentPlaying, history, activeTab,
                     addUrl, isAdding,
                     localPlaying, localCurrentTime, localDuration, localVolumeDisplay, isDragging,
-                    addSong, manageQueue, skipSong, control, resetSystem,
+                    addSong, manageQueue, shuffleQueue, skipSong, control, resetSystem,
                     reAddHistory, exportHistory,
                     onSeekInput, onSeekEnd, onVolumeInput, formatTime,
 

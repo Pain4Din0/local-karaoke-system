@@ -61,7 +61,7 @@
             <div class="border border-white/20 hover:bg-white/10 transition-colors rounded-full p-6 mb-4 animate-pulse">
                 <i class="ri-hand-coin-line text-4xl"></i>
             </div>
-            <p class="text-xs tracking-[0.2em] text-gray-500 uppercase">Click to Initialize System</p>
+            <p class="text-xs tracking-[0.2em] text-gray-500 uppercase">{{ t('init_system') }}</p>
         </div>
 
         <div id="artplayer" class="w-full h-full absolute top-0 left-0 z-10"></div>
@@ -97,9 +97,9 @@
                         </div>
                         <!-- Aligned Labels -->
                         <div class="flex text-[10px] text-zinc-500 font-mono tracking-widest uppercase gap-1">
-                            <span class="w-[50%]">Video</span>
-                            <span class="w-[30%]">Audio</span>
-                            <span class="w-[20%]">Processing</span>
+                            <span class="w-[50%]">{{ t('label_video') }}</span>
+                            <span class="w-[30%]">{{ t('label_audio') }}</span>
+                            <span class="w-[20%]">{{ t('label_processing') }}</span>
                         </div>
                     </div>
                     <p class="text-3xl font-light text-white truncate mt-8 opacity-80">{{ currentSong.title }}</p>
@@ -117,7 +117,7 @@
                         <div v-if="networks.length > 1" class="absolute -bottom-10 left-0 w-full text-center">
                             <p
                                 class="text-[10px] uppercase tracking-widest text-zinc-500 group-hover:text-white transition-colors bg-black/50 py-1 rounded">
-                                <i class="ri-arrow-left-right-line align-middle mr-1"></i> Click QR to Switch
+                                <i class="ri-arrow-left-right-line align-middle mr-1"></i> {{ t('click_qr_switch') }}
                             </p>
                             <div class="flex justify-center gap-1.5 mt-2">
                                 <div v-for="(net, idx) in networks" :key="idx"
@@ -129,7 +129,8 @@
 
                     <div class="text-left space-y-8 min-w-[300px]">
                         <div>
-                            <p class="text-xs text-zinc-500 font-mono tracking-widest uppercase mb-2">Current Network
+                            <p class="text-xs text-zinc-500 font-mono tracking-widest uppercase mb-2">{{
+                                t('current_network') }}
                             </p>
                             <div
                                 class="inline-flex items-center gap-2 border border-zinc-800 px-3 py-1 rounded-full bg-zinc-900">
@@ -139,7 +140,8 @@
                         </div>
 
                         <div>
-                            <p class="text-xs text-zinc-500 font-mono tracking-widest uppercase mb-2">Connect via URL
+                            <p class="text-xs text-zinc-500 font-mono tracking-widest uppercase mb-2">{{
+                                t('connect_via') }}
                             </p>
                             <p class="text-4xl font-light text-white tracking-tight break-all cursor-text select-text">
                                 <span class="text-zinc-600">http://</span>{{ currentNetwork.ip }}<span
@@ -150,7 +152,8 @@
                         <div class="pt-4 border-t border-zinc-900">
                             <div class="flex items-center gap-2 text-zinc-500">
                                 <i class="ri-wifi-line"></i>
-                                <span class="text-xs uppercase tracking-wider">Host SSID: {{ systemSSID }}</span>
+                                <span class="text-xs uppercase tracking-wider">{{ t('host_ssid') }}: {{ systemSSID
+                                    }}</span>
                             </div>
                         </div>
                     </div>
@@ -166,8 +169,8 @@
                         currentSong.title }}</h1>
                     <div class="flex items-center gap-3">
                         <span
-                            class="bg-white/20 px-2 py-0.5 text-[10px] font-bold rounded uppercase tracking-wider text-white/90">Requested
-                            By</span>
+                            class="bg-white/20 px-2 py-0.5 text-[10px] font-bold rounded uppercase tracking-wider text-white/90">{{
+                            t('requested_by') }}</span>
                         <span class="text-lg font-light text-gray-200">{{ currentSong.requester }}</span>
                     </div>
                 </div>
@@ -559,8 +562,47 @@
         // Global audio manager instance
         const audioManager = new PrecisionAudioManager();
 
+        const messages = {
+            en: {
+                init_system: "Click to Initialize System",
+                label_video: "Video",
+                label_audio: "Audio",
+                label_processing: "Processing",
+                click_qr_switch: "Click QR to Switch",
+                current_network: "Current Network",
+                connect_via: "Connect via URL",
+                host_ssid: "Host SSID",
+                requested_by: "Requested By"
+            },
+            zh: {
+                init_system: "点击初始化系统",
+                label_video: "视频",
+                label_audio: "音频",
+                label_processing: "处理",
+                click_qr_switch: "点击二维码切换网络",
+                current_network: "当前网络",
+                connect_via: "连接地址",
+                host_ssid: "主机 SSID",
+                requested_by: "点歌人"
+            },
+            ja: {
+                init_system: "クリックしてシステムを初期化",
+                label_video: "映像",
+                label_audio: "音声",
+                label_processing: "処理",
+                click_qr_switch: "QRをクリックして切り替え",
+                current_network: "現在のネットワーク",
+                connect_via: "接続URL",
+                host_ssid: "ホストSSID",
+                requested_by: "リクエスト"
+            }
+        };
+
         createApp({
             setup() {
+                const lang = ref(localStorage.getItem('ktv_lang') || 'zh');
+                const t = (key) => messages[lang.value] ? (messages[lang.value][key] || key) : key;
+
                 const currentSong = ref(null);
                 const showInfo = ref(false);
                 const hasInteracted = ref(false);
@@ -924,7 +966,8 @@
 
                 return {
                     currentSong, isPlayingVideo, showInfo, hasInteracted, startInteraction,
-                    networks, currentNetwork, currentNetIndex, nextNetwork, systemSSID, systemPort
+                    networks, currentNetwork, currentNetIndex, nextNetwork, systemSSID, systemPort,
+                    t
                 };
             }
         }).mount('#app');

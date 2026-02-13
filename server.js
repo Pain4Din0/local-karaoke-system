@@ -772,6 +772,16 @@ io.on('connection', async (socket) => {
         io.emit('sync_state', { playlist, currentPlaying, playerStatus, history, autoProcessKaraoke });
     });
 
+    socket.on('shuffle_queue', () => {
+        // Fisher-Yates shuffle for playlist (waiting list only)
+        for (let i = playlist.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [playlist[i], playlist[j]] = [playlist[j], playlist[i]];
+        }
+        console.log('[Queue] Playlist shuffled');
+        io.emit('sync_state', { playlist, currentPlaying, playerStatus, history, autoProcessKaraoke });
+    });
+
     socket.on('control_action', (action) => {
         if (action.type === 'toggle') playerStatus.playing = !playerStatus.playing;
         if (action.type === 'seek') playerStatus.currentTime = action.value;
