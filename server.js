@@ -19,7 +19,7 @@ let currentPlaying = null;
 let isDownloading = false;
 let playerStatus = { playing: false, currentTime: 0, duration: 0, volume: 0.8, pitch: 0, vocalRemoval: false };
 let autoProcessKaraoke = false; // Global setting: auto-process songs for karaoke
-let karaokeProcessingQueue = []; // Queue of songs waiting to be processed
+// let karaokeProcessingQueue = []; // Removed in favor of dynamic scanning
 let isProcessingKaraoke = false;
 let currentDownloadingId = null; // Track specific song ID for download synchronization
 
@@ -64,10 +64,10 @@ const terminateKaraokeProcess = (songId) => {
         activeKaraokeProcesses.delete(songId);
         cleanupSeparatedFiles(songId);
     }
-    // Also remove from queue if pending
-    const queueIdx = karaokeProcessingQueue.findIndex(s => s && s.id === songId);
+    // Also remove from manual queue if pending
+    const queueIdx = manualKaraokeQueue.findIndex(s => s && s.id === songId);
     if (queueIdx !== -1) {
-        karaokeProcessingQueue.splice(queueIdx, 1);
+        manualKaraokeQueue.splice(queueIdx, 1);
     }
 };
 
@@ -136,6 +136,7 @@ const processVocalSeparation = (song) => {
             cleanupSeparatedFiles(song.id);
         }
         io.emit('sync_state', { playlist, currentPlaying, playerStatus, history, autoProcessKaraoke });
+        isProcessingKaraoke = false; // Reset flag to allow next process
         processNextKaraoke();
     });
 
@@ -145,39 +146,68 @@ const processVocalSeparation = (song) => {
         song.karaokeProgress = 0;
         console.error(`[Karaoke] Spawn error: ${err.message}`);
         cleanupSeparatedFiles(song.id);
+        isProcessingKaraoke = false; // Reset flag to allow next process
         processNextKaraoke();
     });
 };
 
 
+let manualKaraokeQueue = []; // Queue for manually triggered processing (high priority)
+
+// ... existing code ...
+
 const processNextKaraoke = () => {
-    if (karaokeProcessingQueue.length === 0) {
-        isProcessingKaraoke = false;
-        return;
+    if (isProcessingKaraoke) return;
+
+    // 1. Check manual queue first (High Priority)
+    if (manualKaraokeQueue.length > 0) {
+        const nextSong = manualKaraokeQueue.shift();
+        if (nextSong && nextSong.status === 'ready' && !nextSong.karaokeReady && !nextSong.karaokeProcessing) {
+            isProcessingKaraoke = true;
+            processVocalSeparation(nextSong);
+            return;
+        } else {
+            // Invalid entry in manual queue, try next
+            processNextKaraoke();
+            return;
+        }
     }
-    isProcessingKaraoke = true;
-    const nextSong = karaokeProcessingQueue.shift();
-    if (nextSong && nextSong.status === 'ready' && !nextSong.karaokeReady) {
-        processVocalSeparation(nextSong);
-    } else {
-        processNextKaraoke();
+
+    // 2. Check auto-process queue (Playlist Order)
+    if (autoProcessKaraoke) {
+        // Find the first song in playlist (or current) that needs processing
+        // Order: Current Song -> Playlist [0] -> Playlist [1] ...
+        const candidates = [currentPlaying, ...playlist].filter(s => s && s.status === 'ready' && !s.karaokeReady && !s.karaokeProcessing);
+
+        if (candidates.length > 0) {
+            const nextSong = candidates[0];
+            isProcessingKaraoke = true;
+            processVocalSeparation(nextSong);
+            return;
+        }
     }
+
+    // No candidates found
+    isProcessingKaraoke = false;
 };
 
 const queueKaraokeProcessing = (song, prioritize = false) => {
     if (!song || song.karaokeReady || song.karaokeProcessing) return;
-    if (karaokeProcessingQueue.includes(song)) return;
+
     if (prioritize) {
-        karaokeProcessingQueue.unshift(song);
-    } else {
-        karaokeProcessingQueue.push(song);
+        // Add to manual queue if not already there
+        if (!manualKaraokeQueue.find(s => s.id === song.id)) {
+            manualKaraokeQueue.push(song);
+        }
     }
+
+    // Always try to process next (trigger check)
     if (!isProcessingKaraoke) processNextKaraoke();
 };
 
 const queueAllReadySongsForKaraoke = () => {
-    const allSongs = [currentPlaying, ...playlist].filter(s => s && s.status === 'ready' && !s.karaokeReady && !s.karaokeProcessing);
-    allSongs.forEach(song => queueKaraokeProcessing(song));
+    // Just trigger the processor, it will scan the list if autoProcess is on
+    if (!isProcessingKaraoke) processNextKaraoke();
 };
 
 // --- Get all available network interfaces ---
@@ -765,6 +795,7 @@ io.on('connection', async (socket) => {
             if (action === 'top') playlist.unshift(item);
             io.emit('sync_state', { playlist, currentPlaying, playerStatus, history, autoProcessKaraoke });
             processDownloadQueue();
+            if (autoProcessKaraoke && !isProcessingKaraoke) processNextKaraoke();
         }
     });
 
@@ -785,6 +816,7 @@ io.on('connection', async (socket) => {
         }
         console.log('[Queue] Playlist shuffled');
         io.emit('sync_state', { playlist, currentPlaying, playerStatus, history, autoProcessKaraoke });
+        if (autoProcessKaraoke && !isProcessingKaraoke) processNextKaraoke();
     });
 
     socket.on('control_action', (action) => {
