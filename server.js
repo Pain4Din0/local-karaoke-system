@@ -122,7 +122,7 @@ const processVocalSeparation = (song) => {
             if (fs.existsSync(noVocalsPath)) {
                 const karaokePath = path.join(DOWNLOAD_DIR, `${song.id}_karaoke.mp3`);
                 fs.copyFileSync(noVocalsPath, karaokePath);
-                song.karaokeSrc = `/downloads/${song.id}_karaoke.mp3`;
+                song.karaokeSrc = `/downloads/${song.id}_karaoke.mp3?t=${Date.now()}`;
                 song.karaokeReady = true;
                 song.karaokeProgress = 100;
                 console.log(`[Karaoke] Ready: ${song.title}`);
@@ -655,7 +655,8 @@ io.on('connection', async (socket) => {
 
     const networks = getNetworkInterfaces();
     const ssid = await getWifiSSID();
-    socket.emit('system_info', { networks, ssid, port: PORT });
+    const actualPort = server.address() ? server.address().port : PORT;
+    socket.emit('system_info', { networks, ssid, port: actualPort });
 
     // New: Parse URL and return list
     socket.on('parse_url', async (url) => {
@@ -804,7 +805,23 @@ io.on('connection', async (socket) => {
     });
 });
 
-const PORT = 8080;
+const PORT = 0; // Let OS assign a free port
 server.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on port ${PORT}`);
+    const actualPort = server.address().port;
+    console.log(`Server running on port ${actualPort}`);
+
+    // Auto-open browser
+    const url = `http://localhost:${actualPort}/player.html`;
+    console.log(`[System] Opening browser: ${url}`);
+
+    let command;
+    switch (process.platform) {
+        case 'win32': command = `start "" "${url}"`; break;
+        case 'darwin': command = `open "${url}"`; break;
+        default: command = `xdg-open "${url}"`; break;
+    }
+
+    exec(command, (err) => {
+        if (err) console.error(`[System] Failed to open browser: ${err.message}`);
+    });
 });

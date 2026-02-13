@@ -25,3 +25,4 @@ secrets.json
 yt-dlp.exe
 ffmpeg.exe
 ffprobe.exe
+package-lock.json

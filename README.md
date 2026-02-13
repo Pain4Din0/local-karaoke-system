@@ -52,11 +52,11 @@ The system relies on the following core components. Please install them and ensu
 
 ### 2. Connect Interfaces
 -   **Player (Host)**:
-    - The script automatically opens `http://localhost:8080/player.html`. Move this window to your TV or projector.
+    - The script automatically opens `http://localhost:<PORT>/player.html` (Port is randomly assigned). Move this window to your TV or projector.
 -   **Controller (Remote)**:
     1.  Ensure your mobile device is on the **same Wi-Fi network** as the host PC.
-    2.  Locate your PC's local IP address (displayed in the console output).
-    3.  Open `http://<YOUR_LOCAL_IP>:8080/` in your mobile browser.
+    2.  Locate your PC's local IP address and **Port** (displayed in the console output or Player screen).
+    3.  Open `http://<YOUR_LOCAL_IP>:<PORT>/` in your mobile browser.
 
 ## 🍪 Advanced Configuration: Platform Cookies
 

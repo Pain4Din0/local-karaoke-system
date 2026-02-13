@@ -141,9 +141,9 @@
                         <div>
                             <p class="text-xs text-zinc-500 font-mono tracking-widest uppercase mb-2">Connect via URL
                             </p>
-                            <p class="text-3xl font-light text-white tracking-tight break-all cursor-text select-text">
+                            <p class="text-4xl font-light text-white tracking-tight break-all cursor-text select-text">
                                 <span class="text-zinc-600">http://</span>{{ currentNetwork.ip }}<span
-                                    class="text-zinc-600">:{{ systemPort }}</span>
+                                    class="text-blue-400 font-bold">:{{ systemPort }}</span>
                             </p>
                         </div>
 
@@ -227,6 +227,10 @@
 
                 // Crossfade settings
                 this.CROSSFADE_TIME = 0.1;    // 100ms crossfade
+
+                // Active song ID validation
+                this.currentSongId = null;
+                this.isLoadingKaraoke = false;
             }
 
             // Initialize AudioContext and processing chain
@@ -294,13 +298,15 @@
             }
 
             // Load both original and karaoke buffers for a song
-            async loadSong(originalUrl, karaokeUrl, loudnessGain) {
+            async loadSong(originalUrl, karaokeUrl, loudnessGain, songId) {
                 // Increment session ID to invalidate any pending loads from previous songs
                 this.currentSessionId++;
                 const sessionId = this.currentSessionId;
 
                 this.cleanup(false); // Cleanup but don't increment session ID again
 
+                this.currentSongId = songId;
+                this.isLoadingKaraoke = false; // Reset lock on new song
                 this.loudnessAdjustment = loudnessGain || 0;
                 this.isKaraokeMode = false;
 
@@ -334,46 +340,54 @@
             }
 
             // Add karaoke track after it becomes ready (mid-playback)
-            async addKaraokeBuffer(karaokeUrl) {
-                if (this.karaokeBuffer) return; // Already loaded
+            async addKaraokeBuffer(karaokeUrl, songId) {
+                if (songId !== this.currentSongId) {
+                    console.warn('[AudioManager] Ignoring karaoke buffer for wrong song:', songId);
+                    return;
+                }
+                if (this.karaokeBuffer || this.isLoadingKaraoke) return; // Already loaded or loading
                 if (!karaokeUrl) return;
 
+                this.isLoadingKaraoke = true;
                 const sessionId = this.currentSessionId;
-                const buffer = await this.loadBuffer(karaokeUrl);
 
-                if (!buffer || this.currentSessionId !== sessionId) return;
+                try {
+                    const buffer = await this.loadBuffer(karaokeUrl);
 
-                this.karaokeBuffer = buffer;
-                console.log('[AudioManager] Karaoke track added mid-playback');
+                    if (!buffer || this.currentSessionId !== sessionId || this.currentSongId !== songId) return;
 
-                // If currently playing, start the karaoke source immediately synchronized
-                if (this.isPlaying && this.ctx) {
-                    const currentPos = this.getCurrentTime();
+                    // Double-check if loaded while we were waiting
+                    if (this.karaokeBuffer) return;
 
-                    // Create new source
-                    this.karaokeSource = this.ctx.createBufferSource();
-                    this.karaokeSource.buffer = this.karaokeBuffer;
-                    this.karaokeSource.connect(this.karaokeGain);
+                    this.karaokeBuffer = buffer;
+                    console.log('[AudioManager] Karaoke track added mid-playback');
 
-                    // Sync start
-                    // We need to calculate the correct offset in the buffer
-                    // shift = how long we've been playing
-                    // Buffer offset = startOffset + (now - startTime)
+                    // If currently playing, start the karaoke source immediately synchronized
+                    if (this.isPlaying && this.ctx) {
+                        const currentPos = this.getCurrentTime();
 
-                    // However, we just use start(0, currentPos) because currentPos IS the offset
-                    this.karaokeSource.start(0, currentPos);
+                        // Safety check: ensure no existing source
+                        if (this.karaokeSource) {
+                            try { this.karaokeSource.stop(); } catch (e) { }
+                            this.karaokeSource.disconnect();
+                        }
 
-                    console.log('[AudioManager] Karaoke source hot-started at:', currentPos.toFixed(2));
+                        // Create new source
+                        this.karaokeSource = this.ctx.createBufferSource();
+                        this.karaokeSource.buffer = this.karaokeBuffer;
+                        this.karaokeSource.connect(this.karaokeGain);
 
-                    // If we were waiting for vocal removal, apply it now? 
-                    // The UI handles toggling 'vocal_removal' which calls switchMode.
-                    // If the user already enabled vocal removal (and it was waiting), 
-                    // switchMode should have been called or will be called.
-                    // But if isKaraokeMode is ALREADY true (which shouldn't happen if buffer wasn't there), 
-                    // we should ensure gains are correct.
-                    if (this.isKaraokeMode) {
-                        this.switchMode(true);
+                        // Sync start
+                        this.karaokeSource.start(0, currentPos);
+
+                        console.log('[AudioManager] Karaoke source hot-started at:', currentPos.toFixed(2));
+
+                        if (this.isKaraokeMode) {
+                            this.switchMode(true);
+                        }
                     }
+                } finally {
+                    this.isLoadingKaraoke = false;
                 }
             }
 
@@ -629,9 +643,9 @@
                 // PLAYER INITIALIZATION
                 // Video is master clock, audio follows via events
                 // ============================================================
-                const initPlayer = async (videoUrl, audioSrc, karaokeSrc, loudnessGain) => {
+                const initPlayer = async (videoUrl, audioSrc, karaokeSrc, loudnessGain, songId) => {
                     // Load audio buffers first (decode into memory)
-                    await audioManager.loadSong(audioSrc, karaokeSrc, loudnessGain);
+                    await audioManager.loadSong(audioSrc, karaokeSrc, loudnessGain, songId);
 
                     if (art) {
                         // Reuse existing player to maintain fullscreen status
@@ -778,13 +792,14 @@
                                 newSong.src,
                                 newSong.audioSrc,
                                 newSong.karaokeSrc || null,
-                                newSong.loudnessGain
+                                newSong.loudnessGain,
+                                newSong.id
                             );
                             showInfo.value = true;
                             setTimeout(() => showInfo.value = false, 8000);
                         } else if (isSameSong && newSong.karaokeReady && !audioManager.karaokeBuffer && newSong.karaokeSrc) {
                             // Karaoke just became ready - load it
-                            audioManager.addKaraokeBuffer(newSong.karaokeSrc);
+                            audioManager.addKaraokeBuffer(newSong.karaokeSrc, newSong.id);
                         }
                     } else if (newSong && newSong.status !== 'ready') {
                         // Stop audio if switching to a song that is not ready (downloading/processing)

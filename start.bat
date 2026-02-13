@@ -323,7 +323,7 @@ echo [INFO] Starting Server...
 echo [HINT] Allow browser autoplay if asked.
 echo.
 
-start "" cmd /c "timeout /t 2 >nul & start http://localhost:8080/player.html"
+:: Browser launch handled by server.js dynamically
 
 :: Run node server
 %NODE_EXE% server.js
