@@ -162,6 +162,15 @@
             </div>
         </div>
 
+        <Transition name="hud">
+            <div v-if="hud.show" class="absolute top-12 left-1/2 -translate-x-1/2 z-40 pointer-events-none">
+                <div
+                    class="bg-black/60 backdrop-blur-md px-8 py-4 rounded-full border border-white/10 shadow-2xl flex items-center gap-4">
+                    <i :class="hud.icon" class="text-3xl text-white"></i>
+                    <span class="text-2xl font-medium text-white tracking-wide">{{ hud.text }}</span>
+                </div>
+            </div>
+        </Transition>
         <Transition name="song-info">
             <div v-if="isPlayingVideo && showInfo" class="absolute top-8 left-8 max-w-2xl z-30 pointer-events-none">
                 <div class="bg-black/40 backdrop-blur-md rounded-2xl p-6 border border-white/10 shadow-2xl">
@@ -572,7 +581,17 @@
                 current_network: "Current Network",
                 connect_via: "Connect via URL",
                 host_ssid: "Host SSID",
-                requested_by: "Requested By"
+                requested_by: "Requested By",
+                skip: "Skipped",
+                replay: "Replay",
+                paused: "Paused",
+                playing: "Playing",
+                loudness_on: "Loudness On",
+                loudness_off: "Loudness Off",
+                key_change: "Key",
+                karaoke_not_ready: "Karaoke Not Ready",
+                forward: "Forward",
+                rewind: "Rewind"
             },
             zh: {
                 init_system: "点击初始化系统",
@@ -583,7 +602,17 @@
                 current_network: "当前网络",
                 connect_via: "连接地址",
                 host_ssid: "主机 SSID",
-                requested_by: "点歌人"
+                requested_by: "点歌人",
+                skip: "已切歌",
+                replay: "重播",
+                paused: "已暂停",
+                playing: "播放中",
+                loudness_on: "响度均衡 开",
+                loudness_off: "响度均衡 关",
+                key_change: "变调",
+                karaoke_not_ready: "伴奏未就绪",
+                forward: "快进",
+                rewind: "快退"
             },
             ja: {
                 init_system: "クリックしてシステムを初期化",
@@ -594,9 +623,20 @@
                 current_network: "現在のネットワーク",
                 connect_via: "接続URL",
                 host_ssid: "ホストSSID",
-                requested_by: "リクエスト"
+                requested_by: "リクエスト",
+                skip: "スキップ",
+                replay: "もう一度",
+                paused: "一時停止",
+                playing: "再生中",
+                loudness_on: "ラウドネス ON",
+                loudness_off: "ラウドネス OFF",
+                key_change: "キー",
+                karaoke_not_ready: "インスト未準備",
+                forward: "早送り",
+                rewind: "巻き戻し"
             }
         };
+
 
         createApp({
             setup() {
@@ -615,6 +655,17 @@
                 const systemPort = ref('8080');
 
                 const currentNetwork = computed(() => networks.value[currentNetIndex.value] || networks.value[0]);
+
+                const hud = ref({ show: false, icon: '', text: '' });
+                let hudTimeout = null;
+
+                const showHud = (icon, text) => {
+                    hud.value = { show: true, icon, text };
+                    if (hudTimeout) clearTimeout(hudTimeout);
+                    hudTimeout = setTimeout(() => {
+                        hud.value.show = false;
+                    }, 2000);
+                };
 
                 // State variables for UI reporting
                 let currentVolume = 0.8;
@@ -876,11 +927,14 @@
                     if (action.type === 'volume') {
                         currentVolume = action.value;
                         audioManager.setVolume(action.value);
-                        if (art) art.notice.show = `VOL ${Math.round(action.value * 100)}`;
+                        const vol = Math.round(action.value * 100);
+                        showHud(vol === 0 ? 'ri-volume-mute-line' : (vol < 50 ? 'ri-volume-down-line' : 'ri-volume-up-line'), `${vol}%`);
                     } else if (action.type === 'loudness_norm') {
                         isLoudnessNormEnabled = action.value;
                         audioManager.setLoudnessNorm(action.value);
-                        if (art) art.notice.show = `LOUDNESS ${action.value ? 'ON' : 'OFF'}`;
+                        showHud('ri-equalizer-line', action.value ? t('loudness_on') : t('loudness_off'));
+                    } else if (action.type === 'cut') {
+                        showHud('ri-skip-forward-fill', t('skip'));
                     }
 
                     if (!art) return;
@@ -889,12 +943,15 @@
                         case 'toggle':
                             art.toggle();
                             // Audio will follow via play/pause events
+                            // State might not be updated yet, trusting toggle
+                            // FIXED: Show status AFTER toggle (paused means it IS paused)
+                            showHud(art.video.paused ? 'ri-pause-fill' : 'ri-play-fill', art.video.paused ? t('paused') : t('playing'));
                             break;
 
                         case 'seek':
                             // Just set video time - audio follows via 'seeked' event
                             art.currentTime = action.value;
-                            art.notice.show = `${formatTime(action.value)}`;
+                            showHud('ri-movie-line', formatTime(action.value));
                             break;
 
                         // Volume handled above
@@ -902,17 +959,20 @@
                         case 'seek_fwd':
                             art.forward = 5;
                             // Audio follows via 'seeked' event
+                            showHud('ri-forward-5-line', '+5s ' + t('forward'));
                             break;
 
                         case 'seek_rew':
                             art.backward = 5;
                             // Audio follows via 'seeked' event
+                            showHud('ri-replay-5-line', '-5s ' + t('rewind'));
                             break;
 
                         case 'replay':
                             art.currentTime = 0;
                             art.play();
                             // Audio follows via seek + play events
+                            showHud('ri-restart-line', t('replay'));
                             break;
 
                         case 'reload':
@@ -921,20 +981,20 @@
 
                         case 'pitch':
                             audioManager.setPitch(action.value);
-                            art.notice.show = `KEY ${action.value > 0 ? '+' : ''}${action.value}`;
+                            showHud('ri-music-2-line', `${t('key_change')} ${action.value > 0 ? '+' : ''}${action.value}`);
                             break;
 
                         case 'vocal_removal':
                             if (currentSong.value?.karaokeReady && currentSong.value?.karaokeSrc) {
                                 isVocalRemovalActive = action.value;
                                 audioManager.switchMode(action.value);
-                                art.notice.show = `VOCAL ${action.value ? 'OFF' : 'ON'}`;
+                                showHud(action.value ? 'ri-mic-off-line' : 'ri-mic-line', action.value ? t('vocal_off') : t('vocal_on'));
                             } else if (action.value) {
-                                art.notice.show = 'Karaoke not ready';
+                                showHud('ri-error-warning-line', t('karaoke_not_ready'));
                             } else {
                                 isVocalRemovalActive = false;
                                 audioManager.switchMode(false);
-                                art.notice.show = 'VOCAL ON';
+                                showHud('ri-mic-line', t('vocal_on'));
                             }
                             break;
 
@@ -967,7 +1027,7 @@
                 return {
                     currentSong, isPlayingVideo, showInfo, hasInteracted, startInteraction,
                     networks, currentNetwork, currentNetIndex, nextNetwork, systemSSID, systemPort,
-                    t
+                    t, hud
                 };
             }
         }).mount('#app');
@@ -989,6 +1049,25 @@
         .song-info-leave-from {
             opacity: 1;
             transform: translateY(0) scale(1);
+            filter: blur(0);
+        }
+
+        .hud-enter-active,
+        .hud-leave-active {
+            transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .hud-enter-from,
+        .hud-leave-to {
+            opacity: 0;
+            transform: translate(-50%, -20px) scale(0.9);
+            filter: blur(8px);
+        }
+
+        .hud-enter-to,
+        .hud-leave-from {
+            opacity: 1;
+            transform: translate(-50%, 0) scale(1);
             filter: blur(0);
         }
     </style>

@@ -1615,7 +1615,7 @@
 
                 const manageQueue = (action, item) => socket.emit('manage_queue', { action, id: item.id });
                 const shuffleQueue = () => socket.emit('shuffle_queue');
-                const skipSong = () => socket.emit('next_song');
+                const skipSong = () => socket.emit('next_song', { manual: true });
                 const control = (type) => socket.emit('control_action', { type });
                 const resetSystem = () => {
                     if (confirm(t('reset_confirm'))) {

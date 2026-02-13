@@ -751,7 +751,12 @@ io.on('connection', async (socket) => {
         processDownloadQueue();
     });
 
-    socket.on('next_song', promoteNextSong);
+    socket.on('next_song', (data) => {
+        if (data && data.manual) {
+            io.emit('exec_control', { type: 'cut' });
+        }
+        promoteNextSong();
+    });
     socket.on('manage_queue', ({ action, id }) => {
         const index = playlist.findIndex(item => item.id === id);
         if (index !== -1) {
