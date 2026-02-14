@@ -837,6 +837,266 @@
             </div>
         </div>
 
+        <!-- ADVANCED SETTINGS MODAL -->
+        <div v-if="showAdvancedSettings"
+            class="fixed inset-0 z-50 bg-[#09090b]/95 backdrop-blur-md flex flex-col pt-safe pb-safe">
+            <div class="flex-none px-4 py-3 border-b border-zinc-800 flex justify-between items-center bg-zinc-900">
+                <h2 class="font-bold text-lg text-white">{{ t('advanced_settings') }}</h2>
+                <button @click="closeAdvancedSettings"
+                    class="w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-400 hover:text-white">
+                    <i class="ri-close-line"></i>
+                </button>
+            </div>
+            <div class="flex-1 overflow-y-auto p-4 space-y-6 pb-24">
+                <!-- yt-dlp -->
+                <section class="bg-zinc-900/80 rounded-xl border border-zinc-800 p-4">
+                    <h3 class="text-sm font-bold text-zinc-200 uppercase tracking-wider mb-3 flex items-center gap-2">
+                        <i class="ri-download-line"></i> yt-dlp
+                    </h3>
+                    <div class="space-y-3 text-sm">
+                        <div>
+                            <label class="block text-zinc-500 mb-1">Video format</label>
+                            <input v-model="advancedConfig.ytdlp.videoFormat" type="text"
+                                class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white placeholder-zinc-500 outline-none focus:ring-1 focus:ring-zinc-500">
+                        </div>
+                        <div>
+                            <label class="block text-zinc-500 mb-1">Audio format</label>
+                            <input v-model="advancedConfig.ytdlp.audioFormat" type="text"
+                                class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white placeholder-zinc-500 outline-none focus:ring-1 focus:ring-zinc-500">
+                        </div>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-zinc-500 mb-1">Concurrent fragments (-N)</label>
+                                <input v-model.number="advancedConfig.ytdlp.concurrentFragments" type="number" min="1" max="32"
+                                    class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white outline-none focus:ring-1 focus:ring-zinc-500">
+                            </div>
+                            <div>
+                                <label class="block text-zinc-500 mb-1">HTTP chunk size</label>
+                                <input v-model="advancedConfig.ytdlp.httpChunkSize" type="text"
+                                    class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white placeholder-zinc-500 outline-none focus:ring-1 focus:ring-zinc-500">
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-zinc-500 mb-1">Proxy (e.g. socks5://127.0.0.1:1080)</label>
+                            <input v-model="advancedConfig.ytdlp.proxy" type="text"
+                                class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white placeholder-zinc-500 outline-none focus:ring-1 focus:ring-zinc-500">
+                        </div>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-zinc-500 mb-1">Socket timeout (s)</label>
+                                <input v-model.number="advancedConfig.ytdlp.socketTimeout" type="number" min="0"
+                                    class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white outline-none focus:ring-1 focus:ring-zinc-500">
+                            </div>
+                            <div>
+                                <label class="block text-zinc-500 mb-1">Retries</label>
+                                <input v-model.number="advancedConfig.ytdlp.retries" type="number" min="0"
+                                    class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white outline-none focus:ring-1 focus:ring-zinc-500">
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-zinc-500 mb-1">User-Agent</label>
+                            <input v-model="advancedConfig.ytdlp.userAgent" type="text"
+                                class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white placeholder-zinc-500 outline-none focus:ring-1 focus:ring-zinc-500">
+                        </div>
+                        <div>
+                            <label class="block text-zinc-500 mb-1">Extractor args (space-separated)</label>
+                            <input v-model="advancedConfig.ytdlp.extractorArgs" type="text"
+                                class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white placeholder-zinc-500 outline-none focus:ring-1 focus:ring-zinc-500">
+                        </div>
+                        <div>
+                            <label class="block text-zinc-500 mb-1">Postprocessor args (space-separated)</label>
+                            <input v-model="advancedConfig.ytdlp.postprocessorArgs" type="text"
+                                class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white placeholder-zinc-500 outline-none focus:ring-1 focus:ring-zinc-500">
+                        </div>
+                        <div>
+                            <label class="block text-zinc-500 mb-1">Limit rate (e.g. 50K or 4.2M)</label>
+                            <input v-model="advancedConfig.ytdlp.limitRate" type="text"
+                                class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white placeholder-zinc-500 outline-none focus:ring-1 focus:ring-zinc-500">
+                        </div>
+                        <div class="flex flex-wrap gap-4">
+                            <label class="flex items-center gap-2 text-zinc-400 cursor-pointer">
+                                <input type="checkbox" v-model="advancedConfig.ytdlp.noPlaylist"
+                                    class="w-4 h-4 rounded border-zinc-600 bg-zinc-800 accent-blue-500">
+                                No playlist
+                            </label>
+                            <label class="flex items-center gap-2 text-zinc-400 cursor-pointer">
+                                <input type="checkbox" v-model="advancedConfig.ytdlp.noCheckCertificates"
+                                    class="w-4 h-4 rounded border-zinc-600 bg-zinc-800 accent-blue-500">
+                                No check certs
+                            </label>
+                            <label class="flex items-center gap-2 text-zinc-400 cursor-pointer">
+                                <input type="checkbox" v-model="advancedConfig.ytdlp.forceIPv4"
+                                    class="w-4 h-4 rounded border-zinc-600 bg-zinc-800 accent-blue-500">
+                                Force IPv4
+                            </label>
+                            <label class="flex items-center gap-2 text-zinc-400 cursor-pointer">
+                                <input type="checkbox" v-model="advancedConfig.ytdlp.forceIPv6"
+                                    class="w-4 h-4 rounded border-zinc-600 bg-zinc-800 accent-blue-500">
+                                Force IPv6
+                            </label>
+                            <label class="flex items-center gap-2 text-zinc-400 cursor-pointer">
+                                <input type="checkbox" v-model="advancedConfig.ytdlp.noPart"
+                                    class="w-4 h-4 rounded border-zinc-600 bg-zinc-800 accent-blue-500">
+                                No part
+                            </label>
+                            <label class="flex items-center gap-2 text-zinc-400 cursor-pointer">
+                                <input type="checkbox" v-model="advancedConfig.ytdlp.ignoreErrors"
+                                    class="w-4 h-4 rounded border-zinc-600 bg-zinc-800 accent-blue-500">
+                                Ignore errors
+                            </label>
+                            <label class="flex items-center gap-2 text-zinc-400 cursor-pointer">
+                                <input type="checkbox" v-model="advancedConfig.ytdlp.abortOnError"
+                                    class="w-4 h-4 rounded border-zinc-600 bg-zinc-800 accent-blue-500">
+                                Abort on error
+                            </label>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Demucs -->
+                <section class="bg-zinc-900/80 rounded-xl border border-zinc-800 p-4">
+                    <h3 class="text-sm font-bold text-zinc-200 uppercase tracking-wider mb-3 flex items-center gap-2">
+                        <i class="ri-music-2-line"></i> Demucs
+                    </h3>
+                    <div class="space-y-3 text-sm">
+                        <div>
+                            <label class="block text-zinc-500 mb-1">Model (-n)</label>
+                            <select v-model="advancedConfig.demucs.model"
+                                class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white outline-none focus:ring-1 focus:ring-zinc-500">
+                                <option value="htdemucs">htdemucs</option>
+                                <option value="htdemucs_ft">htdemucs_ft</option>
+                                <option value="hdemucs_mmi">hdemucs_mmi</option>
+                                <option value="htdemucs_6s">htdemucs_6s</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-zinc-500 mb-1">Two stems (e.g. vocals)</label>
+                            <input v-model="advancedConfig.demucs.twoStems" type="text"
+                                class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white outline-none focus:ring-1 focus:ring-zinc-500">
+                        </div>
+                        <div class="grid grid-cols-3 gap-3">
+                            <div>
+                                <label class="block text-zinc-500 mb-1">Overlap</label>
+                                <input v-model.number="advancedConfig.demucs.overlap" type="number" step="0.05" min="0"
+                                    class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white outline-none focus:ring-1 focus:ring-zinc-500">
+                            </div>
+                            <div>
+                                <label class="block text-zinc-500 mb-1">Segment</label>
+                                <input v-model.number="advancedConfig.demucs.segment" type="number" step="0.1" min="0"
+                                    class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white outline-none focus:ring-1 focus:ring-zinc-500">
+                            </div>
+                            <div>
+                                <label class="block text-zinc-500 mb-1">Shifts</label>
+                                <input v-model.number="advancedConfig.demucs.shifts" type="number" min="1"
+                                    class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white outline-none focus:ring-1 focus:ring-zinc-500">
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-zinc-500 mb-1">Device (e.g. cuda, cpu)</label>
+                            <input v-model="advancedConfig.demucs.device" type="text"
+                                class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white placeholder-zinc-500 outline-none focus:ring-1 focus:ring-zinc-500">
+                        </div>
+                        <div>
+                            <label class="block text-zinc-500 mb-1">Jobs (0 = auto)</label>
+                            <input v-model.number="advancedConfig.demucs.jobs" type="number" min="0"
+                                class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white outline-none focus:ring-1 focus:ring-zinc-500">
+                        </div>
+                        <div class="flex flex-wrap gap-4">
+                            <label class="flex items-center gap-2 text-zinc-400 cursor-pointer">
+                                <input type="checkbox" v-model="advancedConfig.demucs.overlapOutput"
+                                    class="w-4 h-4 rounded border-zinc-600 bg-zinc-800 accent-blue-500">
+                                Overlap output
+                            </label>
+                            <label class="flex items-center gap-2 text-zinc-400 cursor-pointer">
+                                <input type="checkbox" v-model="advancedConfig.demucs.float32"
+                                    class="w-4 h-4 rounded border-zinc-600 bg-zinc-800 accent-blue-500">
+                                Float32
+                            </label>
+                            <label class="flex items-center gap-2 text-zinc-400 cursor-pointer">
+                                <input type="checkbox" v-model="advancedConfig.demucs.noSegment"
+                                    class="w-4 h-4 rounded border-zinc-600 bg-zinc-800 accent-blue-500">
+                                No segment
+                            </label>
+                        </div>
+                        <div>
+                            <label class="block text-zinc-500 mb-1">Clip mode</label>
+                            <select v-model="advancedConfig.demucs.clipMode"
+                                class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white outline-none focus:ring-1 focus:ring-zinc-500">
+                                <option value="rescale">rescale</option>
+                                <option value="clamp">clamp</option>
+                            </select>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- FFmpeg (Loudness) -->
+                <section class="bg-zinc-900/80 rounded-xl border border-zinc-800 p-4">
+                    <h3 class="text-sm font-bold text-zinc-200 uppercase tracking-wider mb-3 flex items-center gap-2">
+                        <i class="ri-volume-up-line"></i> FFmpeg Loudness
+                    </h3>
+                    <div class="space-y-3 text-sm">
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-zinc-500 mb-1">Target I (LUFS)</label>
+                                <input v-model.number="advancedConfig.ffmpeg.loudnessI" type="number" step="0.5"
+                                    class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white outline-none focus:ring-1 focus:ring-zinc-500">
+                            </div>
+                            <div>
+                                <label class="block text-zinc-500 mb-1">True peak (TP)</label>
+                                <input v-model.number="advancedConfig.ffmpeg.loudnessTP" type="number" step="0.1"
+                                    class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white outline-none focus:ring-1 focus:ring-zinc-500">
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-zinc-500 mb-1">LRA</label>
+                                <input v-model.number="advancedConfig.ffmpeg.loudnessLRA" type="number" step="0.5"
+                                    class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white outline-none focus:ring-1 focus:ring-zinc-500">
+                            </div>
+                            <div>
+                                <label class="block text-zinc-500 mb-1">Gain clamp (±dB)</label>
+                                <input v-model.number="advancedConfig.ffmpeg.loudnessGainClamp" type="number" min="0"
+                                    class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white outline-none focus:ring-1 focus:ring-zinc-500">
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- System -->
+                <section class="bg-zinc-900/80 rounded-xl border border-zinc-800 p-4">
+                    <h3 class="text-sm font-bold text-zinc-200 uppercase tracking-wider mb-3 flex items-center gap-2">
+                        <i class="ri-settings-3-line"></i> System
+                    </h3>
+                    <div class="space-y-3 text-sm">
+                        <div>
+                            <label class="block text-zinc-500 mb-1">Max concurrent downloads (1–5)</label>
+                            <input v-model.number="advancedConfig.system.maxConcurrentDownloads" type="number" min="1" max="5"
+                                class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white outline-none focus:ring-1 focus:ring-zinc-500">
+                        </div>
+                        <div>
+                            <label class="block text-zinc-500 mb-1">Delete file delay (ms) after skip</label>
+                            <input v-model.number="advancedConfig.system.deleteDelayMs" type="number" min="0"
+                                class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white outline-none focus:ring-1 focus:ring-zinc-500">
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Restore defaults -->
+                <div class="flex justify-center pt-2">
+                    <button @click="restoreAdvancedDefaults" type="button"
+                        class="text-sm text-zinc-500 hover:text-amber-400 border border-zinc-700 hover:border-amber-500/50 px-4 py-2 rounded-xl transition-colors">
+                        <i class="ri-restart-line align-middle mr-1"></i> {{ t('restore_defaults') }}
+                    </button>
+                </div>
+            </div>
+            <div class="flex-none p-4 border-t border-zinc-800 bg-zinc-900 flex gap-3">
+                <button @click="closeAdvancedSettings"
+                    class="flex-1 py-3 rounded-xl border border-zinc-700 text-zinc-300 hover:bg-zinc-800">{{ t('cancel') }}</button>
+                <button @click="saveAdvancedSettings"
+                    class="flex-1 py-3 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-500">{{ t('save') }}</button>
+            </div>
+        </div>
+
         <!-- NEW: PLAYLIST SELECTION MODAL -->
         <div v-if="showPlaylistModal"
             class="fixed inset-0 z-50 bg-[#09090b]/95 backdrop-blur-md flex flex-col pt-safe pb-safe animate-fade-in">
@@ -1009,7 +1269,12 @@
         <header class="flex-none bg-zinc-900/80 backdrop-blur border-b border-zinc-800 px-4 py-3 z-10">
             <div class="flex justify-between items-center mb-4">
                 <div class="font-semibold tracking-tight text-zinc-100 flex items-center gap-2">
-                    <i class="ri-equalizer-line"></i> CONTROLLER
+                    <button type="button" @click="openAdvancedSettings" id="btn-advanced-settings"
+                        class="header-btn w-8 h-8 rounded-full flex items-center justify-center text-zinc-400 hover:text-white border border-transparent hover:border-zinc-600"
+                        :title="t('advanced_settings')">
+                        <i class="ri-equalizer-line"></i>
+                    </button>
+                    <span>CONTROLLER</span>
                 </div>
                 <div class="flex items-center gap-3">
                     <button @click="resetSystem"
@@ -1286,6 +1551,9 @@
                 add_selected: "Add Selected",
                 select_songs_first: "Select at least one song",
                 tutorial_restart: "Show Tutorial",
+                advanced_settings: "Advanced Settings",
+                restore_defaults: "Restore default settings",
+                restore_defaults_confirm: "Restore all advanced settings to defaults? Current values will be lost.",
                 // Tutorial Steps
                 tut_start_btn: "Get Started",
                 tut_welcome_title: "Welcome!",
@@ -1366,6 +1634,9 @@
                 add_selected: "添加选中歌曲",
                 select_songs_first: "请至少选择一首歌曲",
                 tutorial_restart: "重新观看教学",
+                advanced_settings: "高级设置",
+                restore_defaults: "恢复默认设置",
+                restore_defaults_confirm: "确定要将所有高级设置恢复为默认值吗？当前设置将丢失。",
                 // Tutorial Steps
                 tut_start_btn: "开始使用",
                 tut_welcome_title: "欢迎！",
@@ -1446,6 +1717,9 @@
                 add_selected: "選択した曲を追加",
                 select_songs_first: "曲を選択してください",
                 tutorial_restart: "チュートリアルを表示",
+                advanced_settings: "詳細設定",
+                restore_defaults: "既定に戻す",
+                restore_defaults_confirm: "すべての詳細設定を既定値に戻しますか？現在の設定は失われます。",
                 // Tutorial Steps
                 tut_start_btn: "始める",
                 tut_welcome_title: "ようこそ！",
@@ -1541,6 +1815,13 @@
 
                 const showShareModal = ref(false);
                 const showPlaylistModal = ref(false);
+                const showAdvancedSettings = ref(false);
+                const advancedConfig = ref({
+                    ytdlp: { videoFormat: 'bestvideo[ext=mp4]/bestvideo', audioFormat: 'bestaudio[ext=m4a]/bestaudio', concurrentFragments: 16, httpChunkSize: '10M', noPlaylist: true, proxy: '', socketTimeout: 0, retries: 10, fragmentRetries: 10, userAgent: '', extractorArgs: '', postprocessorArgs: '', noCheckCertificates: false, limitRate: '', geoBypass: true, addHeader: [], mergeOutputFormat: '', flatPlaylist: true, dumpJson: true, noWarnings: false, ignoreErrors: false, abortOnError: false, noPart: false, restrictFilenames: false, windowsFilenames: false, noOverwrites: false, forceIPv4: false, forceIPv6: false },
+                    demucs: { model: 'htdemucs', twoStems: 'vocals', outputFormat: 'mp3', overlap: 0.25, segment: 7.8, shifts: 1, overlapOutput: false, float32: false, clipMode: 'rescale', noSegment: false, jobs: 0, device: '', repo: '' },
+                    ffmpeg: { loudnessI: -16, loudnessTP: -1.5, loudnessLRA: 11, loudnessGainClamp: 12 },
+                    system: { deleteDelayMs: 20000, maxConcurrentDownloads: 1 }
+                });
                 const playlistItems = ref([]);
                 const selectedItems = ref(new Set()); // using Set for indices
 
@@ -1756,6 +2037,19 @@
                     nextTick(() => generateQR());
                 };
 
+                const openAdvancedSettings = () => {
+                    showAdvancedSettings.value = true;
+                    socket.emit('get_advanced_config');
+                };
+                const closeAdvancedSettings = () => { showAdvancedSettings.value = false; };
+                const saveAdvancedSettings = () => {
+                    socket.emit('set_advanced_config', advancedConfig.value);
+                };
+                const restoreAdvancedDefaults = () => {
+                    if (!confirm(t('restore_defaults_confirm'))) return;
+                    socket.emit('reset_advanced_config');
+                };
+
                 const nextNetwork = () => {
                     if (networks.value.length <= 1) return;
                     currentNetIndex.value = (currentNetIndex.value + 1) % networks.value.length;
@@ -1806,6 +2100,12 @@
                 });
                 socket.on('add_success', () => { isAdding.value = false; addUrl.value = ""; });
                 socket.on('error_msg', (msg) => { alert(msg); isAdding.value = false; });
+                socket.on('advanced_config', (config) => {
+                    if (config && typeof config === 'object') advancedConfig.value = config;
+                });
+                socket.on('advanced_config_saved', () => {
+                    closeAdvancedSettings();
+                });
 
                 // Handle parsing results
                 socket.on('parse_result', (result) => {
@@ -1850,6 +2150,7 @@
                     autoProcessKaraoke, toggleAutoProcess, karaokeAvailable,
                     showPlaylistModal, playlistItems, selectedItems, isAllSelected,
                     closePlaylistModal, toggleItem, toggleSelectAll, confirmAddBatch,
+                    showAdvancedSettings, advancedConfig, openAdvancedSettings, closeAdvancedSettings, saveAdvancedSettings, restoreAdvancedDefaults,
                     getQueueProgressStyle,
                     // Tutorial Exports
                     showTutorialOverlay, tutorialStep, startTutorial, endTutorial, nextStep, prevStep,

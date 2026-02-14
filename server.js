@@ -13,6 +13,128 @@ const io = new Server(server, { cors: { origin: "*" } });
 const DOWNLOAD_DIR = path.join(__dirname, 'downloads');
 if (!fs.existsSync(DOWNLOAD_DIR)) fs.mkdirSync(DOWNLOAD_DIR);
 
+// --- Advanced settings (yt-dlp, demucs, ffmpeg, etc.) ---
+const ADVANCED_CONFIG_PATH = path.join(__dirname, 'advanced-config.json');
+
+const DEFAULT_ADVANCED_CONFIG = {
+    ytdlp: {
+        videoFormat: 'bestvideo[ext=mp4]/bestvideo',
+        audioFormat: 'bestaudio[ext=m4a]/bestaudio',
+        concurrentFragments: 16,
+        httpChunkSize: '10M',
+        noPlaylist: true,
+        proxy: '',
+        socketTimeout: 0,
+        retries: 10,
+        fragmentRetries: 10,
+        userAgent: '',
+        extractorArgs: '',
+        postprocessorArgs: '',
+        noCheckCertificates: false,
+        limitRate: '',
+        geoBypass: true,
+        addHeader: [],
+        mergeOutputFormat: '',
+        flatPlaylist: true,
+        dumpJson: true,
+        noWarnings: false,
+        ignoreErrors: false,
+        abortOnError: false,
+        noPart: false,
+        restrictFilenames: false,
+        windowsFilenames: false,
+        noOverwrites: false,
+        forceIPv4: false,
+        forceIPv6: false,
+    },
+    demucs: {
+        model: 'htdemucs',
+        twoStems: 'vocals',
+        outputFormat: 'mp3',
+        overlap: 0.25,
+        segment: 7.8,
+        shifts: 1,
+        overlapOutput: false,
+        float32: false,
+        clipMode: 'rescale',
+        noSegment: false,
+        jobs: 0,
+        device: '',
+        repo: '',
+    },
+    ffmpeg: {
+        loudnessI: -16,
+        loudnessTP: -1.5,
+        loudnessLRA: 11,
+        loudnessGainClamp: 12,
+    },
+    system: {
+        deleteDelayMs: 20000,
+        maxConcurrentDownloads: 1,
+    },
+};
+
+let advancedConfig = null;
+
+function loadAdvancedConfig() {
+    try {
+        if (fs.existsSync(ADVANCED_CONFIG_PATH)) {
+            const raw = fs.readFileSync(ADVANCED_CONFIG_PATH, 'utf8');
+            const loaded = JSON.parse(raw);
+            advancedConfig = deepMerge({ ...DEFAULT_ADVANCED_CONFIG }, loaded);
+            return advancedConfig;
+        }
+    } catch (e) {
+        console.error('[Config] Failed to load advanced-config.json:', e.message);
+    }
+    advancedConfig = JSON.parse(JSON.stringify(DEFAULT_ADVANCED_CONFIG));
+    return advancedConfig;
+}
+
+function deepMerge(target, source) {
+    if (!source || typeof source !== 'object') return target;
+    for (const key of Object.keys(source)) {
+        if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key]) && source[key] !== null) {
+            if (!target[key] || typeof target[key] !== 'object') target[key] = {};
+            deepMerge(target[key], source[key]);
+        } else if (source[key] !== undefined && source[key] !== null) {
+            target[key] = source[key];
+        }
+    }
+    return target;
+}
+
+function saveAdvancedConfig(config) {
+    try {
+        const toSave = deepMerge(JSON.parse(JSON.stringify(DEFAULT_ADVANCED_CONFIG)), config);
+        fs.writeFileSync(ADVANCED_CONFIG_PATH, JSON.stringify(toSave, null, 2), 'utf8');
+        advancedConfig = toSave;
+        return true;
+    } catch (e) {
+        console.error('[Config] Failed to save advanced-config.json:', e.message);
+        return false;
+    }
+}
+
+function getAdvancedConfig() {
+    if (!advancedConfig) loadAdvancedConfig();
+    return JSON.parse(JSON.stringify(advancedConfig));
+}
+
+function resetAdvancedConfigToDefault() {
+    try {
+        advancedConfig = JSON.parse(JSON.stringify(DEFAULT_ADVANCED_CONFIG));
+        fs.writeFileSync(ADVANCED_CONFIG_PATH, JSON.stringify(advancedConfig, null, 2), 'utf8');
+        console.log('[Config] Restored default advanced settings');
+        return true;
+    } catch (e) {
+        console.error('[Config] Failed to reset advanced config:', e.message);
+        return false;
+    }
+}
+
+loadAdvancedConfig();
+
 let playlist = [];
 let history = [];
 let currentPlaying = null;
@@ -36,9 +158,8 @@ const activeKaraokeProcesses = new Map(); // songId -> { proc, song }
 const activeDownloads = new Map(); // songId -> proc
 
 const cleanupSeparatedFiles = (songId) => {
-    // Cleanup function to remove Demucs-generated files
-    // Demucs creates folder based on input filename without extension (ID_audio)
-    const songSeparatedDir = path.join(SEPARATED_DIR, 'htdemucs', `${songId}_audio`);
+    const modelName = (advancedConfig && advancedConfig.demucs && advancedConfig.demucs.model) ? advancedConfig.demucs.model : 'htdemucs';
+    const songSeparatedDir = path.join(SEPARATED_DIR, modelName, `${songId}_audio`);
     if (fs.existsSync(songSeparatedDir)) {
         try {
             fs.rmSync(songSeparatedDir, { recursive: true, force: true });
@@ -85,13 +206,22 @@ const processVocalSeparation = (song) => {
     console.log(`[Karaoke] Processing audio: ${path.basename(audioPath)}`);
     io.emit('sync_state', { playlist, currentPlaying, playerStatus, history, autoProcessKaraoke });
 
-    const args = [
-        '-n', 'htdemucs',
-        '--two-stems', 'vocals',
-        '--mp3',
-        '-o', SEPARATED_DIR,
-        audioPath
-    ];
+    const dcfg = getAdvancedConfig().demucs;
+    const args = ['-n', dcfg.model || 'htdemucs', '-o', SEPARATED_DIR];
+    if (dcfg.twoStems) args.push('--two-stems', dcfg.twoStems);
+    if (dcfg.outputFormat === 'mp3') args.push('--mp3');
+    else if (dcfg.outputFormat) args.push('--mp3'); // default to mp3 for karaoke
+    if (dcfg.overlap != null && dcfg.overlap !== 0.25) args.push('--overlap', String(dcfg.overlap));
+    if (dcfg.segment != null && dcfg.segment !== 7.8) args.push('--segment', String(dcfg.segment));
+    if (dcfg.shifts != null && dcfg.shifts !== 1) args.push('--shifts', String(dcfg.shifts));
+    if (dcfg.overlapOutput) args.push('--overlap-output');
+    if (dcfg.float32) args.push('--float32');
+    if (dcfg.clipMode) args.push('--clip-mode', dcfg.clipMode);
+    if (dcfg.noSegment) args.push('--no-segment');
+    if (dcfg.jobs) args.push('--jobs', String(dcfg.jobs));
+    if (dcfg.device) args.push('--device', dcfg.device);
+    if (dcfg.repo) args.push('--repo', dcfg.repo);
+    args.push(audioPath);
 
     // Use python -m demucs to ensure it works with portable Python
     const proc = spawn(PYTHON_EXE, ['-m', 'demucs', ...args], { shell: true });
@@ -116,8 +246,8 @@ const processVocalSeparation = (song) => {
         song.karaokeProcessing = false;
 
         if (code === 0) {
-            // Demucs creates folder based on input filename without extension (e.g., ID_audio)
-            const noVocalsPath = path.join(SEPARATED_DIR, 'htdemucs', `${song.id}_audio`, 'no_vocals.mp3');
+            const modelName = (getAdvancedConfig().demucs || {}).model || 'htdemucs';
+            const noVocalsPath = path.join(SEPARATED_DIR, modelName, `${song.id}_audio`, 'no_vocals.mp3');
             if (fs.existsSync(noVocalsPath)) {
                 const karaokePath = path.join(DOWNLOAD_DIR, `${song.id}_karaoke.mp3`);
                 fs.copyFileSync(noVocalsPath, karaokePath);
@@ -248,13 +378,18 @@ app.use(express.json());
 app.use('/downloads', express.static(DOWNLOAD_DIR));
 
 const processDownloadQueue = () => {
-    if (isDownloading) return;
-    if (currentPlaying && currentPlaying.status === 'pending') {
-        startDownload(currentPlaying);
-        return;
+    const maxConcurrent = Math.max(1, Math.min(5, (getAdvancedConfig().system || {}).maxConcurrentDownloads || 1));
+    const activeCount = activeDownloads.size;
+    if (activeCount >= maxConcurrent) return;
+
+    const pending = [];
+    if (currentPlaying && currentPlaying.status === 'pending') pending.push(currentPlaying);
+    playlist.forEach(s => { if (s && s.status === 'pending') pending.push(s); });
+    for (const song of pending) {
+        if (activeDownloads.has(song.id)) continue;
+        if (activeDownloads.size >= maxConcurrent) break;
+        startDownload(song);
     }
-    const targetSong = playlist.find(s => s.status === 'pending');
-    if (targetSong) startDownload(targetSong);
 };
 
 const getCookiesPath = (url) => {
@@ -270,8 +405,12 @@ const getCookiesPath = (url) => {
 };
 
 const startDownload = (song) => {
-    isDownloading = true;
-    currentDownloadingId = song.id;
+    if (activeDownloads.has(song.id)) return;
+    const isCurrent = currentPlaying && currentPlaying.id === song.id;
+    if (isCurrent) {
+        isDownloading = true;
+        currentDownloadingId = song.id;
+    }
     song.status = 'downloading';
     song.progress = 0;
     io.emit('sync_state', { playlist, currentPlaying, playerStatus, history });
@@ -285,18 +424,37 @@ const startDownload = (song) => {
     const audioPath = path.join(DOWNLOAD_DIR, audioFilename);
 
     const cookies = getCookiesPath(song.originalUrl);
+    const cfg = getAdvancedConfig().ytdlp;
 
     // Step 1: Download video-only (no audio)
-    const videoArgs = [
-        '-f', 'bestvideo[ext=mp4]/bestvideo',
-        '-o', videoPath,
-        '--no-playlist',
-        '-N', '16', '--http-chunk-size', '10M'
-    ];
+    const videoArgs = ['-f', cfg.videoFormat || 'bestvideo[ext=mp4]/bestvideo', '-o', videoPath];
+    if (cfg.noPlaylist !== false) videoArgs.push('--no-playlist');
+    if (cfg.concurrentFragments) videoArgs.push('-N', String(cfg.concurrentFragments));
+    if (cfg.httpChunkSize) videoArgs.push('--http-chunk-size', cfg.httpChunkSize);
+    if (cfg.proxy) videoArgs.push('--proxy', cfg.proxy);
+    if (cfg.socketTimeout) videoArgs.push('--socket-timeout', String(cfg.socketTimeout));
+    if (cfg.retries) videoArgs.push('--retries', String(cfg.retries));
+    if (cfg.fragmentRetries) videoArgs.push('--fragment-retries', String(cfg.fragmentRetries));
+    if (cfg.userAgent) videoArgs.push('--user-agent', cfg.userAgent);
+    if (cfg.noCheckCertificates) videoArgs.push('--no-check-certificates');
+    if (cfg.limitRate) videoArgs.push('--limit-rate', cfg.limitRate);
+    if (cfg.forceIPv4) videoArgs.push('--force-ipv4');
+    if (cfg.forceIPv6) videoArgs.push('--force-ipv6');
+    if (cfg.noPart) videoArgs.push('--no-part');
+    if (cfg.restrictFilenames) videoArgs.push('--restrict-filenames');
+    if (cfg.windowsFilenames) videoArgs.push('--windows-filenames');
+    if (cfg.noOverwrites) videoArgs.push('--no-overwrites');
+    if (cfg.ignoreErrors) videoArgs.push('--ignore-errors');
+    if (cfg.abortOnError) videoArgs.push('--abort-on-error');
+    if (cfg.noWarnings) videoArgs.push('--no-warnings');
+    if (Array.isArray(cfg.addHeader) && cfg.addHeader.length) cfg.addHeader.forEach(h => { videoArgs.push('--add-header', h); });
+    if (cfg.extractorArgs) { cfg.extractorArgs.split(/\s+/).filter(Boolean).forEach(a => videoArgs.push(a)); }
+    if (cfg.postprocessorArgs) { cfg.postprocessorArgs.split(/\s+/).filter(Boolean).forEach(a => videoArgs.push(a)); }
     if (cookies) videoArgs.push('--cookies', cookies);
     videoArgs.push(song.originalUrl);
 
-    const videoProcess = spawn('yt-dlp.exe', videoArgs);
+    const ytDlpExe = fs.existsSync(path.join(__dirname, 'yt-dlp.exe')) ? path.join(__dirname, 'yt-dlp.exe') : 'yt-dlp';
+    const videoProcess = spawn(ytDlpExe, videoArgs);
     activeDownloads.set(song.id, videoProcess);
 
     videoProcess.stdout.on('data', (data) => {
@@ -319,16 +477,28 @@ const startDownload = (song) => {
         console.log(`[System] Video downloaded: ${videoFilename}`);
 
         // Step 2: Download audio-only
-        const audioArgs = [
-            '-f', 'bestaudio[ext=m4a]/bestaudio',
-            '-o', audioPath,
-            '--no-playlist',
-            '-N', '16'
-        ];
+        const audioArgs = ['-f', cfg.audioFormat || 'bestaudio[ext=m4a]/bestaudio', '-o', audioPath];
+        if (cfg.noPlaylist !== false) audioArgs.push('--no-playlist');
+        if (cfg.concurrentFragments) audioArgs.push('-N', String(cfg.concurrentFragments));
+        if (cfg.proxy) audioArgs.push('--proxy', cfg.proxy);
+        if (cfg.socketTimeout) audioArgs.push('--socket-timeout', String(cfg.socketTimeout));
+        if (cfg.retries) audioArgs.push('--retries', String(cfg.retries));
+        if (cfg.userAgent) audioArgs.push('--user-agent', cfg.userAgent);
+        if (cfg.noCheckCertificates) audioArgs.push('--no-check-certificates');
+        if (cfg.limitRate) audioArgs.push('--limit-rate', cfg.limitRate);
+        if (cfg.forceIPv4) audioArgs.push('--force-ipv4');
+        if (cfg.forceIPv6) audioArgs.push('--force-ipv6');
+        if (cfg.noPart) audioArgs.push('--no-part');
+        if (cfg.restrictFilenames) audioArgs.push('--restrict-filenames');
+        if (cfg.windowsFilenames) audioArgs.push('--windows-filenames');
+        if (cfg.noOverwrites) audioArgs.push('--no-overwrites');
+        if (Array.isArray(cfg.addHeader) && cfg.addHeader.length) cfg.addHeader.forEach(h => { audioArgs.push('--add-header', h); });
+        if (cfg.extractorArgs) { cfg.extractorArgs.split(/\s+/).filter(Boolean).forEach(a => audioArgs.push(a)); }
+        if (cfg.postprocessorArgs) { cfg.postprocessorArgs.split(/\s+/).filter(Boolean).forEach(a => audioArgs.push(a)); }
         if (cookies) audioArgs.push('--cookies', cookies);
         audioArgs.push(song.originalUrl);
 
-        const audioProcess = spawn('yt-dlp.exe', audioArgs);
+        const audioProcess = spawn(ytDlpExe, audioArgs);
         activeDownloads.set(song.id, audioProcess);
 
         audioProcess.stdout.on('data', (data) => {
@@ -362,28 +532,23 @@ const startDownload = (song) => {
                 if (currentDownloadingId === song.id) {
                     currentDownloadingId = null;
                     isDownloading = false;
-
-                    console.log(`[System] Ready: ${song.title} (Loudness Gain: ${loudnessGain.toFixed(2)} dB)`);
-                    song.status = 'ready';
-                    song.progress = 100;
-
-                    // New path structure
-                    song.src = `/downloads/${videoFilename}`;
-                    song.audioSrc = `/downloads/${audioFilename}`;
-                    song.localVideoPath = videoPath;
-                    song.localAudioPath = audioPath;
-                    song.loudnessGain = loudnessGain; // dB adjustment for normalization
-                    song.karaokeReady = false;
-                    song.karaokeSrc = null;
-
-                    if (autoProcessKaraoke) {
-                        queueKaraokeProcessing(song);
-                    }
-
-                    playerStatus.playing = true;
-                    io.emit('sync_state', { playlist, currentPlaying, playerStatus, history, autoProcessKaraoke });
-                    processDownloadQueue();
                 }
+
+                console.log(`[System] Ready: ${song.title} (Loudness Gain: ${loudnessGain.toFixed(2)} dB)`);
+                song.status = 'ready';
+                song.progress = 100;
+                song.src = `/downloads/${videoFilename}`;
+                song.audioSrc = `/downloads/${audioFilename}`;
+                song.localVideoPath = videoPath;
+                song.localAudioPath = audioPath;
+                song.loudnessGain = loudnessGain;
+                song.karaokeReady = false;
+                song.karaokeSrc = null;
+
+                if (autoProcessKaraoke) queueKaraokeProcessing(song);
+                if (currentPlaying && currentPlaying.id === song.id) playerStatus.playing = true;
+                io.emit('sync_state', { playlist, currentPlaying, playerStatus, history, autoProcessKaraoke });
+                processDownloadQueue();
             });
         });
 
@@ -411,11 +576,15 @@ const handleDownloadError = (song, message) => {
 };
 
 // Analyze audio loudness using FFmpeg loudnorm filter
-// Returns gain adjustment in dB to normalize to -16 LUFS
 const analyzeLoudness = (audioPath, callback) => {
+    const fcfg = getAdvancedConfig().ffmpeg || {};
+    const I = fcfg.loudnessI != null ? fcfg.loudnessI : -16;
+    const TP = fcfg.loudnessTP != null ? fcfg.loudnessTP : -1.5;
+    const LRA = fcfg.loudnessLRA != null ? fcfg.loudnessLRA : 11;
+    const clamp = Math.max(0, fcfg.loudnessGainClamp != null ? fcfg.loudnessGainClamp : 12);
     const ffmpegArgs = [
         '-i', audioPath,
-        '-af', 'loudnorm=I=-16:TP=-1.5:LRA=11:print_format=json',
+        '-af', `loudnorm=I=${I}:TP=${TP}:LRA=${LRA}:print_format=json`,
         '-f', 'null',
         '-'
     ];
@@ -441,9 +610,9 @@ const analyzeLoudness = (audioPath, callback) => {
             if (jsonMatch) {
                 const loudnessData = JSON.parse(jsonMatch[0]);
                 const inputLUFS = parseFloat(loudnessData.input_i);
-                const targetLUFS = -16;
+                const targetLUFS = I;
                 const gain = targetLUFS - inputLUFS;
-                const clampedGain = Math.max(-12, Math.min(12, gain));
+                const clampedGain = Math.max(-clamp, Math.min(clamp, gain));
                 console.log(`[Loudness] Input: ${inputLUFS.toFixed(1)} LUFS, Gain: ${clampedGain.toFixed(2)} dB`);
                 callback(clampedGain);
             } else {
@@ -581,14 +750,22 @@ const fetchUrlInfo = (url) => {
     });
 };
 
-// Helper function to run yt-dlp logic
+// Helper function to run yt-dlp logic (parse URL / playlist)
 const runYtDlp = (url, resolve) => {
-    const args = ['--flat-playlist', '--dump-json', '--no-playlist'];
+    const cfg = getAdvancedConfig().ytdlp;
+    const args = [];
+    if (cfg.flatPlaylist !== false) args.push('--flat-playlist');
+    if (cfg.dumpJson !== false) args.push('--dump-json');
+    if (cfg.noPlaylist !== false) args.push('--no-playlist');
+    if (cfg.proxy) args.push('--proxy', cfg.proxy);
+    if (cfg.socketTimeout) args.push('--socket-timeout', String(cfg.socketTimeout));
+    if (cfg.userAgent) args.push('--user-agent', cfg.userAgent);
+    if (cfg.noCheckCertificates) args.push('--no-check-certificates');
+    if (cfg.noWarnings) args.push('--no-warnings');
     const cookies = getCookiesPath(url);
     if (cookies) args.push('--cookies', cookies);
     args.push(url);
 
-    // Ensure we use the local yt-dlp.exe if available
     const ytDlpExe = fs.existsSync(path.join(__dirname, 'yt-dlp.exe')) ? path.join(__dirname, 'yt-dlp.exe') : 'yt-dlp';
     const child = spawn(ytDlpExe, args);
     let output = '';
@@ -660,7 +837,8 @@ const promoteNextSong = () => {
         history.unshift(historyItem);
         if (history.length > 50) history.pop();
         const fileToDelete = { ...currentPlaying };
-        setTimeout(() => deleteSongFile(fileToDelete), 20000); // Increased delay
+        const delayMs = (getAdvancedConfig().system || {}).deleteDelayMs ?? 20000;
+        setTimeout(() => deleteSongFile(fileToDelete), delayMs);
     }
 
     if (playlist.length > 0) {
@@ -795,6 +973,32 @@ io.on('connection', async (socket) => {
             io.emit('sync_state', { playlist, currentPlaying, playerStatus, history, autoProcessKaraoke });
             processDownloadQueue();
             if (autoProcessKaraoke && !isProcessingKaraoke) processNextKaraoke();
+        }
+    });
+
+    socket.on('get_advanced_config', () => {
+        socket.emit('advanced_config', getAdvancedConfig());
+    });
+
+    socket.on('set_advanced_config', (config) => {
+        if (config && typeof config === 'object') {
+            const ok = saveAdvancedConfig(config);
+            if (ok) {
+                socket.emit('advanced_config', getAdvancedConfig());
+                socket.emit('advanced_config_saved');
+            } else {
+                socket.emit('error_msg', 'Failed to save advanced config');
+            }
+        }
+    });
+
+    socket.on('reset_advanced_config', () => {
+        const ok = resetAdvancedConfigToDefault();
+        if (ok) {
+            socket.emit('advanced_config', getAdvancedConfig());
+            socket.emit('advanced_config_saved');
+        } else {
+            socket.emit('error_msg', 'Failed to restore default settings');
         }
     });
 
