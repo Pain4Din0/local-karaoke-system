@@ -89,7 +89,6 @@ const processVocalSeparation = (song) => {
         '-n', 'htdemucs',
         '--two-stems', 'vocals',
         '--mp3',
-        '-d', 'cpu',
         '-o', SEPARATED_DIR,
         audioPath
     ];
