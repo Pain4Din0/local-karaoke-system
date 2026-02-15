@@ -1,0 +1,72 @@
+body {
+    font-family: 'Inter', 'Noto Sans SC', 'Noto Sans JP', sans-serif;
+}
+
+
+.fade-enter-active,
+.fade-leave-active {
+    transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+    opacity: 0;
+}
+
+/* Progress Bar Animation */
+@keyframes fill-processing {
+    0% {
+        width: 0%;
+    }
+
+    100% {
+        width: 95%;
+    }
+}
+
+.animate-fill-processing {
+    animation: fill-processing 5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+/* Hide Artplayer Volume Button */
+.art-control-volume {
+    display: none !important;
+}
+
+.song-info-enter-active,
+.song-info-leave-active {
+    transition: all 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.song-info-enter-from,
+.song-info-leave-to {
+    opacity: 0;
+    transform: translateY(-20px) scale(0.95);
+    filter: blur(10px);
+}
+
+.song-info-enter-to,
+.song-info-leave-from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+}
+
+.hud-enter-active,
+.hud-leave-active {
+    transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.hud-enter-from,
+.hud-leave-to {
+    opacity: 0;
+    transform: translate(-50%, -20px) scale(0.9);
+    filter: blur(8px);
+}
+
+.hud-enter-to,
+.hud-leave-from {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+    filter: blur(0);
+}
