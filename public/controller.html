@@ -202,7 +202,7 @@
                         <div class="flex items-center gap-4 bg-zinc-900 p-3 rounded-xl border border-zinc-800">
                             <div class="w-3 h-3 rounded-full bg-blue-500 animate-pulse"></div>
                             <div>
-                                <div class="text-sm font-bold text-blue-400">{{ t('status_downloading') }}</div>
+                                <div class="text-sm font-bold text-blue-400">{{ t('tut_status_downloading') }}</div>
                                 <div class="text-xs text-zinc-500">{{ t('status_downloading_desc') }}</div>
                             </div>
                         </div>
@@ -512,7 +512,8 @@
                         <div class="grid grid-cols-2 gap-3">
                             <div>
                                 <label class="block text-zinc-500 mb-1">Concurrent fragments (-N)</label>
-                                <input v-model.number="advancedConfig.ytdlp.concurrentFragments" type="number" min="1" max="32"
+                                <input v-model.number="advancedConfig.ytdlp.concurrentFragments" type="number" min="1"
+                                    max="32"
                                     class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white outline-none focus:ring-1 focus:ring-zinc-500">
                             </div>
                             <div>
@@ -715,7 +716,8 @@
                     <div class="space-y-3 text-sm">
                         <div>
                             <label class="block text-zinc-500 mb-1">Max concurrent downloads (1–5)</label>
-                            <input v-model.number="advancedConfig.system.maxConcurrentDownloads" type="number" min="1" max="5"
+                            <input v-model.number="advancedConfig.system.maxConcurrentDownloads" type="number" min="1"
+                                max="5"
                                 class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white outline-none focus:ring-1 focus:ring-zinc-500">
                         </div>
                         <div>
@@ -736,9 +738,11 @@
             </div>
             <div class="flex-none p-4 border-t border-zinc-800 bg-zinc-900 flex gap-3">
                 <button @click="closeAdvancedSettings"
-                    class="flex-1 py-3 rounded-xl border border-zinc-700 text-zinc-300 hover:bg-zinc-800">{{ t('cancel') }}</button>
+                    class="flex-1 py-3 rounded-xl border border-zinc-700 text-zinc-300 hover:bg-zinc-800">{{ t('cancel')
+                    }}</button>
                 <button @click="saveAdvancedSettings"
-                    class="flex-1 py-3 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-500">{{ t('save') }}</button>
+                    class="flex-1 py-3 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-500">{{ t('save')
+                    }}</button>
             </div>
         </div>
 
