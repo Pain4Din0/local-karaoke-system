@@ -7,12 +7,62 @@ const { getCookiesPath } = require('./system');
 
 const ROOT_DIR = path.join(__dirname, '../../');
 
-const runYtDlp = (url, resolve) => {
+const isYouTubeLikeUrl = (url) => /(^https?:\/\/)?(www\.)?(youtube\.com|youtu\.be|music\.youtube\.com)\b/i.test(url);
+
+const isPlaylistLikeUrl = (url) => {
+    try {
+        const parsed = new URL(url);
+        const host = parsed.hostname.toLowerCase();
+        const pathname = parsed.pathname.toLowerCase();
+        const listId = parsed.searchParams.get('list');
+
+        if (host === 'music.youtube.com') {
+            if (pathname.startsWith('/playlist') || pathname.startsWith('/browse')) return true;
+            if (listId && listId.trim()) return true;
+        }
+
+        if (host.endsWith('youtube.com') || host === 'youtu.be') {
+            if (pathname.startsWith('/playlist')) return true;
+            if (listId && listId.trim()) return true;
+        }
+
+        if (host.endsWith('bilibili.com')) {
+            if (pathname.includes('/favlist')) return true;
+            if (pathname.includes('/list/')) return true;
+            if (pathname.includes('/medialist/')) return true;
+            if (parsed.searchParams.get('fid')) return true;
+        }
+    } catch (e) {
+        return /[?&]list=|music\.youtube\.com\/(playlist|browse)|bilibili\.com\/.*(favlist|list|medialist)/i.test(url);
+    }
+
+    return false;
+};
+
+const buildOriginalUrl = (data, sourceUrl) => {
+    let itemUrl = data.url || data.webpage_url || data.original_url;
+    if (!itemUrl && data.id) {
+        if (data.ie_key === 'Youtube' || data.ie_key === 'YoutubeTab' || !data.ie_key || isYouTubeLikeUrl(sourceUrl)) {
+            itemUrl = `https://www.youtube.com/watch?v=${data.id}`;
+        } else if (data.ie_key === 'BiliBili') {
+            itemUrl = `https://www.bilibili.com/video/${data.id}`;
+        } else {
+            itemUrl = sourceUrl;
+        }
+    }
+    if (typeof itemUrl === 'string' && !/^https?:\/\//i.test(itemUrl) && data.id && isYouTubeLikeUrl(sourceUrl)) {
+        itemUrl = `https://www.youtube.com/watch?v=${data.id}`;
+    }
+    return itemUrl || sourceUrl;
+};
+
+const runYtDlp = (url, resolve, options = {}) => {
     const cfg = getAdvancedConfig().ytdlp;
     const args = [];
+    const playlistMode = options.playlistMode === true;
     if (cfg.flatPlaylist !== false) args.push('--flat-playlist');
     if (cfg.dumpJson !== false) args.push('--dump-json');
-    if (cfg.noPlaylist !== false) args.push('--no-playlist');
+    if (!playlistMode && cfg.noPlaylist !== false) args.push('--no-playlist');
     if (cfg.proxy) args.push('--proxy', cfg.proxy);
     if (cfg.socketTimeout) args.push('--socket-timeout', String(cfg.socketTimeout));
     if (cfg.userAgent) args.push('--user-agent', cfg.userAgent);
@@ -42,20 +92,6 @@ const runYtDlp = (url, resolve) => {
                 }
 
                 const formattedItems = items.map(data => {
-                    // Construct a usable URL
-                    let itemUrl = data.url || data.webpage_url;
-                    if (!itemUrl && data.id) {
-                        // Heuristic for YouTube IDs if url is missing/just ID
-                        if (data.ie_key === 'Youtube' || !data.ie_key) {
-                            itemUrl = `https://www.youtube.com/watch?v=${data.id}`;
-                        } else if (data.ie_key === 'BiliBili') {
-                            itemUrl = `https://www.bilibili.com/video/${data.id}`;
-                        } else {
-                            itemUrl = url; // Fallback to provided URL (might be wrong for playlists)
-                        }
-                    }
-
-                    // Handle Bilibili specific fields or missing titles
                     let title = data.title;
                     if (!title && data.id) title = `Video ${data.id}`;
 
@@ -63,7 +99,7 @@ const runYtDlp = (url, resolve) => {
                         title: title || 'Unknown Title',
                         uploader: data.uploader || data.uploader_id || 'Unknown',
                         pic: null, // Thumbnails disabled per user request
-                        originalUrl: itemUrl || url
+                        originalUrl: buildOriginalUrl(data, url)
                     };
                 });
 
@@ -89,6 +125,8 @@ const runYtDlp = (url, resolve) => {
 
 const fetchUrlInfo = (url) => {
     return new Promise((resolve) => {
+        const playlistMode = isPlaylistLikeUrl(url);
+
         // 1. Try Bilibili Favorites API first
         const biliFavMatch = url.match(/space\.bilibili\.com\/\d+\/favlist\?.*fid=(\d+)/);
         if (biliFavMatch) {
@@ -146,13 +184,13 @@ const fetchUrlInfo = (url) => {
                 }
 
                 // Fallback to yt-dlp if API fails or returns empty
-                runYtDlp(url, resolve);
+                runYtDlp(url, resolve, { playlistMode });
             })();
             return; // Early return to prevent running yt-dlp immediately
         }
 
         // 2. Default yt-dlp logic for all other URLs or if Bilibili API failed
-        runYtDlp(url, resolve);
+        runYtDlp(url, resolve, { playlistMode });
     });
 };
 

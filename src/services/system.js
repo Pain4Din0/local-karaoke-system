@@ -46,7 +46,7 @@ const getCookiesPath = (url) => {
         const p = path.join(ROOT_DIR, 'cookies_bilibili.txt');
         return fs.existsSync(p) ? p : null;
     }
-    if (url.includes('youtube.com') || url.includes('youtu.be')) {
+    if (url.includes('youtube.com') || url.includes('youtu.be') || url.includes('music.youtube.com')) {
         const p = path.join(ROOT_DIR, 'cookies_youtube.txt');
         return fs.existsSync(p) ? p : null;
     }

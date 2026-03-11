@@ -1,12 +1,12 @@
 # Local Karaoke System
 
-A robust, locally hosted karaoke solution that enables seamless queuing and playback of content from YouTube, Bilibili, and other supported platforms using `yt-dlp`. Designed for home entertainment and social gatherings, it features a dual-interface architecture with a dedicated **Player** for large screens and a mobile-optimized **Controller** for remote management.
+A robust, locally hosted karaoke solution that enables seamless queuing and playback of content from YouTube, YouTube Music, Bilibili, and other supported platforms using `yt-dlp`. Designed for home entertainment and social gatherings, it features a dual-interface architecture with a dedicated **Player** for large screens and a mobile-optimized **Controller** for remote management.
 
 > **Disclaimer**: The code for this project was written almost entirely by LLMs (including this sentence). I only performed prompt engineering and minor detail adjustments. Please perform full testing before use.
 
 ## ✨ Features
 
-- **Universal Content Support**: Queue songs directly via URL from YouTube, Bilibili, and any platform supported by `yt-dlp`.
+- **Universal Content Support**: Queue songs directly via URL from YouTube, YouTube Music, Bilibili, and any platform supported by `yt-dlp`.
 - **Pro Audio Experience**:
   - **AI Vocal Removal**: Real-time source separation using [Demucs](https://github.com/facebookresearch/demucs).
   - **Pitch Shifting (Beta)**: Adjust key in real-time to match your vocal range.
@@ -14,7 +14,7 @@ A robust, locally hosted karaoke solution that enables seamless queuing and play
   - **Loudness Normalization**: Consistent volume levels across different sources.
 - **Interactive UX**:
   - **Smart Controller**: Mobile-first interface with intuitive status indicators and interactive tutorials for new users.
-  - **Batch Import**: One-click import for Bilibili Collections and YouTube Playlists.
+  - **Batch Import**: One-click import for Bilibili Collections, YouTube Playlists, and YouTube Music playlists.
 - **Intelligent Queue System**:
   - **Reliable Downloading**: Sequential processing queue with auto-retry and robust error handling.
   - **Priority Management**: Move urgent requests to the top of the queue.
