@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { getAdvancedConfig } = require('../config/configManager');
 const state = require('../utils/state');
+const { deleteLyricsCache } = require('./lyrics');
 
 // Adjust paths relative to src/services
 const ROOT_DIR = path.join(__dirname, '../../');
@@ -109,6 +110,7 @@ const deleteSongFile = (song) => {
     if (song.id) {
         const karaokePath = path.join(DOWNLOAD_DIR, `${song.id}_karaoke.mp3`);
         tryDelete(karaokePath);
+        deleteLyricsCache(song.id);
     }
 };
 

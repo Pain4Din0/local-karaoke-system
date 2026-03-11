@@ -11,6 +11,8 @@ const { getNetworkInterfaces, getWifiSSID, deleteSongFile } = require('./src/ser
 const { processDownloadQueue } = require('./src/services/downloader');
 const { queueKaraokeProcessing, queueAllReadySongsForKaraoke, processNextKaraoke } = require('./src/services/karaoke');
 const { fetchUrlInfo } = require('./src/services/fetcher');
+const { getLyricsBySongId } = require('./src/services/lyrics');
+const ALLOWED_LYRICS_SOURCES = new Set(['auto', 'sidecar', 'ytmusic', 'youtube_captions', 'lrclib']);
 
 // Initialize Config
 loadAdvancedConfig();
@@ -28,6 +30,21 @@ const DOWNLOAD_DIR = path.join(ROOT_DIR, 'downloads');
 app.use(express.static(path.join(ROOT_DIR, 'public')));
 app.use(express.json());
 app.use('/downloads', express.static(DOWNLOAD_DIR));
+app.get('/api/lyrics/:songId', async (req, res) => {
+    try {
+        const requestedSource = typeof req.query.source === 'string' ? req.query.source : 'auto';
+        const preferredSource = ALLOWED_LYRICS_SOURCES.has(requestedSource) ? requestedSource : 'auto';
+        const lyrics = await getLyricsBySongId(req.params.songId, { preferredSource });
+        if (!lyrics) {
+            res.status(404).json({ found: false, message: 'Lyrics not found' });
+            return;
+        }
+        res.json(lyrics);
+    } catch (error) {
+        console.error('[Lyrics] API error:', error.message);
+        res.status(500).json({ found: false, message: 'Lyrics lookup failed' });
+    }
+});
 
 // Helper: Promote Next Song
 const promoteNextSong = () => {
@@ -84,12 +101,22 @@ io.on('connection', async (socket) => {
                 id: Date.now() + Math.floor(Math.random() * 1000), // Ensure unique IDs
                 title: meta.title,
                 uploader: meta.uploader,
+                artist: meta.artist,
+                album: meta.album,
+                track: meta.track,
+                duration: meta.duration,
+                sourceId: meta.sourceId,
+                extractor: meta.extractor,
                 pic: meta.pic,
                 requester,
                 originalUrl: meta.originalUrl,
                 status: 'pending',
                 progress: 0,
-                src: null
+                src: null,
+                lyricsStatus: 'idle',
+                lyricsSource: null,
+                lyricsType: null,
+                lyricsAvailable: false,
             };
             if (!state.currentPlaying) {
                 state.currentPlaying = song;
@@ -117,12 +144,22 @@ io.on('connection', async (socket) => {
                 id: Date.now(),
                 title: meta.title,
                 uploader: meta.uploader,
+                artist: meta.artist,
+                album: meta.album,
+                track: meta.track,
+                duration: meta.duration,
+                sourceId: meta.sourceId,
+                extractor: meta.extractor,
                 pic: meta.pic,
                 requester,
                 originalUrl: meta.originalUrl,
                 status: 'pending',
                 progress: 0,
-                src: null
+                src: null,
+                lyricsStatus: 'idle',
+                lyricsSource: null,
+                lyricsType: null,
+                lyricsAvailable: false,
             };
             if (!state.currentPlaying) {
                 state.currentPlaying = song;
@@ -139,7 +176,19 @@ io.on('connection', async (socket) => {
     });
 
     socket.on('readd_history', (historyItem) => {
-        const newSong = { ...historyItem, id: Date.now(), status: 'pending', progress: 0, src: null, localPath: null };
+        const newSong = {
+            ...historyItem,
+            id: Date.now(),
+            status: 'pending',
+            progress: 0,
+            src: null,
+            localPath: null,
+            lyricsData: null,
+            lyricsStatus: 'idle',
+            lyricsSource: null,
+            lyricsType: null,
+            lyricsAvailable: false,
+        };
         if (!state.currentPlaying) {
             state.currentPlaying = newSong;
             state.playerStatus.playing = true;
@@ -221,6 +270,12 @@ io.on('connection', async (socket) => {
         if (action.type === 'seek') state.playerStatus.currentTime = action.value;
         if (action.type === 'volume') state.playerStatus.volume = action.value;
         if (action.type === 'pitch') state.playerStatus.pitch = action.value;
+        if (action.type === 'lyrics_toggle') state.playerStatus.lyricsEnabled = !!action.value;
+        if (action.type === 'lyrics_source') {
+            const nextSource = ALLOWED_LYRICS_SOURCES.has(action.value) ? action.value : 'auto';
+            state.playerStatus.lyricsSource = nextSource;
+            action.value = nextSource;
+        }
         if (action.type === 'vocal_removal') {
             // Manual trigger
             if (action.value && state.currentPlaying && state.currentPlaying.status === 'ready' &&
@@ -231,6 +286,8 @@ io.on('connection', async (socket) => {
             state.playerStatus.vocalRemoval = action.value;
         }
         io.emit('exec_control', action);
+        io.volatile.emit('sync_tick', state.playerStatus);
+        state.emitSync();
     });
 
     socket.on('player_tick', (data) => {
@@ -243,7 +300,7 @@ io.on('connection', async (socket) => {
         state.playlist = [];
         state.history = [];
         state.currentPlaying = null;
-        state.playerStatus = { playing: false, currentTime: 0, duration: 0, volume: 0.8, pitch: 0, vocalRemoval: false };
+        state.playerStatus = { playing: false, currentTime: 0, duration: 0, volume: 0.8, pitch: 0, vocalRemoval: false, loudnessNorm: true, lyricsEnabled: true, lyricsSource: 'auto' };
         state.autoProcessKaraoke = false;
         // manualKaraokeQueue should also be cleared likely, but it's internal to karaoke service. 
         // We can ignore for now or add a clear method to karaoke service.

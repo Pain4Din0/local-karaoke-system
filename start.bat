@@ -279,7 +279,7 @@ set "PIP_CMD=.\python\python.exe -m pip"
 if %errorlevel% equ 0 (
     echo [CHECK] Demucs AI Vocal Separation available.
     echo.
-    goto INSTALL_DEPS
+    goto CHECK_YTMUSICAPI
 )
 
 :: Auto-install demucs and dependencies
@@ -293,6 +293,28 @@ if %errorlevel% neq 0 (
     goto INSTALL_DEPS
 )
 echo [DONE] Demucs ready.
+echo.
+
+:: ---------------------------------------------------------
+:: 3.7 Check and Install ytmusicapi (for timed lyrics)
+:: ---------------------------------------------------------
+:CHECK_YTMUSICAPI
+%PYTHON_EXE% -c "import ytmusicapi" >nul 2>&1
+if %errorlevel% equ 0 (
+    echo [CHECK] ytmusicapi available for YouTube Music timed lyrics.
+    echo.
+    goto INSTALL_DEPS
+)
+
+echo [TASK] Installing ytmusicapi (YouTube Music timed lyrics)...
+%PIP_CMD% install ytmusicapi -i %PIP_INDEX% --no-warn-script-location
+
+if %errorlevel% neq 0 (
+    echo [WARN] ytmusicapi installation failed. YouTube Music timed lyrics will be unavailable.
+    echo.
+    goto INSTALL_DEPS
+)
+echo [DONE] ytmusicapi ready.
 echo.
 
 :: ---------------------------------------------------------

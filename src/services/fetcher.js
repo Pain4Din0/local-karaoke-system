@@ -98,6 +98,12 @@ const runYtDlp = (url, resolve, options = {}) => {
                     return {
                         title: title || 'Unknown Title',
                         uploader: data.uploader || data.uploader_id || 'Unknown',
+                        artist: data.artist || data.album_artist || data.creator || data.uploader || data.uploader_id || 'Unknown',
+                        album: data.album || '',
+                        track: data.track || title || 'Unknown Title',
+                        duration: Number.isFinite(data.duration) ? data.duration : null,
+                        sourceId: data.id || null,
+                        extractor: data.ie_key || null,
                         pic: null, // Thumbnails disabled per user request
                         originalUrl: buildOriginalUrl(data, url)
                     };
@@ -176,6 +182,12 @@ const fetchUrlInfo = (url) => {
                     const list = allMedias.map(item => ({
                         title: item.title,
                         uploader: item.upper ? item.upper.name : 'Unknown',
+                        artist: item.upper ? item.upper.name : 'Unknown',
+                        album: '',
+                        track: item.title,
+                        duration: Number.isFinite(item.duration) ? item.duration : null,
+                        sourceId: item.bvid || null,
+                        extractor: 'BiliBili',
                         pic: null, // Thumbnails disabled per user request
                         originalUrl: `https://www.bilibili.com/video/${item.bvid}`
                     }));

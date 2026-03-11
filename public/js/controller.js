@@ -24,6 +24,15 @@ const messages = {
         vocal_removal: "Vocal Remover",
         vocal_on: "Vocals On",
         vocal_off: "Vocals Off",
+        lyrics: "Lyrics",
+        lyrics_on: "Lyrics On",
+        lyrics_off: "Lyrics Off",
+        lyrics_source: "Lyrics Source",
+        lyrics_source_auto: "Auto",
+        lyrics_source_sidecar: "Local LRC",
+        lyrics_source_ytmusic: "YouTube Music",
+        lyrics_source_youtube_captions: "YouTube Captions",
+        lyrics_source_lrclib: "LRCLIB",
         vocal_hint: "Processing may take 1-2 minutes",
         vocal_warning: "Uses Demucs AI model. May cause high system load. First-time model loading might be slow (stuck at 99%), please wait.",
         vocal_unavailable: "Not Available",
@@ -107,6 +116,15 @@ const messages = {
         vocal_removal: "人声消除",
         vocal_on: "人声开启",
         vocal_off: "人声已消除",
+        lyrics: "歌词",
+        lyrics_on: "歌词开启",
+        lyrics_off: "歌词关闭",
+        lyrics_source: "歌词来源",
+        lyrics_source_auto: "自动",
+        lyrics_source_sidecar: "本地 LRC",
+        lyrics_source_ytmusic: "YouTube Music",
+        lyrics_source_youtube_captions: "YouTube 字幕",
+        lyrics_source_lrclib: "LRCLIB",
         vocal_hint: "处理可能需要 1-2 分钟",
         vocal_warning: "使用 Demucs AI 模型进行处理。可能会造成较大性能开销。首次加载模型时可能较慢（进度条卡在99%），请耐心等待或留意控制台输出。",
         vocal_unavailable: "暂不可用",
@@ -190,6 +208,15 @@ const messages = {
         vocal_removal: "ボーカル除去",
         vocal_on: "ボーカルあり",
         vocal_off: "ボーカルなし",
+        lyrics: "歌詞",
+        lyrics_on: "歌詞オン",
+        lyrics_off: "歌詞オフ",
+        lyrics_source: "歌詞ソース",
+        lyrics_source_auto: "自動",
+        lyrics_source_sidecar: "ローカル LRC",
+        lyrics_source_ytmusic: "YouTube Music",
+        lyrics_source_youtube_captions: "YouTube 字幕",
+        lyrics_source_lrclib: "LRCLIB",
         vocal_hint: "処理には 1～2 分かかります",
         vocal_warning: "Demucs AIモデルを使用します。システム負荷が高くなる可能性があります。初回モデル読み込みは遅くなる場合があります（99%で停止）、お待ちください。",
         vocal_unavailable: "利用不可",
@@ -297,11 +324,20 @@ createApp({
         const localPitch = ref(0);
         const localVocalRemoval = ref(false);
         const localLoudnessNorm = ref(true); // Loudness normalization on by default
+        const localLyricsEnabled = ref(true);
+        const localLyricsSource = ref('auto');
         const isDragging = ref(false);
         const showTuning = ref(false);
         const autoProcessKaraoke = ref(false);
 
         const karaokeAvailable = computed(() => currentPlaying.value && currentPlaying.value.karaokeReady);
+        const lyricsSourceOptions = computed(() => ([
+            { value: 'auto', label: t('lyrics_source_auto') },
+            { value: 'sidecar', label: t('lyrics_source_sidecar') },
+            { value: 'ytmusic', label: t('lyrics_source_ytmusic') },
+            { value: 'youtube_captions', label: t('lyrics_source_youtube_captions') },
+            { value: 'lrclib', label: t('lyrics_source_lrclib') },
+        ]));
 
         const showShareModal = ref(false);
         const showPlaylistModal = ref(false);
@@ -509,6 +545,15 @@ createApp({
             socket.emit('control_action', { type: 'loudness_norm', value: localLoudnessNorm.value });
         };
 
+        const toggleLyrics = () => {
+            localLyricsEnabled.value = !localLyricsEnabled.value;
+            socket.emit('control_action', { type: 'lyrics_toggle', value: localLyricsEnabled.value });
+        };
+
+        const setLyricsSource = () => {
+            socket.emit('control_action', { type: 'lyrics_source', value: localLyricsSource.value });
+        };
+
         socket.on('system_info', (info) => {
             networks.value = info.networks;
             systemSSID.value = info.ssid;
@@ -560,6 +605,14 @@ createApp({
             currentPlaying.value = state.currentPlaying;
             history.value = state.history;
             if (state.autoProcessKaraoke !== undefined) autoProcessKaraoke.value = state.autoProcessKaraoke;
+            if (state.playerStatus) {
+                if (state.playerStatus.lyricsEnabled !== undefined) localLyricsEnabled.value = state.playerStatus.lyricsEnabled;
+                if (state.playerStatus.lyricsSource !== undefined) localLyricsSource.value = state.playerStatus.lyricsSource;
+                if (state.playerStatus.vocalRemoval !== undefined) localVocalRemoval.value = state.playerStatus.vocalRemoval;
+                if (state.playerStatus.pitch !== undefined) localPitch.value = state.playerStatus.pitch;
+                if (state.playerStatus.volume !== undefined) localVolumeDisplay.value = Math.round(state.playerStatus.volume * 100);
+                if (state.playerStatus.loudnessNorm !== undefined) localLoudnessNorm.value = state.playerStatus.loudnessNorm;
+            }
         });
         socket.on('sync_tick', (status) => {
             localPlaying.value = status.playing;
@@ -569,6 +622,8 @@ createApp({
             if (status.pitch !== undefined) localPitch.value = status.pitch;
             if (status.vocalRemoval !== undefined) localVocalRemoval.value = status.vocalRemoval;
             if (status.loudnessNorm !== undefined) localLoudnessNorm.value = status.loudnessNorm;
+            if (status.lyricsEnabled !== undefined) localLyricsEnabled.value = status.lyricsEnabled;
+            if (status.lyricsSource !== undefined) localLyricsSource.value = status.lyricsSource;
         });
         socket.on('update_progress', ({ id, progress }) => {
             const item = playlist.value.find(p => p.id === id); if (item) item.progress = progress;
@@ -627,6 +682,7 @@ createApp({
             showTuning, changePitch, resetPitch, localPitch,
             localVocalRemoval, toggleVocalRemoval,
             localLoudnessNorm, toggleLoudnessNorm,
+            localLyricsEnabled, toggleLyrics, localLyricsSource, setLyricsSource, lyricsSourceOptions,
             autoProcessKaraoke, toggleAutoProcess, karaokeAvailable,
             showPlaylistModal, playlistItems, selectedItems, isAllSelected,
             closePlaylistModal, toggleItem, toggleSelectAll, confirmAddBatch,

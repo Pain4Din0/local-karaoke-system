@@ -5,6 +5,7 @@ const { getAdvancedConfig } = require('../config/configManager');
 const state = require('../utils/state');
 const { analyzeLoudness, getCookiesPath } = require('./system');
 const { queueKaraokeProcessing } = require('./karaoke');
+const { prefetchLyrics } = require('./lyrics');
 
 const ROOT_DIR = path.join(__dirname, '../../');
 const DOWNLOAD_DIR = path.join(ROOT_DIR, 'downloads');
@@ -164,10 +165,15 @@ const startDownload = (song) => {
                 song.loudnessGain = loudnessGain;
                 song.karaokeReady = false;
                 song.karaokeSrc = null;
+                song.lyricsStatus = 'loading';
+                song.lyricsSource = null;
+                song.lyricsType = null;
+                song.lyricsAvailable = false;
 
                 if (state.autoProcessKaraoke) queueKaraokeProcessing(song);
                 if (state.currentPlaying && state.currentPlaying.id === song.id) state.playerStatus.playing = true;
                 state.emitSync();
+                prefetchLyrics(song);
                 processDownloadQueue();
             });
         });

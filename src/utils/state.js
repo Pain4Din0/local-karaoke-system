@@ -9,7 +9,10 @@ class StateStore {
             duration: 0,
             volume: 0.8,
             pitch: 0,
-            vocalRemoval: false
+            vocalRemoval: false,
+            loudnessNorm: true,
+            lyricsEnabled: true,
+            lyricsSource: 'auto'
         };
         this.isDownloading = false;
         this.autoProcessKaraoke = false;

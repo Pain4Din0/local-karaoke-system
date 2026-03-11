@@ -150,6 +150,28 @@
                 </div>
             </div>
         </Transition>
+
+        <div v-if="isPlayingVideo && lyricsState.visible" class="lyrics-overlay z-30 pointer-events-none">
+            <div class="lyrics-panel">
+                <div class="lyrics-meta" v-if="lyricsState.badge">
+                    <span>{{ lyricsState.badge }}</span>
+                </div>
+                <div class="lyrics-current" :class="{ 'lyrics-current-word': lyricsState.currentWords.length > 0 }">
+                    <template v-if="lyricsState.currentWords.length > 0">
+                        <span
+                            v-for="word in lyricsState.currentWords"
+                            :key="`${lyricsState.currentLine?.id || 0}-${word.id}`"
+                            class="lyrics-word"
+                            :class="word.state"
+                        >{{ word.text }}</span>
+                    </template>
+                    <template v-else>
+                        {{ lyricsState.currentText }}
+                    </template>
+                </div>
+                <div class="lyrics-next" v-if="lyricsState.nextText">{{ lyricsState.nextText }}</div>
+            </div>
+        </div>
     </div>
 
     <script src="js/player.js"></script>

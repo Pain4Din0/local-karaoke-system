@@ -33,6 +33,7 @@ The system relies on the following core components. Please install them and ensu
 
 - **[Node.js](https://nodejs.org/)** (Runtime Environment): Powers the web server and application logic.
 - **[Python](https://www.python.org/)** (3.10+): Required for AI vocal separation (Demucs).
+- **Python package `ytmusicapi`**: Used for YouTube Music timed lyrics retrieval. The bundled `start.bat` now installs it automatically together with other Python-side dependencies.
 - **[FFmpeg](https://ffmpeg.org/)** (Multimedia Framework): Handles audio/video processing.
 - **[yt-dlp](https://github.com/yt-dlp/yt-dlp)** (Media Downloader): Extracts content from streaming platforms.
 - **[Visual C++ Redistributable](https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist)**: Often required for Python and media libraries to run correctly.
