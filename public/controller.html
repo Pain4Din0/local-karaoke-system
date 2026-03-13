@@ -728,6 +728,29 @@
                     </div>
                 </section>
 
+                <!-- Lyrics -->
+                <section class="bg-zinc-900/80 rounded-xl border border-zinc-800 p-4">
+                    <h3 class="text-sm font-bold text-zinc-200 uppercase tracking-wider mb-3 flex items-center gap-2">
+                        <i class="ri-file-text-line"></i> {{ t('lyrics') }}
+                    </h3>
+                    <div class="space-y-3 text-sm">
+                        <label class="flex items-center gap-2 text-zinc-400 cursor-pointer">
+                            <input type="checkbox" v-model="advancedConfig.lyrics.enabled"
+                                class="w-4 h-4 rounded border-zinc-600 bg-zinc-800 accent-blue-500">
+                            {{ t('lyrics') }}
+                        </label>
+                        <div>
+                            <label class="block text-zinc-500 mb-1">{{ t('lyrics_source') }}</label>
+                            <select v-model="advancedConfig.lyrics.source"
+                                class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-white outline-none focus:ring-1 focus:ring-zinc-500">
+                                <option v-for="option in lyricsSourceOptions" :key="option.value" :value="option.value">
+                                    {{ option.label }}
+                                </option>
+                            </select>
+                        </div>
+                    </div>
+                </section>
+
                 <!-- Restore defaults -->
                 <div class="flex justify-center pt-2">
                     <button @click="restoreAdvancedDefaults" type="button"
@@ -877,33 +900,6 @@
                             <div class="w-5 h-5 bg-white rounded-full absolute top-0.5 transition-all duration-200"
                                 :class="localLoudnessNorm ? 'right-0.5' : 'left-0.5'"></div>
                         </button>
-                    </div>
-                </div>
-
-                <div class="space-y-3 pt-4 border-t border-zinc-800" id="tuning-lyrics">
-                    <div class="flex justify-between items-center text-xs text-zinc-500 uppercase tracking-wider">
-                        <span>{{ t('lyrics') }}</span>
-                        <span :class="localLyricsEnabled ? 'text-green-500' : 'text-zinc-600'">
-                            {{ localLyricsEnabled ? t('lyrics_on') : t('lyrics_off') }}
-                        </span>
-                    </div>
-                    <div class="flex justify-between items-center">
-                        <span class="text-xs text-zinc-600">{{ t('lyrics') }}</span>
-                        <button @click="toggleLyrics"
-                            class="w-12 h-6 rounded-full relative transition-colors duration-200"
-                            :class="localLyricsEnabled ? 'bg-blue-500' : 'bg-zinc-700'">
-                            <div class="w-5 h-5 bg-white rounded-full absolute top-0.5 transition-all duration-200"
-                                :class="localLyricsEnabled ? 'right-0.5' : 'left-0.5'"></div>
-                        </button>
-                    </div>
-                    <div class="space-y-2">
-                        <span class="block text-xs text-zinc-600">{{ t('lyrics_source') }}</span>
-                        <select v-model="localLyricsSource" @change="setLyricsSource"
-                            class="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-3 text-sm text-zinc-200 outline-none">
-                            <option v-for="option in lyricsSourceOptions" :key="option.value" :value="option.value">
-                                {{ option.label }}
-                            </option>
-                        </select>
                     </div>
                 </div>
 

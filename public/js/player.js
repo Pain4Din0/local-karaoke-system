@@ -476,7 +476,6 @@ createApp({
         const hud = ref({ show: false, icon: '', text: '' });
         const lyricsState = ref({
             visible: false,
-            badge: '',
             currentText: '',
             nextText: '',
             currentLine: null,
@@ -501,20 +500,9 @@ createApp({
         let lyricsEnabled = true;
         let lyricsSource = 'auto';
 
-        const buildLyricsBadge = (data) => {
-            if (!data || !data.found) return '';
-            const detail = data.type === 'word'
-                ? 'Word Sync'
-                : data.type === 'line'
-                    ? 'Line Sync'
-                    : 'Timed';
-            return `${data.source || 'Lyrics'} • ${detail}`;
-        };
-
         const resetLyricsState = () => {
             lyricsState.value = {
                 visible: false,
-                badge: '',
                 currentText: '',
                 nextText: '',
                 currentLine: null,
@@ -530,7 +518,6 @@ createApp({
             }
             lyricsState.value = {
                 visible: true,
-                badge: buildLyricsBadge(data),
                 currentText: '',
                 nextText: '',
                 currentLine: null,

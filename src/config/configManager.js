@@ -59,6 +59,10 @@ const DEFAULT_ADVANCED_CONFIG = {
         deleteDelayMs: 20000,
         maxConcurrentDownloads: 1,
     },
+    lyrics: {
+        enabled: true,
+        source: 'auto',
+    },
 };
 
 let advancedConfig = null;

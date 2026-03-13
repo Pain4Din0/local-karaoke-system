@@ -324,8 +324,6 @@ createApp({
         const localPitch = ref(0);
         const localVocalRemoval = ref(false);
         const localLoudnessNorm = ref(true); // Loudness normalization on by default
-        const localLyricsEnabled = ref(true);
-        const localLyricsSource = ref('auto');
         const isDragging = ref(false);
         const showTuning = ref(false);
         const autoProcessKaraoke = ref(false);
@@ -346,7 +344,8 @@ createApp({
             ytdlp: { videoFormat: 'bestvideo[ext=mp4]/bestvideo', audioFormat: 'bestaudio[ext=m4a]/bestaudio', concurrentFragments: 16, httpChunkSize: '10M', noPlaylist: true, proxy: '', socketTimeout: 0, retries: 10, fragmentRetries: 10, userAgent: '', extractorArgs: '', postprocessorArgs: '', noCheckCertificates: false, limitRate: '', geoBypass: true, addHeader: [], mergeOutputFormat: '', flatPlaylist: true, dumpJson: true, noWarnings: false, ignoreErrors: false, abortOnError: false, noPart: false, restrictFilenames: false, windowsFilenames: false, noOverwrites: false, forceIPv4: false, forceIPv6: false },
             demucs: { model: 'htdemucs', twoStems: 'vocals', outputFormat: 'mp3', overlap: 0.25, segment: 7.8, shifts: 1, overlapOutput: false, float32: false, clipMode: 'rescale', noSegment: false, jobs: 0, device: '', repo: '' },
             ffmpeg: { loudnessI: -16, loudnessTP: -1.5, loudnessLRA: 11, loudnessGainClamp: 12 },
-            system: { deleteDelayMs: 20000, maxConcurrentDownloads: 1 }
+            system: { deleteDelayMs: 20000, maxConcurrentDownloads: 1 },
+            lyrics: { enabled: true, source: 'auto' }
         });
         const playlistItems = ref([]);
         const selectedItems = ref(new Set()); // using Set for indices
@@ -545,15 +544,6 @@ createApp({
             socket.emit('control_action', { type: 'loudness_norm', value: localLoudnessNorm.value });
         };
 
-        const toggleLyrics = () => {
-            localLyricsEnabled.value = !localLyricsEnabled.value;
-            socket.emit('control_action', { type: 'lyrics_toggle', value: localLyricsEnabled.value });
-        };
-
-        const setLyricsSource = () => {
-            socket.emit('control_action', { type: 'lyrics_source', value: localLyricsSource.value });
-        };
-
         socket.on('system_info', (info) => {
             networks.value = info.networks;
             systemSSID.value = info.ssid;
@@ -606,8 +596,6 @@ createApp({
             history.value = state.history;
             if (state.autoProcessKaraoke !== undefined) autoProcessKaraoke.value = state.autoProcessKaraoke;
             if (state.playerStatus) {
-                if (state.playerStatus.lyricsEnabled !== undefined) localLyricsEnabled.value = state.playerStatus.lyricsEnabled;
-                if (state.playerStatus.lyricsSource !== undefined) localLyricsSource.value = state.playerStatus.lyricsSource;
                 if (state.playerStatus.vocalRemoval !== undefined) localVocalRemoval.value = state.playerStatus.vocalRemoval;
                 if (state.playerStatus.pitch !== undefined) localPitch.value = state.playerStatus.pitch;
                 if (state.playerStatus.volume !== undefined) localVolumeDisplay.value = Math.round(state.playerStatus.volume * 100);
@@ -622,8 +610,6 @@ createApp({
             if (status.pitch !== undefined) localPitch.value = status.pitch;
             if (status.vocalRemoval !== undefined) localVocalRemoval.value = status.vocalRemoval;
             if (status.loudnessNorm !== undefined) localLoudnessNorm.value = status.loudnessNorm;
-            if (status.lyricsEnabled !== undefined) localLyricsEnabled.value = status.lyricsEnabled;
-            if (status.lyricsSource !== undefined) localLyricsSource.value = status.lyricsSource;
         });
         socket.on('update_progress', ({ id, progress }) => {
             const item = playlist.value.find(p => p.id === id); if (item) item.progress = progress;
@@ -682,7 +668,7 @@ createApp({
             showTuning, changePitch, resetPitch, localPitch,
             localVocalRemoval, toggleVocalRemoval,
             localLoudnessNorm, toggleLoudnessNorm,
-            localLyricsEnabled, toggleLyrics, localLyricsSource, setLyricsSource, lyricsSourceOptions,
+            lyricsSourceOptions,
             autoProcessKaraoke, toggleAutoProcess, karaokeAvailable,
             showPlaylistModal, playlistItems, selectedItems, isAllSelected,
             closePlaylistModal, toggleItem, toggleSelectAll, confirmAddBatch,

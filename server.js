@@ -17,6 +17,14 @@ const ALLOWED_LYRICS_SOURCES = new Set(['auto', 'sidecar', 'ytmusic', 'youtube_c
 // Initialize Config
 loadAdvancedConfig();
 
+const applyLyricsSettingsFromAdvancedConfig = (config = getAdvancedConfig()) => {
+    const lyricsConfig = (config && config.lyrics && typeof config.lyrics === 'object') ? config.lyrics : {};
+    state.playerStatus.lyricsEnabled = lyricsConfig.enabled !== undefined ? !!lyricsConfig.enabled : true;
+    state.playerStatus.lyricsSource = ALLOWED_LYRICS_SOURCES.has(lyricsConfig.source) ? lyricsConfig.source : 'auto';
+};
+
+applyLyricsSettingsFromAdvancedConfig();
+
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
@@ -227,8 +235,12 @@ io.on('connection', async (socket) => {
         if (config && typeof config === 'object') {
             const ok = saveAdvancedConfig(config);
             if (ok) {
-                socket.emit('advanced_config', getAdvancedConfig());
+                const nextConfig = getAdvancedConfig();
+                applyLyricsSettingsFromAdvancedConfig(nextConfig);
+                socket.emit('advanced_config', nextConfig);
                 socket.emit('advanced_config_saved');
+                io.volatile.emit('sync_tick', state.playerStatus);
+                state.emitSync();
             } else {
                 socket.emit('error_msg', 'Failed to save advanced config');
             }
@@ -238,8 +250,12 @@ io.on('connection', async (socket) => {
     socket.on('reset_advanced_config', () => {
         const ok = resetAdvancedConfigToDefault();
         if (ok) {
-            socket.emit('advanced_config', getAdvancedConfig());
+            const nextConfig = getAdvancedConfig();
+            applyLyricsSettingsFromAdvancedConfig(nextConfig);
+            socket.emit('advanced_config', nextConfig);
             socket.emit('advanced_config_saved');
+            io.volatile.emit('sync_tick', state.playerStatus);
+            state.emitSync();
         } else {
             socket.emit('error_msg', 'Failed to restore default settings');
         }
@@ -301,6 +317,7 @@ io.on('connection', async (socket) => {
         state.history = [];
         state.currentPlaying = null;
         state.playerStatus = { playing: false, currentTime: 0, duration: 0, volume: 0.8, pitch: 0, vocalRemoval: false, loudnessNorm: true, lyricsEnabled: true, lyricsSource: 'auto' };
+        applyLyricsSettingsFromAdvancedConfig();
         state.autoProcessKaraoke = false;
         // manualKaraokeQueue should also be cleared likely, but it's internal to karaoke service. 
         // We can ignore for now or add a clear method to karaoke service.
