@@ -19,6 +19,7 @@ A robust, locally hosted karaoke solution that enables seamless queuing and play
   - **Reliable Downloading**: Sequential processing queue with auto-retry and robust error handling.
   - **Priority Management**: Move urgent requests to the top of the queue.
 - **Automated Deployment**: The included `start.bat` handles all dependencies (Node.js, yt-dlp, FFmpeg, Demucs) automatically.
+- **Runtime Hygiene**: Generated media cache, temporary lyric downloads, and Demucs separation output are cleaned up automatically on startup/reset to avoid long-term accumulation.
 
 ## 🛠 Prerequisites
 
@@ -50,6 +51,10 @@ The system relies on the following core components. Please install them and ensu
       - **[2] Original**: Uses official sources (nodejs.org, python.org, github.com).
     - The script will automatically set up a complete portable environment including Node.js, Python, yt-dlp, FFmpeg, and all required dependencies.
     - Your choice is saved and won't be asked again. Delete `.mirror_config` to reset.
+
+### 1.1 Useful Maintenance Commands
+- **Syntax Check**: Run `npm run check` to validate all JavaScript files before startup or after refactors.
+- **Disable Auto Browser Launch**: In PowerShell, run ``$env:NO_AUTO_OPEN='1'; node server.js`` when you want to start the service without automatically opening the Player page.
 
 ### 2. Connect Interfaces
 -   **Player (Host)**:

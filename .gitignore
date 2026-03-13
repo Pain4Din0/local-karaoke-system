@@ -11,10 +11,20 @@ build/
 bin/
 python/
 .mirror_config
+.bootstrap_state.cmd
+.bootstrap_pip_state.json
 
 # Logs
 *.log
 npm-debug.log*
+tmp-*.log
+
+# Local app settings
+advanced-config.json
+
+# Bootstrap temp files
+bootstrap-get-pip.py
+*.download
 
 # User credentials
 cookies_*.txt

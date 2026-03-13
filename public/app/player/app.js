@@ -1,469 +1,27 @@
-const { createApp, ref, computed, nextTick, watch } = Vue;
-const socket = io();
+import { PrecisionAudioManager } from './audio-manager.js';
+import { messages } from './messages.js';
+
+const { createApp, ref, computed, nextTick } = window.Vue;
+const socket = window.io();
+const Artplayer = window.Artplayer;
 let art = null;
 let tickInterval = null;
 let lyricsTickInterval = null;
 
-// ============================================================
-// PRECISION AUDIO MANAGER - AudioBuffer-based Sync System
-// ============================================================
-// This replaces the old HTML Audio element approach.
-// Audio is decoded into memory buffers and scheduled with
-// sample-accurate precision using Web Audio API.
-// Video element is the SINGLE source of truth for playback time.
-// ============================================================
-
-class PrecisionAudioManager {
-    constructor() {
-        this.ctx = null;
-        this.pitchNode = null;
-
-        // Session management for async ops
-        this.currentSessionId = 0;
-
-        // AudioBuffers (decoded audio data in memory)
-        this.originalBuffer = null;
-        this.karaokeBuffer = null;
-
-        // Active source nodes (recreated on each play/seek)
-        this.originalSource = null;
-        this.karaokeSource = null;
-
-        // Playback state tracking
-        this.isPlaying = false;
-        this.startOffset = 0;         // Audio offset when playback started
-        this.startContextTime = 0;    // AudioContext.currentTime when playback started
-
-        // Audio mode
-        this.isKaraokeMode = false;
-
-        // Gain nodes (persistent across playback)
-        this.originalGain = null;
-        this.karaokeGain = null;
-        this.volumeGain = null;
-        this.loudnessGain = null;
-
-        // Settings
-        this.volume = 0.8;
-        this.loudnessAdjustment = 0;  // dB
-        this.isLoudnessNormEnabled = true;
-
-        // Crossfade settings
-        this.CROSSFADE_TIME = 0.1;    // 100ms crossfade
-
-        // Active song ID validation
-        this.currentSongId = null;
-        this.isLoadingKaraoke = false;
-    }
-
-    // Initialize AudioContext and processing chain
-    async init() {
-        if (this.ctx) return;
-
-        try {
-            this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-
-            // Load pitch processor worklet
-            await this.ctx.audioWorklet.addModule('pitch-processor.js');
-            this.pitchNode = new AudioWorkletNode(this.ctx, 'pitch-processor');
-
-            // Create gain nodes
-            this.originalGain = this.ctx.createGain();
-            this.karaokeGain = this.ctx.createGain();
-            this.volumeGain = this.ctx.createGain();
-            this.loudnessGain = this.ctx.createGain();
-
-            // Initial gain values
-            this.originalGain.gain.value = 1.0;
-            this.karaokeGain.gain.value = 0.0;
-            this.volumeGain.gain.value = this.volume;
-            this.loudnessGain.gain.value = 1.0;
-
-            // Connect processing chain:
-            // [OriginalGain + KaraokeGain] -> VolumeGain -> LoudnessGain -> PitchNode -> Destination
-            this.originalGain.connect(this.volumeGain);
-            this.karaokeGain.connect(this.volumeGain);
-            this.volumeGain.connect(this.loudnessGain);
-            this.loudnessGain.connect(this.pitchNode);
-            this.pitchNode.connect(this.ctx.destination);
-
-            // Expose globally for pitch control
-            window.audioCtx = this.ctx;
-            window.pitchNode = this.pitchNode;
-
-            console.log('[AudioManager] Initialized successfully');
-        } catch (e) {
-            console.error('[AudioManager] Init failed:', e);
-        }
-    }
-
-    // Decode audio file URL into AudioBuffer
-    async loadBuffer(url) {
-        if (!this.ctx) await this.init();
-        const sessionId = this.currentSessionId; // Capture session ID at start
-        try {
-            console.log('[AudioManager] Loading:', url);
-            const response = await fetch(url);
-            const arrayBuffer = await response.arrayBuffer();
-
-            if (this.currentSessionId !== sessionId) {
-                console.log('[AudioManager] Load aborted (session changed):', url);
-                return null;
-            }
-
-            const audioBuffer = await this.ctx.decodeAudioData(arrayBuffer);
-            console.log('[AudioManager] Decoded:', url, `(${audioBuffer.duration.toFixed(1)}s)`);
-            return audioBuffer;
-        } catch (e) {
-            console.error('[AudioManager] Load failed:', url, e);
-            return null;
-        }
-    }
-
-    // Load both original and karaoke buffers for a song
-    async loadSong(originalUrl, karaokeUrl, loudnessGain, songId) {
-        // Increment session ID to invalidate any pending loads from previous songs
-        this.currentSessionId++;
-        const sessionId = this.currentSessionId;
-
-        this.cleanup(false); // Cleanup but don't increment session ID again
-
-        this.currentSongId = songId;
-        this.isLoadingKaraoke = false; // Reset lock on new song
-        this.loudnessAdjustment = loudnessGain || 0;
-        this.isKaraokeMode = false;
-
-        // Reset gain states
-        if (this.originalGain) this.originalGain.gain.value = 1.0;
-        if (this.karaokeGain) this.karaokeGain.gain.value = 0.0;
-
-        console.log(`[AudioManager] Loading song (Session ${sessionId})`);
-
-        // Load original buffer
-        if (originalUrl) {
-            const buffer = await this.loadBuffer(originalUrl);
-            if (this.currentSessionId !== sessionId) return;
-            this.originalBuffer = buffer;
-        }
-
-        // Load karaoke buffer if available
-        if (karaokeUrl) {
-            const buffer = await this.loadBuffer(karaokeUrl);
-            if (this.currentSessionId !== sessionId) return;
-            this.karaokeBuffer = buffer;
-
-            // Hot-start: If we are already playing and in karaoke mode (or if we want to be ready),
-            // we might need to start this source. 
-            // But usually loadSong is called BEFORE playback starts for a new song.
-            // The 'addKaraokeBuffer' method handles the mid-playback case.
-        }
-
-        this.updateLoudness();
-        this.updateVolume();
-    }
-
-    // Add karaoke track after it becomes ready (mid-playback)
-    async addKaraokeBuffer(karaokeUrl, songId) {
-        if (songId !== this.currentSongId) {
-            console.warn('[AudioManager] Ignoring karaoke buffer for wrong song:', songId);
-            return;
-        }
-        if (this.karaokeBuffer || this.isLoadingKaraoke) return; // Already loaded or loading
-        if (!karaokeUrl) return;
-
-        this.isLoadingKaraoke = true;
-        const sessionId = this.currentSessionId;
-
-        try {
-            const buffer = await this.loadBuffer(karaokeUrl);
-
-            if (!buffer || this.currentSessionId !== sessionId || this.currentSongId !== songId) return;
-
-            // Double-check if loaded while we were waiting
-            if (this.karaokeBuffer) return;
-
-            this.karaokeBuffer = buffer;
-            console.log('[AudioManager] Karaoke track added mid-playback');
-
-            // If currently playing, start the karaoke source immediately synchronized
-            if (this.isPlaying && this.ctx) {
-                const currentPos = this.getCurrentTime();
-
-                // Safety check: ensure no existing source
-                if (this.karaokeSource) {
-                    try { this.karaokeSource.stop(); } catch (e) { }
-                    this.karaokeSource.disconnect();
-                }
-
-                // Create new source
-                this.karaokeSource = this.ctx.createBufferSource();
-                this.karaokeSource.buffer = this.karaokeBuffer;
-                this.karaokeSource.connect(this.karaokeGain);
-
-                // Sync start
-                this.karaokeSource.start(0, currentPos);
-
-                console.log('[AudioManager] Karaoke source hot-started at:', currentPos.toFixed(2));
-
-                if (this.isKaraokeMode) {
-                    this.switchMode(true);
-                }
-            }
-        } finally {
-            this.isLoadingKaraoke = false;
-        }
-    }
-
-    // Start or resume playback from a specific time offset
-    startPlayback(offset) {
-        if (!this.ctx || !this.originalBuffer) return;
-
-        // Stop any existing sources
-        this.stopSources();
-
-        // Clamp offset to valid range
-        const maxDuration = Math.max(
-            this.originalBuffer?.duration || 0,
-            this.karaokeBuffer?.duration || 0
-        );
-        offset = Math.max(0, Math.min(offset, maxDuration - 0.1));
-
-        this.startOffset = offset;
-        this.startContextTime = this.ctx.currentTime;
-        this.isPlaying = true;
-
-        // Create and start original source
-        if (this.originalBuffer) {
-            this.originalSource = this.ctx.createBufferSource();
-            this.originalSource.buffer = this.originalBuffer;
-            this.originalSource.connect(this.originalGain);
-            this.originalSource.start(0, offset);
-        }
-
-        // Create and start karaoke source (if available)
-        if (this.karaokeBuffer) {
-            this.karaokeSource = this.ctx.createBufferSource();
-            this.karaokeSource.buffer = this.karaokeBuffer;
-            this.karaokeSource.connect(this.karaokeGain);
-            this.karaokeSource.start(0, offset);
-        }
-
-        console.log('[AudioManager] Started at:', offset.toFixed(2) + 's');
-    }
-
-    // Stop all active sources (for pause/seek)
-    stopSources() {
-        if (this.originalSource) {
-            try { this.originalSource.stop(); } catch (e) { }
-            this.originalSource.disconnect(); // Disconnect for GC
-            this.originalSource = null;
-        }
-        if (this.karaokeSource) {
-            try { this.karaokeSource.stop(); } catch (e) { }
-            this.karaokeSource.disconnect(); // Disconnect for GC
-            this.karaokeSource = null;
-        }
-        this.isPlaying = false;
-    }
-
-    // Pause playback
-    pause() {
-        this.stopSources();
-    }
-
-    // Seek to a new position (stop and restart at new offset)
-    seek(newTime) {
-        if (!this.isPlaying) {
-            // Not playing, just update offset for next play
-            this.startOffset = newTime;
-            return;
-        }
-        // Stop current playback and restart at new position
-        this.startPlayback(newTime);
-    }
-
-    // Switch between original and karaoke mode with crossfade
-    switchMode(useKaraoke) {
-        if (!this.ctx) return;
-
-        // Safety check: Don't switch to karaoke if no buffer
-        if (useKaraoke && !this.karaokeBuffer) {
-            console.warn('[AudioManager] Cannot switch to karaoke: buffer not ready');
-            return;
-        }
-
-        this.isKaraokeMode = useKaraoke;
-        const now = this.ctx.currentTime;
-
-        if (useKaraoke) {
-            // Crossfade to karaoke
-            this.originalGain.gain.cancelScheduledValues(now);
-            this.originalGain.gain.setValueAtTime(this.originalGain.gain.value, now);
-            this.originalGain.gain.linearRampToValueAtTime(0.0, now + this.CROSSFADE_TIME);
-
-            this.karaokeGain.gain.cancelScheduledValues(now);
-            this.karaokeGain.gain.setValueAtTime(this.karaokeGain.gain.value, now);
-            this.karaokeGain.gain.linearRampToValueAtTime(1.0, now + this.CROSSFADE_TIME);
-        } else {
-            // Crossfade to original
-            this.originalGain.gain.cancelScheduledValues(now);
-            this.originalGain.gain.setValueAtTime(this.originalGain.gain.value, now);
-            this.originalGain.gain.linearRampToValueAtTime(1.0, now + this.CROSSFADE_TIME);
-
-            this.karaokeGain.gain.cancelScheduledValues(now);
-            this.karaokeGain.gain.setValueAtTime(this.karaokeGain.gain.value, now);
-            this.karaokeGain.gain.linearRampToValueAtTime(0.0, now + this.CROSSFADE_TIME);
-        }
-
-        console.log('[AudioManager] Mode:', useKaraoke ? 'Karaoke' : 'Original');
-    }
-
-    // Update volume gain
-    setVolume(value) {
-        this.volume = value;
-        this.updateVolume();
-    }
-
-    updateVolume() {
-        if (this.volumeGain && this.ctx) {
-            this.volumeGain.gain.setValueAtTime(this.volume, this.ctx.currentTime);
-        }
-    }
-
-    // Update loudness normalization
-    setLoudnessNorm(enabled) {
-        this.isLoudnessNormEnabled = enabled;
-        this.updateLoudness();
-    }
-
-    updateLoudness() {
-        if (!this.loudnessGain || !this.ctx) return;
-        const linearGain = this.isLoudnessNormEnabled ?
-            Math.pow(10, this.loudnessAdjustment / 20) : 1.0;
-        this.loudnessGain.gain.setValueAtTime(linearGain, this.ctx.currentTime);
-    }
-
-    // Set pitch shift
-    setPitch(semitones) {
-        if (this.pitchNode && this.ctx) {
-            const param = this.pitchNode.parameters.get('pitch');
-            if (param) {
-                param.setValueAtTime(semitones, this.ctx.currentTime);
-            }
-        }
-    }
-
-    // Resume AudioContext if suspended (browser autoplay policy)
-    async resume() {
-        if (this.ctx && this.ctx.state === 'suspended') {
-            await this.ctx.resume();
-        }
-    }
-
-    // Complete cleanup for song change
-    cleanup(incrementSession = true) {
-        if (incrementSession) {
-            this.currentSessionId++;
-        }
-        this.stopSources();
-        this.originalBuffer = null;
-        this.karaokeBuffer = null;
-        this.isKaraokeMode = false;
-        this.startOffset = 0;
-    }
-
-    // Get current playback position (for UI sync verification only)
-    getCurrentTime() {
-        if (!this.isPlaying || !this.ctx) return this.startOffset;
-        return this.startOffset + (this.ctx.currentTime - this.startContextTime);
-    }
-}
-
-// Global audio manager instance
 const audioManager = new PrecisionAudioManager();
-
-const messages = {
-    en: {
-        init_system: "Click to Initialize System",
-        label_video: "Video",
-        label_audio: "Audio",
-        label_processing: "Processing",
-        click_qr_switch: "Click QR to Switch",
-        current_network: "Current Network",
-        connect_via: "Connect via URL",
-        host_ssid: "Host SSID",
-        requested_by: "Requested By",
-        skip: "Skipped",
-        replay: "Replay",
-        paused: "Paused",
-        playing: "Playing",
-        loudness_on: "Loudness On",
-        loudness_off: "Loudness Off",
-        key_change: "Key",
-        karaoke_not_ready: "Karaoke Not Ready",
-        forward: "Forward",
-        rewind: "Rewind",
-        vocal_on: "Vocals On",
-        vocal_off: "Vocals Off"
-    },
-    zh: {
-        init_system: "点击初始化系统",
-        label_video: "视频",
-        label_audio: "音频",
-        label_processing: "处理",
-        click_qr_switch: "点击二维码切换网络",
-        current_network: "当前网络",
-        connect_via: "连接地址",
-        host_ssid: "主机 SSID",
-        requested_by: "点歌人",
-        skip: "已切歌",
-        replay: "重播",
-        paused: "已暂停",
-        playing: "播放中",
-        loudness_on: "响度均衡 开",
-        loudness_off: "响度均衡 关",
-        key_change: "变调",
-        karaoke_not_ready: "伴奏未就绪",
-        forward: "快进",
-        rewind: "快退",
-        vocal_on: "原唱 开",
-        vocal_off: "原唱 关"
-    },
-    ja: {
-        init_system: "クリックしてシステムを初期化",
-        label_video: "映像",
-        label_audio: "音声",
-        label_processing: "処理",
-        click_qr_switch: "QRをクリックして切り替え",
-        current_network: "現在のネットワーク",
-        connect_via: "接続URL",
-        host_ssid: "ホストSSID",
-        requested_by: "リクエスト",
-        skip: "スキップ",
-        replay: "もう一度",
-        paused: "一時停止",
-        playing: "再生中",
-        loudness_on: "ラウドネス ON",
-        loudness_off: "ラウドネス OFF",
-        key_change: "キー",
-        karaoke_not_ready: "インスト未準備",
-        forward: "早送り",
-        rewind: "巻き戻し",
-        vocal_on: "ボーカル ON",
-        vocal_off: "ボーカル OFF"
-    }
-};
 
 
 createApp({
     setup() {
         const lang = ref(localStorage.getItem('ktv_lang') || 'zh');
+        const clearBrowserState = () => {
+            localStorage.removeItem('ktv_lang');
+        };
         const t = (key) => messages[lang.value] ? (messages[lang.value][key] || key) : key;
 
         const currentSong = ref(null);
         const showInfo = ref(false);
         const hasInteracted = ref(false);
-        const systemInfo = ref({ ssid: 'Loading...', url: 'Loading...', ip: '' });
         const isPlayingVideo = computed(() => currentSong.value && currentSong.value.status === 'ready');
 
         const networks = ref([{ name: 'Loading', ip: '...' }]);
@@ -490,6 +48,11 @@ createApp({
             hudTimeout = setTimeout(() => {
                 hud.value.show = false;
             }, 2000);
+        };
+
+        const logHud = (level, icon, text, payload) => {
+            console[level]('[Player]', text, payload || '');
+            showHud(icon, text);
         };
 
         // State variables for UI reporting
@@ -604,12 +167,20 @@ createApp({
             lyricsSongId = song.id;
             try {
                 const response = await fetch(`/api/lyrics/${song.id}?source=${encodeURIComponent(lyricsSource || 'auto')}`);
+                if (!response.ok && response.status !== 404) {
+                    throw new Error(`lyrics_http_${response.status}`);
+                }
                 const data = await response.json();
                 if (lyricsSongId !== song.id || !lyricsEnabled) return;
                 applyLyricsData(data);
+                if (!data?.found) {
+                    console.warn('[Player] Lyrics not found for song:', song.title, data);
+                }
                 syncLyricsToPlayback();
             } catch (error) {
+                console.warn('[Player] Failed to fetch lyrics for song:', song.title, error);
                 resetLyricsState();
+                showHud('ri-file-warning-line', t('lyrics_unavailable'));
             }
         };
 
@@ -705,7 +276,12 @@ createApp({
             if (art) {
                 // Reuse existing player to maintain fullscreen status
                 console.log('[Player] Switching video URL');
-                await art.switchUrl(videoUrl);
+                try {
+                    await art.switchUrl(videoUrl);
+                } catch (error) {
+                    logHud('error', 'ri-error-warning-line', t('song_failed'), error);
+                    return;
+                }
 
                 // Reset state for new song
                 isVocalRemovalActive = false;
@@ -902,6 +478,23 @@ createApp({
             }
         });
 
+        socket.on('song_error', (payload) => {
+            if (!payload || !currentSong.value || payload.id !== currentSong.value.id) return;
+            logHud('error', 'ri-error-warning-line', t('song_failed'), payload);
+        });
+
+        socket.on('connect_error', (error) => {
+            logHud('warn', 'ri-wifi-off-line', t('connection_lost'), error);
+        });
+
+        socket.on('disconnect', (reason) => {
+            logHud('warn', 'ri-wifi-off-line', t('connection_lost'), reason);
+        });
+
+        socket.on('connect', () => {
+            showHud('ri-wifi-line', t('connection_restored'));
+        });
+
         // ============================================================
         // CONTROL HANDLER - Responds to controller commands
         // ============================================================
@@ -925,6 +518,9 @@ createApp({
                 if (lyricsEnabled && currentSong.value && currentSong.value.status === 'ready') fetchLyrics(currentSong.value);
             } else if (action.type === 'cut') {
                 showHud('ri-skip-forward-fill', t('skip'));
+            } else if (action.type === 'clear_client_storage') {
+                clearBrowserState();
+                return;
             }
 
             if (!art) return;

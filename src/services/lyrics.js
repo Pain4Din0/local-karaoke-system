@@ -2,30 +2,20 @@ const fs = require('fs');
 const path = require('path');
 const https = require('https');
 const { spawn } = require('child_process');
-const state = require('../utils/state');
 
-const ROOT_DIR = path.join(__dirname, '../../');
-const DOWNLOAD_DIR = path.join(ROOT_DIR, 'downloads');
-const YTMUSIC_HELPER = path.join(ROOT_DIR, 'scripts', 'fetch_ytmusic_lyrics.py');
-const YT_DLP_EXE = fs.existsSync(path.join(ROOT_DIR, 'yt-dlp.exe'))
-    ? path.join(ROOT_DIR, 'yt-dlp.exe')
-    : 'yt-dlp';
+const { DOWNLOAD_DIR, SCRIPTS_DIR, YT_DLP_EXE, PYTHON_EXE, ensureRuntimeDirs, getCookiesPath, buildChildProcessEnv, appendYtDlpJsRuntimeArgs } = require('../config/runtime');
+const state = require('../utils/state');
+const logger = require('../utils/logger');
 
 const inflightLyrics = new Map();
 const CAPTION_LANGS = ['zh-Hans', 'zh-Hant', 'zh-CN', 'zh-TW', 'zh', 'en', 'ja'];
+const YTMUSIC_HELPER = path.join(SCRIPTS_DIR, 'lyrics', 'fetch_ytmusic_lyrics.py');
+const MISSING_LYRICS_CACHE_TTL_MS = 5 * 60 * 1000;
+let lyricsSessionId = 0;
+
+ensureRuntimeDirs();
 
 const isYouTubeLikeUrl = (url = '') => /(^https?:\/\/)?(www\.)?(youtube\.com|youtu\.be|music\.youtube\.com)\b/i.test(url);
-const getCookiesPath = (url = '') => {
-    if (url.includes('youtube.com') || url.includes('youtu.be') || url.includes('music.youtube.com')) {
-        const filePath = path.join(ROOT_DIR, 'cookies_youtube.txt');
-        return fs.existsSync(filePath) ? filePath : null;
-    }
-    if (url.includes('bilibili.com')) {
-        const filePath = path.join(ROOT_DIR, 'cookies_bilibili.txt');
-        return fs.existsSync(filePath) ? filePath : null;
-    }
-    return null;
-};
 
 const normalizeSpace = (value) => String(value || '').replace(/\s+/g, ' ').trim();
 const stripDecorators = (value) => normalizeSpace(value)
@@ -176,8 +166,9 @@ const parseVtt = (rawText, fallbackDuration) => {
     };
 };
 
-const requestJson = (url) => new Promise((resolve, reject) => {
-    https.get(url, {
+const requestJson = (url, timeoutMs = 15000) => new Promise((resolve, reject) => {
+    const request = https.get(url, {
+        timeout: timeoutMs,
         headers: {
             'User-Agent': 'local-karaoke-system/1.0',
             'Accept': 'application/json, text/plain;q=0.9, */*;q=0.8',
@@ -196,30 +187,14 @@ const requestJson = (url) => new Promise((resolve, reject) => {
                 reject(error);
             }
         });
-    }).on('error', reject);
-});
+    });
 
-const requestText = (url) => new Promise((resolve, reject) => {
-    https.get(url, {
-        headers: {
-            'User-Agent': 'local-karaoke-system/1.0',
-            'Accept': 'text/plain, text/vtt, */*;q=0.8',
-        }
-    }, (response) => {
-        let body = '';
-        response.on('data', (chunk) => body += chunk);
-        response.on('end', () => {
-            if (response.statusCode && response.statusCode >= 400) {
-                reject(new Error(`HTTP ${response.statusCode}`));
-                return;
-            }
-            resolve(body);
-        });
-    }).on('error', reject);
+    request.on('timeout', () => request.destroy(new Error(`timeout_${timeoutMs}`)));
+    request.on('error', reject);
 });
 
 const runPythonJson = (scriptPath, payload, timeoutMs = 25000) => new Promise((resolve, reject) => {
-    const proc = spawn('python', [scriptPath], { shell: false });
+    const proc = spawn(PYTHON_EXE, [scriptPath], { shell: false });
     let stdout = '';
     let stderr = '';
     let settled = false;
@@ -264,20 +239,43 @@ const loadCachedLyrics = (songId, sourceKey = 'auto') => {
     if (!fs.existsSync(cachePath)) return null;
     try {
         const parsed = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
-        if (!parsed || parsed.found !== true) return null;
+        if (!parsed || typeof parsed !== 'object') return null;
+        if (parsed.expiresAt && Date.now() > parsed.expiresAt) {
+            try { fs.unlinkSync(cachePath); } catch (error) { }
+            return null;
+        }
+        if (parsed.found !== true && parsed.found !== false) return null;
         return parsed;
     } catch (error) {
+        logger.warn('Lyrics', `Failed to read lyrics cache for song ${songId}`, error);
         return null;
     }
 };
 
 const saveCachedLyrics = (songId, data, sourceKey = 'auto') => {
-    if (!data || data.found !== true) return;
+    if (!data || (data.found !== true && data.found !== false)) return;
     try {
-        fs.writeFileSync(getLyricsCachePath(songId, sourceKey), JSON.stringify(data, null, 2), 'utf8');
+        const payload = {
+            ...data,
+            cachedAt: Date.now(),
+        };
+        if (data.found !== true) {
+            payload.expiresAt = Date.now() + MISSING_LYRICS_CACHE_TTL_MS;
+        }
+        fs.writeFileSync(getLyricsCachePath(songId, sourceKey), JSON.stringify(payload, null, 2), 'utf8');
     } catch (error) {
-        console.error('[Lyrics] Failed to cache lyrics:', error.message);
+        logger.warn('Lyrics', `Failed to write lyrics cache for song ${songId}`, error);
     }
+};
+
+const invalidateLyricsSession = (reason = 'manual') => {
+    lyricsSessionId += 1;
+    inflightLyrics.clear();
+    logger.info('Lyrics', 'Invalidated in-flight lyrics session', {
+        reason,
+        sessionId: lyricsSessionId,
+    });
+    return lyricsSessionId;
 };
 
 const updateSongLyricsState = (song, data) => {
@@ -378,13 +376,14 @@ const fetchLyricsFromYouTubeCaptions = async (song, attemptedSources) => {
         '-o', `${tempBase}.%(ext)s`,
         song.originalUrl
     ];
+    appendYtDlpJsRuntimeArgs(args, song.originalUrl);
     const cookies = getCookiesPath(song.originalUrl);
     if (cookies) {
         args.splice(args.length - 1, 0, '--cookies', cookies);
     }
 
     await new Promise((resolve) => {
-        const proc = spawn(YT_DLP_EXE, args, { shell: false });
+        const proc = spawn(YT_DLP_EXE, args, { shell: false, env: buildChildProcessEnv() });
         proc.on('close', () => resolve());
         proc.on('error', () => resolve());
     });
@@ -437,7 +436,7 @@ const fetchLyricsFromYtMusic = async (song, attemptedSources) => {
         duration: query.duration,
         originalUrl: song.originalUrl || null,
     }).catch((error) => {
-        console.error(`[Lyrics] YTMusic helper failed for ${song.title}: ${error.message}`);
+        logger.warn('Lyrics', `YTMusic helper failed for ${song.title}`, error);
         return null;
     });
 
@@ -478,7 +477,10 @@ const fetchLyricsFromLrclib = async (song, attemptedSources) => {
     if (query.artist) search.searchParams.set('artist_name', query.artist);
     if (query.album) search.searchParams.set('album_name', query.album);
 
-    const results = await requestJson(search.toString()).catch(() => []);
+    const results = await requestJson(search.toString()).catch((error) => {
+        logger.warn('Lyrics', `LRCLIB lookup failed for ${song.title}`, error);
+        return [];
+    });
     if (!Array.isArray(results) || results.length === 0) return null;
 
     const best = [...results].sort((a, b) => scoreSearchResult(b, query) - scoreSearchResult(a, query))[0];
@@ -556,13 +558,13 @@ const buildMissingPayload = (song, attemptedSources) => ({
 });
 
 const findSongById = (songId) => {
-    const numericId = Number(songId);
+    const lookupId = String(songId);
     const candidates = [
         state.currentPlaying,
         ...state.playlist,
         ...state.history,
     ].filter(Boolean);
-    return candidates.find((song) => Number(song.id) === numericId) || null;
+    return candidates.find((song) => String(song.id) === lookupId) || null;
 };
 
 const fetchLyricsForSong = async (song, options = {}) => {
@@ -582,6 +584,9 @@ const fetchLyricsForSong = async (song, options = {}) => {
     const inflightKey = `${song.id}:${sourceKey}`;
     if (inflightLyrics.has(inflightKey)) return inflightLyrics.get(inflightKey);
 
+    const startedSessionId = lyricsSessionId;
+    const isStale = () => startedSessionId !== lyricsSessionId;
+
     const task = (async () => {
         const attemptedSources = [];
         const providerMap = {
@@ -599,6 +604,16 @@ const fetchLyricsForSong = async (song, options = {}) => {
             if (!provider) continue;
             try {
                 const data = await provider(song, attemptedSources);
+                if (isStale()) {
+                    logger.info('Lyrics', 'Discarded stale lyrics result after session change', {
+                        songId: song.id,
+                        sourceKey,
+                        providerKey,
+                        startedSessionId,
+                        currentSessionId: lyricsSessionId,
+                    });
+                    return null;
+                }
                 if (data && data.found) {
                     if (sourceKey === 'auto') {
                         song.lyricsData = data;
@@ -608,8 +623,18 @@ const fetchLyricsForSong = async (song, options = {}) => {
                     return data;
                 }
             } catch (error) {
-                console.error(`[Lyrics] Provider failed for ${song.title}: ${error.message}`);
+                logger.warn('Lyrics', `Lyrics provider ${providerKey} failed for ${song.title}`, error);
             }
+        }
+
+        if (isStale()) {
+            logger.info('Lyrics', 'Skipped writing missing-lyrics cache after session change', {
+                songId: song.id,
+                sourceKey,
+                startedSessionId,
+                currentSessionId: lyricsSessionId,
+            });
+            return null;
         }
 
         const missing = buildMissingPayload(song, attemptedSources);
@@ -617,6 +642,7 @@ const fetchLyricsForSong = async (song, options = {}) => {
             song.lyricsData = missing;
             updateSongLyricsState(song, missing);
         }
+        saveCachedLyrics(song.id, missing, sourceKey);
         return missing;
     })().finally(() => {
         inflightLyrics.delete(inflightKey);
@@ -628,7 +654,7 @@ const fetchLyricsForSong = async (song, options = {}) => {
 
 const prefetchLyrics = (song) => {
     fetchLyricsForSong(song).catch((error) => {
-        console.error('[Lyrics] Prefetch failed:', error.message);
+        logger.warn('Lyrics', 'Prefetch failed', error);
     });
 };
 
@@ -643,6 +669,7 @@ const getLyricsBySongId = async (songId, options = {}) => {
 };
 
 const deleteLyricsCache = (songId) => {
+    if (!fs.existsSync(DOWNLOAD_DIR)) return;
     for (const file of fs.readdirSync(DOWNLOAD_DIR)) {
         if (file.startsWith(`${songId}_lyriccap`) || file.startsWith(`${songId}_lyrics_`)) {
             try { fs.unlinkSync(path.join(DOWNLOAD_DIR, file)); } catch (error) { }
@@ -655,4 +682,5 @@ module.exports = {
     getLyricsBySongId,
     prefetchLyrics,
     deleteLyricsCache,
+    invalidateLyricsSession,
 };

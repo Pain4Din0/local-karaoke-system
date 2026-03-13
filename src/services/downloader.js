@@ -1,209 +1,393 @@
-const { spawn } = require('child_process');
-const fs = require('fs');
 const path = require('path');
+const { spawn } = require('child_process');
+
 const { getAdvancedConfig } = require('../config/configManager');
+const {
+    DOWNLOAD_DIR,
+    YT_DLP_EXE,
+    ensureRuntimeDirs,
+    buildChildProcessEnv,
+    appendYtDlpJsRuntimeArgs,
+    isYouTubeLikeUrl,
+} = require('../config/runtime');
 const state = require('../utils/state');
-const { analyzeLoudness, getCookiesPath } = require('./system');
+const logger = require('../utils/logger');
+const { setSongError } = require('../utils/song');
+const { analyzeLoudness, deleteSongFile, getCookiesPath } = require('./system');
 const { queueKaraokeProcessing } = require('./karaoke');
 const { prefetchLyrics } = require('./lyrics');
 
-const ROOT_DIR = path.join(__dirname, '../../');
-const DOWNLOAD_DIR = path.join(ROOT_DIR, 'downloads');
+ensureRuntimeDirs();
 
-// Ensure download directory exists
-if (!fs.existsSync(DOWNLOAD_DIR)) fs.mkdirSync(DOWNLOAD_DIR);
+const emitProgress = (song, progress) => {
+    if (!song) return;
+    const nextProgress = Math.max(0, Math.min(100, Number(progress) || 0));
+    if (nextProgress <= (song.progress || 0)) return;
+    song.progress = nextProgress;
+    if (state.io) {
+        state.io.emit('update_progress', { id: song.id, progress: nextProgress });
+    }
+};
 
-const handleDownloadError = (song, message) => {
-    state.activeDownloads.delete(song.id);
-    if (state.currentDownloadingId === song.id) {
+const emitSongError = (song, stage, message, details) => {
+    setSongError(song, message, stage);
+    logger.error('Download', message, {
+        songId: song && song.id,
+        title: song && song.title,
+        stage,
+        ...details,
+    });
+
+    if (state.io && song) {
+        state.io.emit('song_error', {
+            id: song.id,
+            title: song.title,
+            stage,
+            message,
+        });
+    }
+};
+
+const resetDownloadFlags = (songId) => {
+    state.activeDownloads.delete(songId);
+    if (state.currentDownloadingId === songId) {
         state.currentDownloadingId = null;
         state.isDownloading = false;
     }
-    console.error(`[System] ${message}`);
+};
+
+const advanceQueueAfterFailure = (song) => {
+    if (!song) return;
+
+    if (state.currentPlaying && state.currentPlaying.id === song.id) {
+        state.currentPlaying = state.playlist.length > 0 ? state.playlist.shift() : null;
+        state.playerStatus.playing = !!state.currentPlaying;
+        state.playerStatus.currentTime = 0;
+        state.playerStatus.duration = 0;
+        state.playerStatus.pitch = 0;
+        state.playerStatus.vocalRemoval = false;
+        return;
+    }
+
+    const queueIndex = state.playlist.findIndex((item) => item.id === song.id);
+    if (queueIndex !== -1) {
+        state.playlist.splice(queueIndex, 1);
+    }
+};
+
+const handleDownloadError = (song, stage, message, details) => {
+    if (!song) return;
+    resetDownloadFlags(song.id);
     song.status = 'error';
+    emitSongError(song, stage, message, details);
+    deleteSongFile(song);
+    advanceQueueAfterFailure(song);
     state.emitSync();
     processDownloadQueue();
 };
 
+const appendSharedYtDlpArgs = (args, cfg, cookies, originalUrl, { includeHttpChunkSize = false, includeFragmentRetries = false } = {}) => {
+    appendYtDlpJsRuntimeArgs(args, originalUrl);
+    if (cfg.noPlaylist !== false) args.push('--no-playlist');
+    if (cfg.concurrentFragments) args.push('-N', String(cfg.concurrentFragments));
+    if (includeHttpChunkSize && cfg.httpChunkSize) args.push('--http-chunk-size', cfg.httpChunkSize);
+    if (cfg.proxy) args.push('--proxy', cfg.proxy);
+    if (cfg.socketTimeout) args.push('--socket-timeout', String(cfg.socketTimeout));
+    if (cfg.retries !== undefined && cfg.retries !== null) args.push('--retries', String(cfg.retries));
+    if (includeFragmentRetries && cfg.fragmentRetries !== undefined && cfg.fragmentRetries !== null) {
+        args.push('--fragment-retries', String(cfg.fragmentRetries));
+    }
+    if (cfg.userAgent) args.push('--user-agent', cfg.userAgent);
+    if (cfg.noCheckCertificates) args.push('--no-check-certificates');
+    if (cfg.limitRate) args.push('--limit-rate', cfg.limitRate);
+    if (cfg.forceIPv4) args.push('--force-ipv4');
+    if (cfg.forceIPv6) args.push('--force-ipv6');
+    if (cfg.noPart) args.push('--no-part');
+    if (cfg.restrictFilenames) args.push('--restrict-filenames');
+    if (cfg.windowsFilenames) args.push('--windows-filenames');
+    if (cfg.noOverwrites) args.push('--no-overwrites');
+    if (cfg.ignoreErrors) args.push('--ignore-errors');
+    if (cfg.abortOnError) args.push('--abort-on-error');
+    if (cfg.noWarnings) args.push('--no-warnings');
+
+    if (Array.isArray(cfg.addHeader) && cfg.addHeader.length) {
+        cfg.addHeader.forEach((header) => args.push('--add-header', header));
+    }
+
+    if (cfg.extractorArgs) {
+        cfg.extractorArgs.split(/\s+/).filter(Boolean).forEach((value) => args.push(value));
+    }
+
+    if (cfg.postprocessorArgs) {
+        cfg.postprocessorArgs.split(/\s+/).filter(Boolean).forEach((value) => args.push(value));
+    }
+
+    if (cookies) args.push('--cookies', cookies);
+};
+
+const attachProgressListeners = (proc, song, { baseProgress, spanProgress }) => {
+    const logTail = [];
+    const pushLogLine = (source, line) => {
+        const trimmed = String(line || '').trim();
+        if (!trimmed) return;
+        logTail.push(`[${source}] ${trimmed}`);
+        if (logTail.length > 30) logTail.shift();
+    };
+
+    const handleChunk = (source) => (data) => {
+        const text = data.toString();
+        const lines = text.split(/\r?\n/);
+        for (const line of lines) {
+            if (!line.trim()) continue;
+            pushLogLine(source, line);
+            const match = line.match(/(\d+(?:\.\d+)?)%/);
+            if (!match) continue;
+            const percent = baseProgress + (parseFloat(match[1]) * spanProgress);
+            emitProgress(song, percent);
+        }
+    };
+
+    proc.stdout.on('data', handleChunk('stdout'));
+    proc.stderr.on('data', handleChunk('stderr'));
+
+    return () => logTail.join('\n');
+};
+
+const shouldRetryWithFallbackFormat = (stageName, output = '') => {
+    const normalized = String(output || '').toLowerCase();
+    if (stageName !== 'video' && stageName !== 'audio') return false;
+    return normalized.includes('requested format is not available')
+        || normalized.includes('no video formats')
+        || normalized.includes('no audio formats')
+        || normalized.includes('format not available');
+};
+
+const buildVideoFormatCandidates = (configuredFormat) => {
+    const candidates = [
+        configuredFormat || 'bestvideo[ext=mp4]/bestvideo',
+        'best[ext=mp4]/best',
+    ];
+    return [...new Set(candidates.filter(Boolean))];
+};
+
+const buildAudioFormatCandidates = (configuredFormat) => {
+    const candidates = [
+        configuredFormat || 'bestaudio[ext=m4a]/bestaudio',
+        'bestaudio/best',
+    ];
+    return [...new Set(candidates.filter(Boolean))];
+};
+
+const buildVideoArgs = ({ cfg, cookies, outputPath, originalUrl, format }) => {
+    const args = ['-f', format, '-o', outputPath];
+    appendSharedYtDlpArgs(args, cfg, cookies, originalUrl, { includeHttpChunkSize: true, includeFragmentRetries: true });
+    if (isYouTubeLikeUrl(originalUrl)) {
+        args.push('--remux-video', 'mp4');
+    }
+    args.push(originalUrl);
+    return args;
+};
+
+const buildAudioArgs = ({ cfg, cookies, outputPath, originalUrl, format }) => {
+    const args = ['-f', format, '-o', outputPath];
+    appendSharedYtDlpArgs(args, cfg, cookies, originalUrl, { includeFragmentRetries: true });
+    args.push(originalUrl);
+    return args;
+};
+
+const runDownloadStage = ({ song, stageName, attemptFormats, baseProgress, spanProgress, createArgs, onSuccess }) => {
+    const formats = Array.isArray(attemptFormats) && attemptFormats.length > 0 ? attemptFormats : [null];
+    let attemptIndex = 0;
+
+    const startAttempt = () => {
+        const currentFormat = formats[attemptIndex];
+        const args = createArgs(currentFormat);
+        const proc = spawn(YT_DLP_EXE, args, { shell: false, env: buildChildProcessEnv() });
+        state.activeDownloads.set(song.id, proc);
+        const getTailLogs = attachProgressListeners(proc, song, { baseProgress, spanProgress });
+
+        logger.info('Download', `Starting ${stageName} attempt ${attemptIndex + 1} for ${song.title}`, {
+            songId: song.id,
+            format: currentFormat,
+        });
+
+        proc.on('close', async (code) => {
+            const output = getTailLogs();
+            if (proc.__terminatedBySystem) {
+                resetDownloadFlags(song.id);
+                logger.info('Download', `${stageName} stage terminated during cleanup`, {
+                    songId: song.id,
+                    title: song.title,
+                    reason: proc.__terminationReason || 'cleanup',
+                    code,
+                });
+                return;
+            }
+
+            if (code !== 0) {
+                if (attemptIndex < formats.length - 1 && shouldRetryWithFallbackFormat(stageName, output)) {
+                    logger.warn('Download', `${stageName} attempt ${attemptIndex + 1} failed, retrying with fallback format`, {
+                        songId: song.id,
+                        output,
+                    });
+                    attemptIndex += 1;
+                    startAttempt();
+                    return;
+                }
+
+                handleDownloadError(song, stageName, `${stageName} download failed`, {
+                    code,
+                    output,
+                    attemptsTried: attemptIndex + 1,
+                });
+                return;
+            }
+
+            try {
+                await onSuccess();
+            } catch (error) {
+                handleDownloadError(song, stageName, `${stageName} post-processing failed`, {
+                    error,
+                    output,
+                });
+            }
+        });
+
+        proc.on('error', (error) => {
+            if (proc.__terminatedBySystem) {
+                resetDownloadFlags(song.id);
+                logger.info('Download', `${stageName} spawn terminated during cleanup`, {
+                    songId: song.id,
+                    title: song.title,
+                    reason: proc.__terminationReason || 'cleanup',
+                });
+                return;
+            }
+            handleDownloadError(song, stageName, `${stageName} spawn failed`, error);
+        });
+    };
+
+    startAttempt();
+};
+
 const startDownload = (song) => {
-    if (state.activeDownloads.has(song.id)) return;
+    if (!song || state.activeDownloads.has(song.id)) return;
+
     const isCurrent = state.currentPlaying && state.currentPlaying.id === song.id;
     if (isCurrent) {
         state.isDownloading = true;
         state.currentDownloadingId = song.id;
     }
-    song.status = 'downloading';
-    song.progress = 0;
-    state.emitSync();
 
-    console.log(`[System] Downloading: ${song.title}`);
-
-    // New file structure: separate video and audio
+    const cfg = getAdvancedConfig().ytdlp;
+    const cookies = getCookiesPath(song.originalUrl);
     const videoFilename = `${song.id}_video.mp4`;
     const audioFilename = `${song.id}_audio.m4a`;
     const videoPath = path.join(DOWNLOAD_DIR, videoFilename);
     const audioPath = path.join(DOWNLOAD_DIR, audioFilename);
 
-    const cookies = getCookiesPath(song.originalUrl);
-    const cfg = getAdvancedConfig().ytdlp;
+    song.status = 'downloading';
+    song.progress = 0;
+    song.localVideoPath = videoPath;
+    song.localAudioPath = audioPath;
+    song.lastError = null;
+    state.emitSync();
 
-    // Step 1: Download video-only (no audio)
-    const videoArgs = ['-f', cfg.videoFormat || 'bestvideo[ext=mp4]/bestvideo', '-o', videoPath];
-    if (cfg.noPlaylist !== false) videoArgs.push('--no-playlist');
-    if (cfg.concurrentFragments) videoArgs.push('-N', String(cfg.concurrentFragments));
-    if (cfg.httpChunkSize) videoArgs.push('--http-chunk-size', cfg.httpChunkSize);
-    if (cfg.proxy) videoArgs.push('--proxy', cfg.proxy);
-    if (cfg.socketTimeout) videoArgs.push('--socket-timeout', String(cfg.socketTimeout));
-    if (cfg.retries) videoArgs.push('--retries', String(cfg.retries));
-    if (cfg.fragmentRetries) videoArgs.push('--fragment-retries', String(cfg.fragmentRetries));
-    if (cfg.userAgent) videoArgs.push('--user-agent', cfg.userAgent);
-    if (cfg.noCheckCertificates) videoArgs.push('--no-check-certificates');
-    if (cfg.limitRate) videoArgs.push('--limit-rate', cfg.limitRate);
-    if (cfg.forceIPv4) videoArgs.push('--force-ipv4');
-    if (cfg.forceIPv6) videoArgs.push('--force-ipv6');
-    if (cfg.noPart) videoArgs.push('--no-part');
-    if (cfg.restrictFilenames) videoArgs.push('--restrict-filenames');
-    if (cfg.windowsFilenames) videoArgs.push('--windows-filenames');
-    if (cfg.noOverwrites) videoArgs.push('--no-overwrites');
-    if (cfg.ignoreErrors) videoArgs.push('--ignore-errors');
-    if (cfg.abortOnError) videoArgs.push('--abort-on-error');
-    if (cfg.noWarnings) videoArgs.push('--no-warnings');
-    if (Array.isArray(cfg.addHeader) && cfg.addHeader.length) cfg.addHeader.forEach(h => { videoArgs.push('--add-header', h); });
-    if (cfg.extractorArgs) { cfg.extractorArgs.split(/\s+/).filter(Boolean).forEach(a => videoArgs.push(a)); }
-    if (cfg.postprocessorArgs) { cfg.postprocessorArgs.split(/\s+/).filter(Boolean).forEach(a => videoArgs.push(a)); }
-    if (cookies) videoArgs.push('--cookies', cookies);
-    videoArgs.push(song.originalUrl);
-
-    const ytDlpExe = fs.existsSync(path.join(ROOT_DIR, 'yt-dlp.exe')) ? path.join(ROOT_DIR, 'yt-dlp.exe') : 'yt-dlp';
-    const videoProcess = spawn(ytDlpExe, videoArgs);
-    state.activeDownloads.set(song.id, videoProcess);
-
-    videoProcess.stdout.on('data', (data) => {
-        const match = data.toString().match(/(\d+\.?\d*)%/);
-        if (match) {
-            // Video download counts as 0-50% progress
-            const percent = parseFloat(match[1]) * 0.5;
-            if (percent > song.progress) {
-                song.progress = percent;
-                if (state.io) state.io.emit('update_progress', { id: song.id, progress: percent });
-            }
-        }
+    logger.info('Download', `Starting download for ${song.title}`, {
+        songId: song.id,
+        originalUrl: song.originalUrl,
     });
 
-    videoProcess.on('close', (code) => {
-        if (code !== 0) {
-            handleDownloadError(song, `Video download failed with code ${code}`);
-            return;
-        }
-        console.log(`[System] Video downloaded: ${videoFilename}`);
+    runDownloadStage({
+        song,
+        stageName: 'video',
+        attemptFormats: buildVideoFormatCandidates(cfg.videoFormat),
+        baseProgress: 0,
+        spanProgress: 0.5,
+        createArgs: (format) => buildVideoArgs({
+            cfg,
+            cookies,
+            outputPath: videoPath,
+            originalUrl: song.originalUrl,
+            format,
+        }),
+        onSuccess: async () => {
+            logger.info('Download', `Video stage completed for ${song.title}`, { file: videoFilename });
 
-        // Step 2: Download audio-only
-        const audioArgs = ['-f', cfg.audioFormat || 'bestaudio[ext=m4a]/bestaudio', '-o', audioPath];
-        if (cfg.noPlaylist !== false) audioArgs.push('--no-playlist');
-        if (cfg.concurrentFragments) audioArgs.push('-N', String(cfg.concurrentFragments));
-        if (cfg.proxy) audioArgs.push('--proxy', cfg.proxy);
-        if (cfg.socketTimeout) audioArgs.push('--socket-timeout', String(cfg.socketTimeout));
-        if (cfg.retries) audioArgs.push('--retries', String(cfg.retries));
-        if (cfg.userAgent) audioArgs.push('--user-agent', cfg.userAgent);
-        if (cfg.noCheckCertificates) audioArgs.push('--no-check-certificates');
-        if (cfg.limitRate) audioArgs.push('--limit-rate', cfg.limitRate);
-        if (cfg.forceIPv4) audioArgs.push('--force-ipv4');
-        if (cfg.forceIPv6) audioArgs.push('--force-ipv6');
-        if (cfg.noPart) audioArgs.push('--no-part');
-        if (cfg.restrictFilenames) audioArgs.push('--restrict-filenames');
-        if (cfg.windowsFilenames) audioArgs.push('--windows-filenames');
-        if (cfg.noOverwrites) audioArgs.push('--no-overwrites');
-        if (Array.isArray(cfg.addHeader) && cfg.addHeader.length) cfg.addHeader.forEach(h => { audioArgs.push('--add-header', h); });
-        if (cfg.extractorArgs) { cfg.extractorArgs.split(/\s+/).filter(Boolean).forEach(a => audioArgs.push(a)); }
-        if (cfg.postprocessorArgs) { cfg.postprocessorArgs.split(/\s+/).filter(Boolean).forEach(a => audioArgs.push(a)); }
-        if (cookies) audioArgs.push('--cookies', cookies);
-        audioArgs.push(song.originalUrl);
+            runDownloadStage({
+                song,
+                stageName: 'audio',
+                attemptFormats: buildAudioFormatCandidates(cfg.audioFormat),
+                baseProgress: 50,
+                spanProgress: 0.3,
+                createArgs: (format) => buildAudioArgs({
+                    cfg,
+                    cookies,
+                    outputPath: audioPath,
+                    originalUrl: song.originalUrl,
+                    format,
+                }),
+                onSuccess: async () => {
+                    logger.info('Download', `Audio stage completed for ${song.title}`, { file: audioFilename });
+                    emitProgress(song, 80);
+                    const loudnessGain = await analyzeLoudness(audioPath);
+                    emitProgress(song, 95);
+                    resetDownloadFlags(song.id);
 
-        const audioProcess = spawn(ytDlpExe, audioArgs);
-        state.activeDownloads.set(song.id, audioProcess);
+                    song.status = 'ready';
+                    song.progress = 100;
+                    song.src = `/downloads/${videoFilename}`;
+                    song.audioSrc = `/downloads/${audioFilename}`;
+                    song.loudnessGain = loudnessGain;
+                    song.karaokeReady = false;
+                    song.karaokeProcessing = false;
+                    song.karaokeProgress = 0;
+                    song.karaokeSrc = null;
+                    song.lyricsData = null;
+                    song.lyricsStatus = 'loading';
+                    song.lyricsSource = null;
+                    song.lyricsType = null;
+                    song.lyricsAvailable = false;
 
-        audioProcess.stdout.on('data', (data) => {
-            const match = data.toString().match(/(\d+\.?\d*)%/);
-            if (match) {
-                // Audio download counts as 50-80% progress
-                const percent = 50 + parseFloat(match[1]) * 0.3;
-                if (percent > song.progress) {
-                    song.progress = percent;
-                    if (state.io) state.io.emit('update_progress', { id: song.id, progress: percent });
-                }
-            }
-        });
+                    if (state.autoProcessKaraoke) queueKaraokeProcessing(song);
+                    if (state.currentPlaying && state.currentPlaying.id === song.id) {
+                        state.playerStatus.playing = true;
+                    }
 
-        audioProcess.on('close', (audioCode) => {
-            if (audioCode !== 0) {
-                handleDownloadError(song, `Audio download failed with code ${audioCode}`);
-                return;
-            }
-            console.log(`[System] Audio downloaded: ${audioFilename}`);
-            song.progress = 80;
-            if (state.io) state.io.emit('update_progress', { id: song.id, progress: 80 });
+                    logger.info('Download', `Song is ready: ${song.title}`, {
+                        songId: song.id,
+                        loudnessGain: Number(loudnessGain.toFixed(2)),
+                    });
 
-            // Step 3: Analyze loudness with FFmpeg (quick, ~1-2 seconds)
-            analyzeLoudness(audioPath, (loudnessGain) => {
-                song.progress = 95;
-                if (state.io) state.io.emit('update_progress', { id: song.id, progress: 95 });
-
-                state.activeDownloads.delete(song.id);
-
-                if (state.currentDownloadingId === song.id) {
-                    state.currentDownloadingId = null;
-                    state.isDownloading = false;
-                }
-
-                console.log(`[System] Ready: ${song.title} (Loudness Gain: ${loudnessGain.toFixed(2)} dB)`);
-                song.status = 'ready';
-                song.progress = 100;
-                song.src = `/downloads/${videoFilename}`;
-                song.audioSrc = `/downloads/${audioFilename}`;
-                song.localVideoPath = videoPath;
-                song.localAudioPath = audioPath;
-                song.loudnessGain = loudnessGain;
-                song.karaokeReady = false;
-                song.karaokeSrc = null;
-                song.lyricsStatus = 'loading';
-                song.lyricsSource = null;
-                song.lyricsType = null;
-                song.lyricsAvailable = false;
-
-                if (state.autoProcessKaraoke) queueKaraokeProcessing(song);
-                if (state.currentPlaying && state.currentPlaying.id === song.id) state.playerStatus.playing = true;
-                state.emitSync();
-                prefetchLyrics(song);
-                processDownloadQueue();
+                    state.emitSync();
+                    prefetchLyrics(song);
+                    processDownloadQueue();
+                },
             });
-        });
-
-        audioProcess.on('error', (err) => {
-            handleDownloadError(song, `Audio spawn error: ${err.message}`);
-        });
-    });
-
-    videoProcess.on('error', (err) => {
-        handleDownloadError(song, `Video spawn error: ${err.message}`);
+        },
     });
 };
 
 const processDownloadQueue = () => {
     const maxConcurrent = Math.max(1, Math.min(5, (getAdvancedConfig().system || {}).maxConcurrentDownloads || 1));
-    const activeCount = state.activeDownloads.size;
-    if (activeCount >= maxConcurrent) return;
+    if (state.activeDownloads.size >= maxConcurrent) return;
 
-    const pending = [];
-    if (state.currentPlaying && state.currentPlaying.status === 'pending') pending.push(state.currentPlaying);
-    state.playlist.forEach(s => { if (s && s.status === 'pending') pending.push(s); });
-    for (const song of pending) {
-        if (state.activeDownloads.has(song.id)) continue;
+    const pendingSongs = [];
+    if (state.currentPlaying && state.currentPlaying.status === 'pending') {
+        pendingSongs.push(state.currentPlaying);
+    }
+    state.playlist.forEach((song) => {
+        if (song && song.status === 'pending') pendingSongs.push(song);
+    });
+
+    for (const song of pendingSongs) {
         if (state.activeDownloads.size >= maxConcurrent) break;
+        if (state.activeDownloads.has(song.id)) continue;
         startDownload(song);
     }
 };
 
 module.exports = {
     startDownload,
-    processDownloadQueue
+    processDownloadQueue,
 };

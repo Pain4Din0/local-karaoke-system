@@ -1,74 +1,112 @@
-const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const { spawn } = require('child_process');
+
 const { getAdvancedConfig } = require('../config/configManager');
+const { DOWNLOAD_DIR, PYTHON_EXE, SEPARATED_DIR, ensureRuntimeDirs } = require('../config/runtime');
 const state = require('../utils/state');
+const logger = require('../utils/logger');
+const { setSongError } = require('../utils/song');
 
-const ROOT_DIR = path.join(__dirname, '../../');
-const SEPARATED_DIR = path.join(ROOT_DIR, 'separated');
-const DOWNLOAD_DIR = path.join(ROOT_DIR, 'downloads');
+ensureRuntimeDirs();
 
-if (!fs.existsSync(SEPARATED_DIR)) fs.mkdirSync(SEPARATED_DIR);
-
-// Detect Python executable (portable version takes priority)
-const PORTABLE_PYTHON = path.join(ROOT_DIR, 'python', 'python.exe');
-const PYTHON_EXE = fs.existsSync(PORTABLE_PYTHON) ? PORTABLE_PYTHON : 'python';
-
-let manualKaraokeQueue = []; // Queue for manually triggered processing (high priority)
+let manualKaraokeQueue = [];
 
 const cleanupSeparatedFiles = (songId) => {
     const modelName = (getAdvancedConfig().demucs && getAdvancedConfig().demucs.model) ? getAdvancedConfig().demucs.model : 'htdemucs';
     const songSeparatedDir = path.join(SEPARATED_DIR, modelName, `${songId}_audio`);
-    if (fs.existsSync(songSeparatedDir)) {
-        try {
-            fs.rmSync(songSeparatedDir, { recursive: true, force: true });
-            console.log(`[Karaoke] Cleaned up: ${songSeparatedDir}`);
-        } catch (e) {
-            console.error(`[Karaoke] Cleanup failed: ${e.message}`);
-        }
+    if (!fs.existsSync(songSeparatedDir)) return;
+
+    try {
+        fs.rmSync(songSeparatedDir, { recursive: true, force: true });
+        logger.info('Karaoke', 'Removed separated files', { songId, path: songSeparatedDir });
+    } catch (error) {
+        logger.warn('Karaoke', `Failed to remove separated files for ${songId}`, error);
+    }
+};
+
+const emitSongError = (song, message, stage = 'karaoke', extra = {}) => {
+    setSongError(song, message, stage);
+    logger.error('Karaoke', message, {
+        songId: song && song.id,
+        title: song && song.title,
+        ...extra,
+    });
+    if (state.io && song) {
+        state.io.emit('song_error', {
+            id: song.id,
+            title: song.title,
+            stage,
+            message,
+        });
     }
 };
 
 const terminateKaraokeProcess = (songId) => {
     const activeProc = state.activeKaraokeProcesses.get(songId);
     if (activeProc) {
-        console.log(`[Karaoke] Terminating process for song ${songId}`);
-        try {
-            // Kill the process tree on Windows
-            spawn('taskkill', ['/pid', activeProc.proc.pid, '/f', '/t'], { shell: true });
-        } catch (e) {
-            try { activeProc.proc.kill('SIGKILL'); } catch (e2) { }
+        logger.info('Karaoke', `Terminating active process for song ${songId}`);
+        activeProc.proc.__terminatedBySystem = true;
+        activeProc.proc.__terminationReason = 'karaoke_cleanup';
+        if (process.platform === 'win32') {
+            try {
+                spawn('taskkill', ['/pid', String(activeProc.proc.pid), '/f', '/t'], { shell: true })
+                    .on('error', (error) => logger.warn('Karaoke', `taskkill failed for ${songId}`, error));
+            } catch (error) {
+                logger.warn('Karaoke', `taskkill threw for ${songId}`, error);
+            }
+        } else {
+            try {
+                activeProc.proc.kill('SIGKILL');
+            } catch (error) {
+                logger.warn('Karaoke', `Failed to kill process for ${songId}`, error);
+            }
         }
+
         if (activeProc.song) {
             activeProc.song.karaokeProcessing = false;
             activeProc.song.karaokeProgress = 0;
         }
+
         state.activeKaraokeProcesses.delete(songId);
         cleanupSeparatedFiles(songId);
     }
-    // Also remove from manual queue if pending
-    const queueIdx = manualKaraokeQueue.findIndex(s => s && s.id === songId);
-    if (queueIdx !== -1) {
-        manualKaraokeQueue.splice(queueIdx, 1);
+
+    manualKaraokeQueue = manualKaraokeQueue.filter((song) => song && song.id !== songId);
+};
+
+const clearKaraokeQueue = () => {
+    manualKaraokeQueue = [];
+    for (const songId of [...state.activeKaraokeProcesses.keys()]) {
+        terminateKaraokeProcess(songId);
     }
+    state.isProcessingKaraoke = false;
 };
 
 const processVocalSeparation = (song) => {
-    // Use audio-only file for faster Demucs processing
-    const audioPath = song.localAudioPath;
-    if (!song || !audioPath || !fs.existsSync(audioPath)) return;
+    const audioPath = song && song.localAudioPath;
+    if (!song || !audioPath || !fs.existsSync(audioPath)) {
+        emitSongError(song, 'Cannot start karaoke processing: audio file is missing');
+        state.isProcessingKaraoke = false;
+        processNextKaraoke();
+        return;
+    }
     if (song.karaokeReady || song.karaokeProcessing) return;
 
     song.karaokeProcessing = true;
     song.karaokeProgress = 0;
-    console.log(`[Karaoke] Processing audio: ${path.basename(audioPath)}`);
-    state.emitSync(); // Sync state update
+    state.emitSync();
+
+    logger.info('Karaoke', `Starting vocal separation for ${song.title}`, {
+        songId: song.id,
+        audioPath,
+    });
 
     const dcfg = getAdvancedConfig().demucs;
-    const args = ['-n', dcfg.model || 'htdemucs', '-o', SEPARATED_DIR];
+    const args = ['-m', 'demucs', '-n', dcfg.model || 'htdemucs', '-o', SEPARATED_DIR];
+
     if (dcfg.twoStems) args.push('--two-stems', dcfg.twoStems);
-    if (dcfg.outputFormat === 'mp3') args.push('--mp3');
-    else if (dcfg.outputFormat) args.push('--mp3'); // default to mp3 for karaoke
+    if (dcfg.outputFormat === 'mp3' || dcfg.outputFormat) args.push('--mp3');
     if (dcfg.overlap != null && dcfg.overlap !== 0.25) args.push('--overlap', String(dcfg.overlap));
     if (dcfg.segment != null && dcfg.segment !== 7.8) args.push('--segment', String(dcfg.segment));
     if (dcfg.shifts != null && dcfg.shifts !== 1) args.push('--shifts', String(dcfg.shifts));
@@ -81,13 +119,22 @@ const processVocalSeparation = (song) => {
     if (dcfg.repo) args.push('--repo', dcfg.repo);
     args.push(audioPath);
 
-    // Use python -m demucs to ensure it works with portable Python
-    const proc = spawn(PYTHON_EXE, ['-m', 'demucs', ...args], { shell: true });
+    const proc = spawn(PYTHON_EXE, args, { shell: false });
+    const logTail = [];
+    let finished = false;
+    const finishOnce = (handler) => {
+        if (finished) return;
+        finished = true;
+        handler();
+    };
     state.activeKaraokeProcesses.set(song.id, { proc, song });
 
     proc.stderr.on('data', (data) => {
-        const line = data.toString();
-        // Parse progress from Demucs output (e.g., "50%|...")
+        const line = data.toString().trim();
+        if (!line) return;
+        logTail.push(line);
+        if (logTail.length > 20) logTail.shift();
+
         const progressMatch = line.match(/(\d+(?:\.\d+)?)\s*%/);
         if (progressMatch) {
             const progress = Math.min(99, Math.round(parseFloat(progressMatch[1])));
@@ -96,106 +143,126 @@ const processVocalSeparation = (song) => {
                 if (state.io) state.io.emit('karaoke_progress', { id: song.id, progress });
             }
         }
-        if (line.trim()) console.log(`[Demucs] ${line.trim()}`);
+
+        logger.info('Demucs', line, { songId: song.id });
     });
 
     proc.on('close', (code) => {
-        state.activeKaraokeProcesses.delete(song.id);
-        song.karaokeProcessing = false;
+        finishOnce(() => {
+            state.activeKaraokeProcesses.delete(song.id);
+            song.karaokeProcessing = false;
 
-        if (code === 0) {
-            const modelName = (getAdvancedConfig().demucs || {}).model || 'htdemucs';
-            const noVocalsPath = path.join(SEPARATED_DIR, modelName, `${song.id}_audio`, 'no_vocals.mp3');
-            if (fs.existsSync(noVocalsPath)) {
-                const karaokePath = path.join(DOWNLOAD_DIR, `${song.id}_karaoke.mp3`);
-                fs.copyFileSync(noVocalsPath, karaokePath);
-                song.karaokeSrc = `/downloads/${song.id}_karaoke.mp3?t=${Date.now()}`;
-                song.karaokeReady = true;
-                song.karaokeProgress = 100;
-                console.log(`[Karaoke] Ready: ${song.title}`);
-                // Cleanup separated files after successful copy
+            if (proc.__terminatedBySystem) {
+                logger.info('Karaoke', 'Karaoke processing terminated during cleanup', {
+                    songId: song.id,
+                    title: song.title,
+                    reason: proc.__terminationReason || 'cleanup',
+                    code,
+                });
                 cleanupSeparatedFiles(song.id);
-            } else {
-                console.error(`[Karaoke] Output not found: ${noVocalsPath}`);
+            } else if (code === 0) {
+                const modelName = (getAdvancedConfig().demucs || {}).model || 'htdemucs';
+                const noVocalsPath = path.join(SEPARATED_DIR, modelName, `${song.id}_audio`, 'no_vocals.mp3');
+                if (fs.existsSync(noVocalsPath)) {
+                    const karaokePath = path.join(DOWNLOAD_DIR, `${song.id}_karaoke.mp3`);
+                    fs.copyFileSync(noVocalsPath, karaokePath);
+                    song.karaokeSrc = `/downloads/${song.id}_karaoke.mp3?t=${Date.now()}`;
+                    song.karaokeReady = true;
+                    song.karaokeProgress = 100;
+                    logger.info('Karaoke', `Karaoke track ready for ${song.title}`, { songId: song.id });
+                    cleanupSeparatedFiles(song.id);
+                } else {
+                    emitSongError(song, 'Demucs finished but no_vocals.mp3 was not produced', 'karaoke', {
+                        expectedOutput: noVocalsPath,
+                    });
+                    cleanupSeparatedFiles(song.id);
+                }
+            } else if (code !== null) {
+                emitSongError(song, `Demucs exited with code ${code}`, 'karaoke', {
+                    output: logTail.join('\n'),
+                });
+                cleanupSeparatedFiles(song.id);
             }
-        } else if (code !== null) {
-            console.error(`[Karaoke] Failed with code ${code}`);
-            cleanupSeparatedFiles(song.id);
-        }
-        state.emitSync();
-        state.isProcessingKaraoke = false; // Reset flag to allow next process
-        processNextKaraoke();
+
+            state.emitSync();
+            state.isProcessingKaraoke = false;
+            processNextKaraoke();
+        });
     });
 
-    proc.on('error', (err) => {
-        state.activeKaraokeProcesses.delete(song.id);
-        song.karaokeProcessing = false;
-        song.karaokeProgress = 0;
-        console.error(`[Karaoke] Spawn error: ${err.message}`);
-        cleanupSeparatedFiles(song.id);
-        state.isProcessingKaraoke = false; // Reset flag to allow next process
-        processNextKaraoke();
+    proc.on('error', (error) => {
+        finishOnce(() => {
+            state.activeKaraokeProcesses.delete(song.id);
+            song.karaokeProcessing = false;
+            song.karaokeProgress = 0;
+            if (proc.__terminatedBySystem) {
+                logger.info('Karaoke', 'Demucs spawn terminated during cleanup', {
+                    songId: song.id,
+                    title: song.title,
+                    reason: proc.__terminationReason || 'cleanup',
+                });
+            } else {
+                emitSongError(song, 'Failed to spawn Demucs process', 'karaoke', error);
+            }
+            cleanupSeparatedFiles(song.id);
+            state.emitSync();
+            state.isProcessingKaraoke = false;
+            processNextKaraoke();
+        });
     });
 };
 
 const processNextKaraoke = () => {
     if (state.isProcessingKaraoke) return;
 
-    // 1. Check manual queue first (High Priority)
     if (manualKaraokeQueue.length > 0) {
         const nextSong = manualKaraokeQueue.shift();
         if (nextSong && nextSong.status === 'ready' && !nextSong.karaokeReady && !nextSong.karaokeProcessing) {
             state.isProcessingKaraoke = true;
             processVocalSeparation(nextSong);
             return;
-        } else {
-            // Invalid entry in manual queue, try next
-            processNextKaraoke();
-            return;
         }
+        processNextKaraoke();
+        return;
     }
 
-    // 2. Check auto-process queue (Playlist Order)
     if (state.autoProcessKaraoke) {
-        // Find the first song in playlist (or current) that needs processing
-        // Order: Current Song -> Playlist [0] -> Playlist [1] ...
-        const candidates = [state.currentPlaying, ...state.playlist].filter(s => s && s.status === 'ready' && !s.karaokeReady && !s.karaokeProcessing);
+        const candidates = [state.currentPlaying, ...state.playlist]
+            .filter((song) => song && song.status === 'ready' && !song.karaokeReady && !song.karaokeProcessing);
 
         if (candidates.length > 0) {
-            const nextSong = candidates[0];
             state.isProcessingKaraoke = true;
-            processVocalSeparation(nextSong);
+            processVocalSeparation(candidates[0]);
             return;
         }
     }
 
-    // No candidates found
     state.isProcessingKaraoke = false;
 };
 
 const queueKaraokeProcessing = (song, prioritize = false) => {
     if (!song || song.karaokeReady || song.karaokeProcessing) return;
 
-    if (prioritize) {
-        // Add to manual queue if not already there
-        if (!manualKaraokeQueue.find(s => s.id === song.id)) {
-            manualKaraokeQueue.push(song);
-        }
+    if (prioritize && !manualKaraokeQueue.find((item) => item && item.id === song.id)) {
+        manualKaraokeQueue.push(song);
     }
 
-    // Always try to process next (trigger check)
-    if (!state.isProcessingKaraoke) processNextKaraoke();
+    if (!state.isProcessingKaraoke) {
+        processNextKaraoke();
+    }
 };
 
 const queueAllReadySongsForKaraoke = () => {
-    // Just trigger the processor, it will scan the list if autoProcess is on
-    if (!state.isProcessingKaraoke) processNextKaraoke();
+    if (!state.isProcessingKaraoke) {
+        processNextKaraoke();
+    }
 };
 
 module.exports = {
     processVocalSeparation,
     terminateKaraokeProcess,
+    clearKaraokeQueue,
     processNextKaraoke,
     queueKaraokeProcessing,
-    queueAllReadySongsForKaraoke
+    queueAllReadySongsForKaraoke,
 };

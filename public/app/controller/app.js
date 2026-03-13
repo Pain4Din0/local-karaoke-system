@@ -1,285 +1,7 @@
-const { createApp, ref, computed, nextTick } = Vue;
-const socket = io();
+import { messages } from './messages.js';
 
-// Messages and Localization
-const messages = {
-    en: {
-        enterName: "Enter Nickname",
-        join: "Join System",
-        playlist: "Queue",
-        history: "History",
-        pasteLink: "Paste Link (Bilibili/YouTube/YouTube Music)",
-        queue: "Up Next",
-        export: "Export List",
-        idle: "Ready to play",
-        join_warn: "Please enter a name first",
-        reset_confirm: "Are you sure you want to reset the system? This will clear all playlists and history.",
-        modify_nick: "Modify Nickname",
-        save: "Save",
-        cancel: "Cancel",
-        tuning: "Audio Settings",
-        volume: "Volume",
-        pitch: "Key Shift",
-        reset: "Reset",
-        vocal_removal: "Vocal Remover",
-        vocal_on: "Vocals On",
-        vocal_off: "Vocals Off",
-        lyrics: "Lyrics",
-        lyrics_on: "Lyrics On",
-        lyrics_off: "Lyrics Off",
-        lyrics_source: "Lyrics Source",
-        lyrics_source_auto: "Auto",
-        lyrics_source_sidecar: "Local LRC",
-        lyrics_source_ytmusic: "YouTube Music",
-        lyrics_source_youtube_captions: "YouTube Captions",
-        lyrics_source_lrclib: "LRCLIB",
-        vocal_hint: "Processing may take 1-2 minutes",
-        vocal_warning: "Uses Demucs AI model. May cause high system load. First-time model loading might be slow (stuck at 99%), please wait.",
-        vocal_unavailable: "Not Available",
-        processing: "Processing",
-        ready: "Ready",
-        click_to_process: "Click to process",
-        start_process: "Remove Vocals",
-        auto_process: "Auto-process new songs",
-        auto_process_hint: "Automatically prepare instrumental tracks",
-        shuffle: "Shuffle",
-        loudness_norm: "Loudness Normalization",
-        select_songs: "Select Songs",
-        select_all: "Select All",
-        selected: "selected",
-        add_selected: "Add Selected",
-        select_songs_first: "Select at least one song",
-        tutorial_restart: "Show Tutorial",
-        advanced_settings: "Advanced Settings",
-        restore_defaults: "Restore default settings",
-        restore_defaults_confirm: "Restore all advanced settings to defaults? Current values will be lost.",
-        // Tutorial Steps
-        tut_start_btn: "Get Started",
-        tut_welcome_title: "Welcome!",
-        tut_welcome_desc: "Let's take a quick tour to learn how to use the Local Karaoke System.",
-        tut_interface_title: "Main Interface",
-        tut_interface_desc: "This is your main control center.",
-        tut_add_title: "Add Songs",
-        tut_add_desc: "Paste Bilibili, YouTube, or YouTube Music links here. We support single videos, Favorites, and Playlists!",
-        tut_add_hint: "Supports Bilibili Favorites, YouTube & YouTube Music playlists",
-        click_to_see_batch: "Click to simulate batch import",
-        tut_status_title: "Status Indicators",
-        tut_status_desc: "Understand what each color means.",
-        tut_status_downloading: "Blinking Blue",
-        status_downloading_desc: "Downloading content...",
-        status_ready: "Solid Blue",
-        status_ready_desc: "Downloaded. Ready to play (original audio).",
-        status_processing: "Blinking Purple",
-        status_processing_desc: "Separating vocals (making instrumental)...",
-        status_full_ready: "Solid Purple",
-        status_full_ready_desc: "Instrumental track is ready!",
-        tut_audio_title: "Audio Settings",
-        tut_audio_desc: "Control vocal removal, volume, and pitch.",
-        tut_misc_title: "Miscellaneous",
-        tut_reset_desc: "Reset playlist & history",
-        tut_share_title: "Share",
-        tut_share_desc: "Invite friends via QR code",
-        tut_nick_title: "Profile",
-        tut_nick_desc: "Tap to rename or restart tutorial",
-        tut_final_title: "You're All Set!",
-        tut_final_desc: "You can now start adding songs and singing! When you return from the background or lock screen, please remember to refresh the page to sync the status.",
-        back: "Back",
-        next: "Next",
-        mock_player: "PREVIEW PLAYER",
-        try_clicking: "(Try clicking the controls)",
-        status_playing: "PLAYING",
-        status_paused: "PAUSED",
-        status_downloading: "DOWNLOADING",
-        status_separating: "SEPARATING",
-        label_video: "VIDEO",
-        label_audio: "AUDIO",
-        label_processing: "PROCESSING"
-    },
-    zh: {
-        enterName: "输入您的昵称",
-        join: "进入系统",
-        playlist: "播放列表",
-        history: "历史记录",
-        pasteLink: "粘贴 Bilibili / YouTube / YouTube Music 链接",
-        queue: "待播队列",
-        export: "导出列表",
-        idle: "当前空闲，请点歌",
-        join_warn: "请先输入昵称",
-        reset_confirm: "确定要重置系统吗？这将清空所有播放列表和历史记录。",
-        modify_nick: "修改昵称",
-        save: "保存",
-        cancel: "取消",
-        tuning: "音频设置",
-        volume: "音量",
-        pitch: "升降调",
-        reset: "重置",
-        vocal_removal: "人声消除",
-        vocal_on: "人声开启",
-        vocal_off: "人声已消除",
-        lyrics: "歌词",
-        lyrics_on: "歌词开启",
-        lyrics_off: "歌词关闭",
-        lyrics_source: "歌词来源",
-        lyrics_source_auto: "自动",
-        lyrics_source_sidecar: "本地 LRC",
-        lyrics_source_ytmusic: "YouTube Music",
-        lyrics_source_youtube_captions: "YouTube 字幕",
-        lyrics_source_lrclib: "LRCLIB",
-        vocal_hint: "处理可能需要 1-2 分钟",
-        vocal_warning: "使用 Demucs AI 模型进行处理。可能会造成较大性能开销。首次加载模型时可能较慢（进度条卡在99%），请耐心等待或留意控制台输出。",
-        vocal_unavailable: "暂不可用",
-        processing: "处理中",
-        ready: "就绪",
-        click_to_process: "点击开始处理",
-        start_process: "消除人声",
-        auto_process: "自动处理新歌曲",
-        auto_process_hint: "自动为歌曲准备纯伴奏",
-        shuffle: "随机打乱",
-        loudness_norm: "响度均衡",
-        select_songs: "选择歌曲",
-        select_all: "全选",
-        selected: "已选",
-        add_selected: "添加选中歌曲",
-        select_songs_first: "请至少选择一首歌曲",
-        tutorial_restart: "重新观看教学",
-        advanced_settings: "高级设置",
-        restore_defaults: "恢复默认设置",
-        restore_defaults_confirm: "确定要将所有高级设置恢复为默认值吗？当前设置将丢失。",
-        // Tutorial Steps
-        tut_start_btn: "开始使用",
-        tut_welcome_title: "欢迎！",
-        tut_welcome_desc: "让我们花一点时间了解如何使用本系统。",
-        tut_interface_title: "主界面",
-        tut_interface_desc: "这里是您的主要控制中心。",
-        tut_add_title: "点歌",
-        tut_add_desc: "在此粘贴 Bilibili、YouTube 或 YouTube Music 链接。我们支持单曲、收藏夹及播放列表导入！",
-        tut_add_hint: "支持 Bilibili 收藏夹、YouTube 和 YouTube Music 播放列表",
-        click_to_see_batch: "点击模拟批量导入",
-        tut_status_title: "状态指示灯",
-        tut_status_desc: "了解不同颜色代表的含义。",
-        tut_status_downloading: "蓝色闪烁",
-        status_downloading_desc: "正在下载内容...",
-        status_ready: "蓝色常亮",
-        status_ready_desc: "下载完成。可以播放（原唱）。",
-        status_processing: "紫色闪烁",
-        status_processing_desc: "正在消除人声（制作伴奏）...",
-        status_full_ready: "紫色常亮",
-        status_full_ready_desc: "伴奏制作完成，已完全就绪！",
-        tut_audio_title: "音频设置",
-        tut_audio_desc: "控制人声消除、音量和升降调。",
-        tut_misc_title: "杂项功能",
-        tut_reset_desc: "重置播放列表和历史",
-        tut_share_title: "分享",
-        tut_share_desc: "显示二维码邀请朋友",
-        tut_nick_title: "个人中心",
-        tut_nick_desc: "点击此处修改昵称或重看教学",
-        tut_final_title: "准备就绪！",
-        tut_final_desc: "您现在可以开始点歌并尽情歌唱了！当您从后台或锁屏回来时，请注意刷新网页以同步状态。",
-        back: "上一步",
-        next: "下一步",
-        mock_player: "演示播放器",
-        try_clicking: "（试着点击控件）",
-        status_playing: "播放中",
-        status_paused: "已暂停",
-        status_downloading: "下载中",
-        status_separating: "分离中",
-        label_video: "视频",
-        label_audio: "音频",
-        label_processing: "处理"
-    },
-    ja: {
-        enterName: "ニックネームを入力",
-        join: "参加する",
-        playlist: "プレイリスト",
-        history: "履歴",
-        pasteLink: "リンクを貼り付け (Bilibili/YouTube Music/YT)",
-        queue: "再生待ち",
-        export: "リストを出力",
-        idle: "リクエスト待ち",
-        join_warn: "名前を入力してください",
-        reset_confirm: "システムをリセットしますか？プレイリストと履歴はすべて消去されます。",
-        modify_nick: "ニックネーム変更",
-        save: "保存",
-        cancel: "キャンセル",
-        tuning: "オーディオ設定",
-        volume: "音量",
-        pitch: "キー変更",
-        reset: "リセット",
-        vocal_removal: "ボーカル除去",
-        vocal_on: "ボーカルあり",
-        vocal_off: "ボーカルなし",
-        lyrics: "歌詞",
-        lyrics_on: "歌詞オン",
-        lyrics_off: "歌詞オフ",
-        lyrics_source: "歌詞ソース",
-        lyrics_source_auto: "自動",
-        lyrics_source_sidecar: "ローカル LRC",
-        lyrics_source_ytmusic: "YouTube Music",
-        lyrics_source_youtube_captions: "YouTube 字幕",
-        lyrics_source_lrclib: "LRCLIB",
-        vocal_hint: "処理には 1～2 分かかります",
-        vocal_warning: "Demucs AIモデルを使用します。システム負荷が高くなる可能性があります。初回モデル読み込みは遅くなる場合があります（99%で停止）、お待ちください。",
-        vocal_unavailable: "利用不可",
-        processing: "処理中",
-        ready: "準備完了",
-        click_to_process: "クリックで処理開始",
-        start_process: "ボーカル除去",
-        auto_process: "新曲を自動処理",
-        auto_process_hint: "自動的にインストを準備",
-        shuffle: "シャッフル",
-        loudness_norm: "ラウドネス正規化",
-        select_songs: "曲を選択",
-        select_all: "すべて選択",
-        selected: "選択済み",
-        add_selected: "選択した曲を追加",
-        select_songs_first: "曲を選択してください",
-        tutorial_restart: "チュートリアルを表示",
-        advanced_settings: "詳細設定",
-        restore_defaults: "既定に戻す",
-        restore_defaults_confirm: "すべての詳細設定を既定値に戻しますか？現在の設定は失われます。",
-        // Tutorial Steps
-        tut_start_btn: "始める",
-        tut_welcome_title: "ようこそ！",
-        tut_welcome_desc: "使い方の簡単なツアーを始めましょう。",
-        tut_interface_title: "メイン画面",
-        tut_interface_desc: "これがメインのコントロールセンターです。",
-        tut_add_title: "曲を追加",
-        tut_add_desc: "Bilibili、YouTube、YouTube Music のリンクを貼り付けてください。リストやマイリストもサポートしています！",
-        tut_add_hint: "Bilibiliマイリスト、YouTube / YouTube Music プレイリスト対応",
-        click_to_see_batch: "クリックして一括インポートをシミュレート",
-        tut_status_title: "ステータス表示",
-        tut_status_desc: "色の意味を理解しましょう。",
-        tut_status_downloading: "青点滅",
-        status_downloading_desc: "コンテンツをダウンロード中...",
-        status_ready: "青点灯",
-        status_ready_desc: "ダウンロード完了。再生可能（原曲）。",
-        status_processing: "紫点滅",
-        status_processing_desc: "ボーカル除去中（インスト作成中）...",
-        status_full_ready: "紫点灯",
-        status_full_ready_desc: "インストの準備が完了しました！",
-        tut_audio_title: "オーディオ設定",
-        tut_audio_desc: "ボーカル除去、音量、キー変更を操作します。",
-        tut_misc_title: "その他",
-        tut_reset_desc: "リストと履歴をリセット",
-        tut_share_title: "共有",
-        tut_share_desc: "QRコードを表示",
-        tut_nick_title: "プロフィール",
-        tut_nick_desc: "タップして名前変更やチュートリアル再表示",
-        tut_final_title: "準備完了！",
-        tut_final_desc: "曲を追加して歌い始めましょう！バックグラウンドやロック画面から戻ったときは、状態を同期するために「更新」ボタンをクリックしてください。",
-        back: "戻る",
-        next: "次へ",
-        mock_player: "プレビュー",
-        try_clicking: "（コントロールをクリックしてみてください）",
-        status_playing: "再生中",
-        status_paused: "停止中",
-        status_downloading: "DL中",
-        status_separating: "分離中",
-        label_video: "映像",
-        label_audio: "音声",
-        label_processing: "処理"
-    },
-};
+const { createApp, ref, computed, nextTick } = window.Vue;
+const socket = window.io();
 
 function throttle(func, limit) {
     let lastFunc, lastRan;
@@ -316,6 +38,7 @@ createApp({
         const addUrl = ref("");
         const isAdding = ref(false);
         const activeTab = ref('playlist');
+        const notifications = ref([]);
 
         const localPlaying = ref(false);
         const localCurrentTime = ref(0);
@@ -357,6 +80,28 @@ createApp({
 
         const currentNetwork = computed(() => networks.value[currentNetIndex.value] || networks.value[0]);
         const isAllSelected = computed(() => playlistItems.value.length > 0 && selectedItems.value.size === playlistItems.value.length);
+        let notificationId = 0;
+        const clearBrowserState = () => {
+            ['ktv_lang', 'ktv_nickname', 'ktv_tutorial_completed'].forEach((key) => localStorage.removeItem(key));
+        };
+
+        const dismissNotification = (id) => {
+            notifications.value = notifications.value.filter(item => item.id !== id);
+        };
+
+        const pushNotification = (message, type = 'error', timeoutMs = 4500) => {
+            const text = typeof message === 'string'
+                ? message
+                : (message && typeof message.message === 'string' ? message.message : 'Operation failed');
+            const item = { id: ++notificationId, text, type };
+            notifications.value = [...notifications.value, item];
+            setTimeout(() => dismissNotification(item.id), timeoutMs);
+        };
+
+        const logAndNotify = (message, payload, type = 'error', timeoutMs = 4500) => {
+            console[type === 'error' ? 'error' : 'warn']('[Controller]', message, payload || '');
+            pushNotification(message, type, timeoutMs);
+        };
 
 
         const saveNickname = () => {
@@ -380,16 +125,24 @@ createApp({
         const formatTime = (seconds) => { if (!seconds || isNaN(seconds)) return "00:00"; const m = Math.floor(seconds / 60); const s = Math.floor(seconds % 60); return `${m}:${s.toString().padStart(2, '0')}`; };
 
         const addSong = () => {
-            if (!addUrl.value) return;
+            const nextUrl = String(addUrl.value || '').trim();
+            if (!nextUrl) {
+                pushNotification(t('pasteLink'));
+                return;
+            }
+            addUrl.value = nextUrl;
             isAdding.value = true;
-            socket.emit('parse_url', addUrl.value);
+            socket.emit('parse_url', nextUrl);
         };
 
-        const closePlaylistModal = () => {
+        const closePlaylistModal = (options = {}) => {
+            const keepBusyState = !!options.keepBusyState;
             showPlaylistModal.value = false;
             playlistItems.value = [];
             selectedItems.value.clear();
-            isAdding.value = false;
+            if (!keepBusyState) {
+                isAdding.value = false;
+            }
             addUrl.value = "";
         };
 
@@ -410,12 +163,17 @@ createApp({
         };
 
         const confirmAddBatch = () => {
-            const songsToAdd = Array.from(selectedItems.value).map(idx => playlistItems.value[idx]);
+            const songsToAdd = Array.from(selectedItems.value)
+                .map(idx => playlistItems.value[idx])
+                .filter(Boolean);
             if (songsToAdd.length > 0) {
                 socket.emit('add_batch_songs', { songs: songsToAdd, requester: nickname.value });
                 isAdding.value = true;
+                closePlaylistModal({ keepBusyState: true });
+            } else {
+                pushNotification(t('select_songs_first'));
+                closePlaylistModal();
             }
-            closePlaylistModal();
         };
 
         const manageQueue = (action, item) => socket.emit('manage_queue', { action, id: item.id });
@@ -427,6 +185,11 @@ createApp({
                 socket.emit('system_reset');
             }
         };
+        const factoryResetSystem = () => {
+            if (confirm(t('factory_reset_confirm'))) {
+                socket.emit('system_factory_reset');
+            }
+        };
         const reAddHistory = (item) => { socket.emit('readd_history', item); activeTab.value = 'playlist'; };
 
         const exportHistory = () => {
@@ -434,7 +197,11 @@ createApp({
             history.value.forEach((item, index) => { text += `${index + 1}. ${item.title}\n   UP: ${item.uploader} | BY: ${item.requester} | URL: ${item.originalUrl}\n\n`; });
             const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
             const url = URL.createObjectURL(blob);
-            const a = document.createElement('a'); a.href = url; a.download = `playlist_${new Date().toISOString().slice(0, 10)}.txt`; a.click();
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `playlist_${new Date().toISOString().slice(0, 10)}.txt`;
+            a.click();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
         };
 
         const sendSeek = (val) => socket.emit('control_action', { type: 'seek', value: val });
@@ -622,8 +389,22 @@ createApp({
             const item = playlist.value.find(p => p.id === id);
             if (item) item.karaokeProgress = progress;
         });
-        socket.on('add_success', () => { isAdding.value = false; addUrl.value = ""; });
-        socket.on('error_msg', (msg) => { alert(msg); isAdding.value = false; });
+        socket.on('add_success', (payload) => {
+            isAdding.value = false;
+            addUrl.value = "";
+            const count = Number(payload?.count || 0);
+            if (count > 1) {
+                pushNotification(`${count} songs added`, 'success', 2200);
+            }
+        });
+        socket.on('error_msg', (msg) => {
+            isAdding.value = false;
+            logAndNotify(typeof msg === 'string' ? msg : (msg?.message || 'Operation failed'), msg, 'error');
+        });
+        socket.on('song_error', (payload) => {
+            const title = payload && payload.title ? `${payload.title}: ` : '';
+            logAndNotify(`${title}${payload?.message || 'Song processing failed'}`, payload, 'error', 6000);
+        });
         socket.on('advanced_config', (config) => {
             if (config && typeof config === 'object') advancedConfig.value = config;
         });
@@ -643,7 +424,29 @@ createApp({
                 }
             } else {
                 isAdding.value = false;
-                alert("Failed to parse URL");
+                logAndNotify('Failed to parse URL', result, 'error');
+            }
+        });
+
+        socket.on('connect_error', (error) => {
+            logAndNotify(error?.message || 'Connection error', error, 'warn', 5000);
+        });
+
+        socket.on('disconnect', (reason) => {
+            logAndNotify(`Connection lost: ${reason}`, { reason }, 'warn', 5000);
+        });
+
+        socket.on('connect', () => {
+            pushNotification('Connected', 'success', 1800);
+        });
+        socket.on('exec_control', (action) => {
+            if (!action || typeof action.type !== 'string') return;
+            if (action.type === 'clear_client_storage') {
+                clearBrowserState();
+                return;
+            }
+            if (action.type === 'reload') {
+                location.reload();
             }
         });
 
@@ -658,8 +461,9 @@ createApp({
             nickname, tempNick, saveNickname,
             playlist, currentPlaying, history, activeTab,
             addUrl, isAdding,
+            notifications, dismissNotification,
             localPlaying, localCurrentTime, localDuration, localVolumeDisplay, isDragging,
-            addSong, manageQueue, shuffleQueue, skipSong, control, resetSystem,
+            addSong, manageQueue, shuffleQueue, skipSong, control, resetSystem, factoryResetSystem,
             reAddHistory, exportHistory,
             onSeekInput, onSeekEnd, onVolumeInput, formatTime,
 
