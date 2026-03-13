@@ -6,7 +6,7 @@ cd /d "%~dp0"
 title Local Karaoke System Launcher
 color 07
 
-set "BOOTSTRAP_STATE=.bootstrap_state.cmd"
+set "BOOTSTRAP_STATE=.bootstrap\bootstrap_state.cmd"
 set "BOOTSTRAP_NODE_EXE="
 set "FAIL_STAGE=bootstrap"
 if exist "%BOOTSTRAP_STATE%" del /f /q "%BOOTSTRAP_STATE%" >nul 2>&1

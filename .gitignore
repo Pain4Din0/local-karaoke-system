@@ -10,6 +10,7 @@ build/
 # Portable runtimes
 bin/
 python/
+.bootstrap/
 .mirror_config
 .bootstrap_state.cmd
 .bootstrap_pip_state.json
@@ -35,4 +36,3 @@ secrets.json
 yt-dlp.exe
 ffmpeg.exe
 ffprobe.exe
-package-lock.json

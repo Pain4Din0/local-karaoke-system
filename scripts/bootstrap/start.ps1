@@ -7,9 +7,20 @@ Set-Location -LiteralPath $RootDir
 $NodeVersion = 'v22.13.0'
 $NodeDirName = "node-$NodeVersion-win-x64"
 $PythonVersion = '3.11.9'
-$MirrorConfigPath = Join-Path $RootDir '.mirror_config'
-$BootstrapStatePath = Join-Path $RootDir '.bootstrap_state.cmd'
-$PipRefreshStatePath = Join-Path $RootDir '.bootstrap_pip_state.json'
+$BootstrapDir = Join-Path $RootDir '.bootstrap'
+$MirrorConfigPath = Join-Path $BootstrapDir 'mirror_config.txt'
+$BootstrapStatePath = Join-Path $BootstrapDir 'bootstrap_state.cmd'
+$PipRefreshStatePath = Join-Path $BootstrapDir 'pip_refresh_state.json'
+$NodeArchivePath = Join-Path $BootstrapDir 'node.zip'
+$PythonArchivePath = Join-Path $BootstrapDir 'python.zip'
+$FfmpegArchivePath = Join-Path $BootstrapDir 'ffmpeg.zip'
+$VcRedistInstallerPath = Join-Path $BootstrapDir 'vc_redist.x64.exe'
+$GetPipPath = Join-Path $BootstrapDir 'bootstrap-get-pip.py'
+$NodeTempDir = Join-Path $BootstrapDir 'bin_temp'
+$FfmpegTempDir = Join-Path $BootstrapDir 'ffmpeg_temp'
+$LegacyMirrorConfigPath = Join-Path $RootDir '.mirror_config'
+$LegacyBootstrapStatePath = Join-Path $RootDir '.bootstrap_state.cmd'
+$LegacyPipRefreshStatePath = Join-Path $RootDir '.bootstrap_pip_state.json'
 $PipRefreshIntervalHours = 168
 $SkipLaunch = $env:START_NO_LAUNCH -eq '1'
 
@@ -39,6 +50,45 @@ function Remove-PathIfExists([string]$Path) {
     if (Test-Path -LiteralPath $Path) {
         Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction SilentlyContinue
     }
+}
+
+function Ensure-Directory([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path)) {
+        New-Item -ItemType Directory -Force -Path $Path | Out-Null
+    }
+}
+
+function Hide-PathIfPossible([string]$Path) {
+    try {
+        $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+        if (($item.Attributes -band [IO.FileAttributes]::Hidden) -eq 0) {
+            $item.Attributes = $item.Attributes -bor [IO.FileAttributes]::Hidden
+        }
+    } catch {
+    }
+}
+
+function Initialize-BootstrapStorage {
+    Ensure-Directory $BootstrapDir
+    Hide-PathIfPossible $BootstrapDir
+
+    if (Test-Path -LiteralPath $LegacyMirrorConfigPath) {
+        if (-not (Test-Path -LiteralPath $MirrorConfigPath)) {
+            Move-Item -LiteralPath $LegacyMirrorConfigPath -Destination $MirrorConfigPath -Force
+        } else {
+            Remove-PathIfExists $LegacyMirrorConfigPath
+        }
+    }
+
+    if (Test-Path -LiteralPath $LegacyPipRefreshStatePath) {
+        if (-not (Test-Path -LiteralPath $PipRefreshStatePath)) {
+            Move-Item -LiteralPath $LegacyPipRefreshStatePath -Destination $PipRefreshStatePath -Force
+        } else {
+            Remove-PathIfExists $LegacyPipRefreshStatePath
+        }
+    }
+
+    Remove-PathIfExists $LegacyBootstrapStatePath
 }
 
 function Get-CommandPath([string]$Name) {
@@ -82,7 +132,8 @@ function Invoke-Download([string[]]$Urls, [string]$TargetFile, [string]$DisplayN
         Fail "No download URLs were configured for $DisplayName."
     }
 
-    $tempTarget = "$TargetFile.download"
+    Ensure-Directory $BootstrapDir
+    $tempTarget = Join-Path $BootstrapDir ((Split-Path -Path $TargetFile -Leaf) + '.download')
     $downloadErrors = @()
 
     foreach ($url in $Urls) {
@@ -228,8 +279,17 @@ function Get-MirrorSettings([string]$Choice) {
 }
 
 function Cleanup-StaleBootstrapArtifacts {
-    @('node.zip', 'ffmpeg.zip', 'python.zip', 'vc_redist.x64.exe', 'bootstrap-get-pip.py', 'bin_temp', 'ffmpeg_temp', '.bootstrap_state.cmd') | ForEach-Object {
-        Remove-PathIfExists (Join-Path $RootDir $_)
+    @(
+        $NodeArchivePath,
+        $PythonArchivePath,
+        $FfmpegArchivePath,
+        $VcRedistInstallerPath,
+        $GetPipPath,
+        $NodeTempDir,
+        $FfmpegTempDir,
+        $LegacyBootstrapStatePath
+    ) | ForEach-Object {
+        Remove-PathIfExists $_
     }
 }
 
@@ -286,19 +346,19 @@ function Ensure-Node($Settings) {
     }
 
     Write-Task "Downloading Node.js $NodeVersion..."
-    Invoke-Download -Urls $Settings.NodeUrls -TargetFile (Join-Path $RootDir 'node.zip') -DisplayName 'Node.js'
+    Invoke-Download -Urls $Settings.NodeUrls -TargetFile $NodeArchivePath -DisplayName 'Node.js'
     Write-Task 'Extracting Node.js...'
-    Expand-ZipFile -ZipFile (Join-Path $RootDir 'node.zip') -Destination (Join-Path $RootDir 'bin_temp') -DisplayName 'Node.js'
+    Expand-ZipFile -ZipFile $NodeArchivePath -Destination $NodeTempDir -DisplayName 'Node.js'
 
-    $extractedNode = Join-Path $RootDir ("bin_temp\" + $NodeDirName)
+    $extractedNode = Join-Path $NodeTempDir $NodeDirName
     if (-not (Test-Path -LiteralPath (Join-Path $extractedNode 'node.exe'))) {
         Fail 'Node.js extraction finished but node.exe was not found.'
     }
 
     Remove-PathIfExists (Join-Path $RootDir 'bin')
     Move-Item -LiteralPath $extractedNode -Destination (Join-Path $RootDir 'bin')
-    Remove-PathIfExists (Join-Path $RootDir 'bin_temp')
-    Remove-PathIfExists (Join-Path $RootDir 'node.zip')
+    Remove-PathIfExists $NodeTempDir
+    Remove-PathIfExists $NodeArchivePath
 
     $script:NodeSource = 'portable'
     $script:NodeExe = Join-Path $RootDir 'bin\node.exe'
@@ -340,20 +400,20 @@ function Ensure-Ffmpeg($Settings) {
     }
 
     Write-Task 'Downloading FFmpeg...'
-    Invoke-Download -Urls $Settings.FfmpegUrls -TargetFile (Join-Path $RootDir 'ffmpeg.zip') -DisplayName 'FFmpeg'
+    Invoke-Download -Urls $Settings.FfmpegUrls -TargetFile $FfmpegArchivePath -DisplayName 'FFmpeg'
     Write-Task 'Extracting FFmpeg...'
-    Expand-ZipFile -ZipFile (Join-Path $RootDir 'ffmpeg.zip') -Destination (Join-Path $RootDir 'ffmpeg_temp') -DisplayName 'FFmpeg'
+    Expand-ZipFile -ZipFile $FfmpegArchivePath -Destination $FfmpegTempDir -DisplayName 'FFmpeg'
 
-    $ffmpegBinary = Get-ChildItem -LiteralPath (Join-Path $RootDir 'ffmpeg_temp') -Filter 'ffmpeg.exe' -Recurse -File | Select-Object -First 1
-    $ffprobeBinary = Get-ChildItem -LiteralPath (Join-Path $RootDir 'ffmpeg_temp') -Filter 'ffprobe.exe' -Recurse -File | Select-Object -First 1
+    $ffmpegBinary = Get-ChildItem -LiteralPath $FfmpegTempDir -Filter 'ffmpeg.exe' -Recurse -File | Select-Object -First 1
+    $ffprobeBinary = Get-ChildItem -LiteralPath $FfmpegTempDir -Filter 'ffprobe.exe' -Recurse -File | Select-Object -First 1
     if ($null -eq $ffmpegBinary -or $null -eq $ffprobeBinary) {
         Fail 'FFmpeg extraction completed but ffmpeg.exe or ffprobe.exe was not found.'
     }
 
     Copy-Item -LiteralPath $ffmpegBinary.FullName -Destination $ffmpegPath -Force
     Copy-Item -LiteralPath $ffprobeBinary.FullName -Destination $ffprobePath -Force
-    Remove-PathIfExists (Join-Path $RootDir 'ffmpeg_temp')
-    Remove-PathIfExists (Join-Path $RootDir 'ffmpeg.zip')
+    Remove-PathIfExists $FfmpegTempDir
+    Remove-PathIfExists $FfmpegArchivePath
 
     Invoke-External -FilePath $ffmpegPath -Arguments @('-version') | Out-Null
     Invoke-External -FilePath $ffprobePath -Arguments @('-version') | Out-Null
@@ -368,18 +428,17 @@ function Ensure-VcRedist($Settings) {
     }
 
     Write-Task 'Visual C++ Redistributable not found. Installing silently...'
-    $installerPath = Join-Path $RootDir 'vc_redist.x64.exe'
     try {
-        Invoke-Download -Urls $Settings.VcRedistUrls -TargetFile $installerPath -DisplayName 'Visual C++ Redistributable'
+        Invoke-Download -Urls $Settings.VcRedistUrls -TargetFile $VcRedistInstallerPath -DisplayName 'Visual C++ Redistributable'
     } catch {
         Write-Warn 'Failed to download the Visual C++ Redistributable. Demucs may fail until it is installed.'
         return
     }
 
     try {
-        Invoke-External -FilePath $installerPath -Arguments @('/install', '/quiet', '/norestart') -AllowFailure | Out-Null
+        Invoke-External -FilePath $VcRedistInstallerPath -Arguments @('/install', '/quiet', '/norestart') -AllowFailure | Out-Null
     } finally {
-        Remove-PathIfExists $installerPath
+        Remove-PathIfExists $VcRedistInstallerPath
     }
 
     if (Test-Path -LiteralPath $vcRuntimeDll) {
@@ -395,12 +454,11 @@ function Ensure-Pip([string[]]$GetPipUrls) {
     if ($check.ExitCode -eq 0) { return }
 
     Write-Task 'Installing pip...'
-    $getPipPath = Join-Path $RootDir 'bootstrap-get-pip.py'
-    Invoke-Download -Urls $GetPipUrls -TargetFile $getPipPath -DisplayName 'get-pip.py'
+    Invoke-Download -Urls $GetPipUrls -TargetFile $GetPipPath -DisplayName 'get-pip.py'
     try {
-        Invoke-External -FilePath $script:PythonExe -Arguments @($getPipPath, '--no-warn-script-location') | Out-Null
+        Invoke-External -FilePath $script:PythonExe -Arguments @($GetPipPath, '--no-warn-script-location') | Out-Null
     } finally {
-        Remove-PathIfExists $getPipPath
+        Remove-PathIfExists $GetPipPath
     }
 
     $verify = Invoke-External -FilePath $script:PythonExe -Arguments @('-m', 'pip', '--version') -AllowFailure -CaptureOutput
@@ -461,11 +519,11 @@ function Ensure-Python($Settings) {
     }
 
     Write-Task "Downloading Python $PythonVersion..."
-    Invoke-Download -Urls $Settings.PythonUrls -TargetFile (Join-Path $RootDir 'python.zip') -DisplayName 'Python'
+    Invoke-Download -Urls $Settings.PythonUrls -TargetFile $PythonArchivePath -DisplayName 'Python'
     Write-Task 'Extracting Python...'
     Remove-PathIfExists (Join-Path $RootDir 'python')
-    Expand-ZipFile -ZipFile (Join-Path $RootDir 'python.zip') -Destination (Join-Path $RootDir 'python') -DisplayName 'Python'
-    Remove-PathIfExists (Join-Path $RootDir 'python.zip')
+    Expand-ZipFile -ZipFile $PythonArchivePath -Destination (Join-Path $RootDir 'python') -DisplayName 'Python'
+    Remove-PathIfExists $PythonArchivePath
 
     if (-not (Test-Path -LiteralPath $portablePython)) {
         Fail 'Python extraction finished but python.exe was not found.'
@@ -690,6 +748,7 @@ function Export-BootstrapState {
 }
 
 try {
+    Initialize-BootstrapStorage
     $mirrorChoice = Select-MirrorChoice
     $settings = Get-MirrorSettings -Choice $mirrorChoice
 
@@ -712,10 +771,11 @@ try {
     Print-Summary -MirrorChoice $mirrorChoice
     New-Item -ItemType Directory -Force -Path (Join-Path $RootDir 'downloads') | Out-Null
     New-Item -ItemType Directory -Force -Path (Join-Path $RootDir 'separated') | Out-Null
-    Export-BootstrapState
     if ($SkipLaunch) {
         Write-Info 'START_NO_LAUNCH=1 detected. Bootstrap verification finished without launching the server.'
+        exit 0
     }
+    Export-BootstrapState
     exit 0
 } catch {
     Write-Host ''

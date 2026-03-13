@@ -50,7 +50,8 @@ The system relies on the following core components. Please install them and ensu
       - **[1] China Mainland**: Uses mirrors (npmmirror, Huawei Cloud, Aliyun) for faster downloads in China.
       - **[2] Original**: Uses official sources (nodejs.org, python.org, github.com).
     - The script will automatically set up a complete portable environment including Node.js, Python, yt-dlp, FFmpeg, and all required dependencies.
-    - Your choice is saved and won't be asked again. Delete `.mirror_config` to reset.
+    - Bootstrap state files are now stored under `.bootstrap\` to keep the project root cleaner.
+    - Your mirror choice is saved and won't be asked again. Delete `.bootstrap\mirror_config.txt` to reset.
 
 ### 1.1 Useful Maintenance Commands
 - **Syntax Check**: Run `npm run check` to validate all JavaScript files before startup or after refactors.
