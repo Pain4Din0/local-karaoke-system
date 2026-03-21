@@ -2,6 +2,17 @@ const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
+let defaultTypeFlag = null;
+try {
+    execFileSync(process.execPath, ['--experimental-default-type=module', '-v'], { stdio: 'ignore' });
+    defaultTypeFlag = '--experimental-default-type=module';
+} catch (e) {
+    try {
+        execFileSync(process.execPath, ['--default-type=module', '-v'], { stdio: 'ignore' });
+        defaultTypeFlag = '--default-type=module';
+    } catch (e2) {}
+}
+
 const ROOT_DIR = path.join(__dirname, '..', '..');
 const TARGETS = [
     'server.js',
@@ -35,8 +46,8 @@ for (const target of TARGETS) {
 }
 
 for (const filePath of filesToCheck) {
-    const args = isFrontEndModule(filePath)
-        ? ['--experimental-default-type=module', '--check', filePath]
+    const args = isFrontEndModule(filePath) && defaultTypeFlag
+        ? [defaultTypeFlag, '--check', filePath]
         : ['--check', filePath];
     execFileSync(process.execPath, args, { stdio: 'inherit' });
 }

@@ -64,7 +64,8 @@ function Hide-PathIfPossible([string]$Path) {
         if (($item.Attributes -band [IO.FileAttributes]::Hidden) -eq 0) {
             $item.Attributes = $item.Attributes -bor [IO.FileAttributes]::Hidden
         }
-    } catch {
+    }
+    catch {
     }
 }
 
@@ -75,7 +76,8 @@ function Initialize-BootstrapStorage {
     if (Test-Path -LiteralPath $LegacyMirrorConfigPath) {
         if (-not (Test-Path -LiteralPath $MirrorConfigPath)) {
             Move-Item -LiteralPath $LegacyMirrorConfigPath -Destination $MirrorConfigPath -Force
-        } else {
+        }
+        else {
             Remove-PathIfExists $LegacyMirrorConfigPath
         }
     }
@@ -83,7 +85,8 @@ function Initialize-BootstrapStorage {
     if (Test-Path -LiteralPath $LegacyPipRefreshStatePath) {
         if (-not (Test-Path -LiteralPath $PipRefreshStatePath)) {
             Move-Item -LiteralPath $LegacyPipRefreshStatePath -Destination $PipRefreshStatePath -Force
-        } else {
+        }
+        else {
             Remove-PathIfExists $LegacyPipRefreshStatePath
         }
     }
@@ -105,9 +108,20 @@ function Invoke-External {
         [switch]$CaptureOutput
     )
 
+    $oldErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        if ($CaptureOutput) {
+            $output = & $FilePath @Arguments 2>&1
+        } else {
+            & $FilePath @Arguments
+        }
+    } finally {
+        $ErrorActionPreference = $oldErrorActionPreference
+    }
+    $exitCode = $LASTEXITCODE
+
     if ($CaptureOutput) {
-        $output = & $FilePath @Arguments 2>&1
-        $exitCode = $LASTEXITCODE
         if (-not $AllowFailure -and $exitCode -ne 0) {
             $text = ($output | Out-String).Trim()
             if (-not $text) { $text = "exit code $exitCode" }
@@ -115,12 +129,10 @@ function Invoke-External {
         }
         return [PSCustomObject]@{
             ExitCode = $exitCode
-            Output = @($output)
+            Output   = @($output)
         }
     }
 
-    & $FilePath @Arguments
-    $exitCode = $LASTEXITCODE
     if (-not $AllowFailure -and $exitCode -ne 0) {
         Fail "Command failed: $FilePath $($Arguments -join ' ') (exit code $exitCode)"
     }
@@ -145,7 +157,8 @@ function Invoke-Download([string[]]$Urls, [string]$TargetFile, [string]$DisplayN
         if ($curl) {
             try {
                 Invoke-External -FilePath $curl -Arguments @('-L', '--fail', '--retry', '3', '--retry-delay', '2', '-o', $tempTarget, $url)
-            } catch {
+            }
+            catch {
                 $downloadErrors += "curl -> $url :: $($_.Exception.Message)"
                 Write-Warn "curl download failed for $DisplayName. Falling back to PowerShell for the same source."
             }
@@ -154,7 +167,8 @@ function Invoke-Download([string[]]$Urls, [string]$TargetFile, [string]$DisplayN
         if (-not (Test-Path -LiteralPath $tempTarget)) {
             try {
                 Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $tempTarget
-            } catch {
+            }
+            catch {
                 $downloadErrors += "powershell -> $url :: $($_.Exception.Message)"
                 continue
             }
@@ -184,7 +198,8 @@ function Expand-ZipFile([string]$ZipFile, [string]$Destination, [string]$Display
     Remove-PathIfExists $Destination
     try {
         Expand-Archive -LiteralPath $ZipFile -DestinationPath $Destination -Force
-    } catch {
+    }
+    catch {
         Fail "Failed to extract $DisplayName from $ZipFile. $($_.Exception.Message)"
     }
 
@@ -221,60 +236,60 @@ function Select-MirrorChoice {
 function Get-MirrorSettings([string]$Choice) {
     if ($Choice -eq '1') {
         return @{
-            NodeUrls = @(
+            NodeUrls     = @(
                 "https://npmmirror.com/mirrors/node/$NodeVersion/node-$NodeVersion-win-x64.zip",
                 "https://nodejs.org/dist/$NodeVersion/node-$NodeVersion-win-x64.zip"
             )
-            PythonUrls = @(
+            PythonUrls   = @(
                 "https://repo.huaweicloud.com/python/$PythonVersion/python-$PythonVersion-embed-amd64.zip",
                 "https://www.python.org/ftp/python/$PythonVersion/python-$PythonVersion-embed-amd64.zip"
             )
-            GetPipUrls = @(
+            GetPipUrls   = @(
                 'https://mirrors.aliyun.com/pypi/get-pip.py',
                 'https://bootstrap.pypa.io/get-pip.py'
             )
-            YtDlpUrls = @(
+            YtDlpUrls    = @(
                 'https://ghfast.top/https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe',
                 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe'
             )
-            FfmpegUrls = @(
+            FfmpegUrls   = @(
                 'https://ghfast.top/https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip',
                 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip'
             )
             VcRedistUrls = @(
                 'https://aka.ms/vs/17/release/vc_redist.x64.exe'
             )
-            PipIndex = 'https://pypi.tuna.tsinghua.edu.cn/simple'
-            NpmRegistry = 'https://registry.npmmirror.com'
+            PipIndex     = 'https://pypi.tuna.tsinghua.edu.cn/simple'
+            NpmRegistry  = 'https://registry.npmmirror.com'
         }
     }
 
     return @{
-        NodeUrls = @(
+        NodeUrls     = @(
             "https://nodejs.org/dist/$NodeVersion/node-$NodeVersion-win-x64.zip",
             "https://npmmirror.com/mirrors/node/$NodeVersion/node-$NodeVersion-win-x64.zip"
         )
-        PythonUrls = @(
+        PythonUrls   = @(
             "https://www.python.org/ftp/python/$PythonVersion/python-$PythonVersion-embed-amd64.zip",
             "https://repo.huaweicloud.com/python/$PythonVersion/python-$PythonVersion-embed-amd64.zip"
         )
-        GetPipUrls = @(
+        GetPipUrls   = @(
             'https://bootstrap.pypa.io/get-pip.py',
             'https://mirrors.aliyun.com/pypi/get-pip.py'
         )
-        YtDlpUrls = @(
+        YtDlpUrls    = @(
             'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe',
             'https://ghfast.top/https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe'
         )
-        FfmpegUrls = @(
+        FfmpegUrls   = @(
             'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip',
             'https://ghfast.top/https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip'
         )
         VcRedistUrls = @(
             'https://aka.ms/vs/17/release/vc_redist.x64.exe'
         )
-        PipIndex = 'https://pypi.org/simple'
-        NpmRegistry = 'https://registry.npmjs.org'
+        PipIndex     = 'https://pypi.org/simple'
+        NpmRegistry  = 'https://registry.npmjs.org'
     }
 }
 
@@ -317,7 +332,8 @@ function Ensure-Node($Settings) {
             Invoke-Npm @('--version')
             Write-Check "Found portable Node.js in 'bin'."
             return
-        } catch {
+        }
+        catch {
             Write-Warn 'Existing portable Node.js is invalid. Reinstalling it.'
             Remove-PathIfExists (Join-Path $RootDir 'bin')
         }
@@ -338,7 +354,8 @@ function Ensure-Node($Settings) {
                 return
             }
             Write-Warn "System Node.js $nodeVersion is too old. Falling back to portable $NodeVersion."
-        } catch {
+        }
+        catch {
             Write-Warn 'System npm is unavailable. Falling back to portable Node.js.'
         }
         $script:NodeSource = ''
@@ -374,7 +391,8 @@ function Ensure-YtDlp($Settings) {
             Invoke-External -FilePath $ytDlpPath -Arguments @('--version') | Out-Null
             Write-Check 'yt-dlp ready.'
             return
-        } catch {
+        }
+        catch {
             Write-Warn 'Existing yt-dlp.exe is invalid. Re-downloading it.'
         }
     }
@@ -394,7 +412,8 @@ function Ensure-Ffmpeg($Settings) {
             Invoke-External -FilePath $ffprobePath -Arguments @('-version') | Out-Null
             Write-Check 'FFmpeg and FFprobe ready.'
             return
-        } catch {
+        }
+        catch {
             Write-Warn 'Existing FFmpeg files are invalid. Re-downloading them.'
         }
     }
@@ -430,14 +449,16 @@ function Ensure-VcRedist($Settings) {
     Write-Task 'Visual C++ Redistributable not found. Installing silently...'
     try {
         Invoke-Download -Urls $Settings.VcRedistUrls -TargetFile $VcRedistInstallerPath -DisplayName 'Visual C++ Redistributable'
-    } catch {
+    }
+    catch {
         Write-Warn 'Failed to download the Visual C++ Redistributable. Demucs may fail until it is installed.'
         return
     }
 
     try {
         Invoke-External -FilePath $VcRedistInstallerPath -Arguments @('/install', '/quiet', '/norestart') -AllowFailure | Out-Null
-    } finally {
+    }
+    finally {
         Remove-PathIfExists $VcRedistInstallerPath
     }
 
@@ -457,7 +478,8 @@ function Ensure-Pip([string[]]$GetPipUrls) {
     Invoke-Download -Urls $GetPipUrls -TargetFile $GetPipPath -DisplayName 'get-pip.py'
     try {
         Invoke-External -FilePath $script:PythonExe -Arguments @($GetPipPath, '--no-warn-script-location') | Out-Null
-    } finally {
+    }
+    finally {
         Remove-PathIfExists $GetPipPath
     }
 
@@ -478,7 +500,8 @@ function Ensure-Python($Settings) {
             Ensure-Pip -GetPipUrls $Settings.GetPipUrls
             Write-Check "Found portable Python in 'python'."
             return
-        } catch {
+        }
+        catch {
             Write-Warn 'Existing portable Python is invalid. Reinstalling it.'
             Remove-PathIfExists (Join-Path $RootDir 'python')
         }
@@ -510,7 +533,8 @@ function Ensure-Python($Settings) {
             }
 
             Write-Warn "System Python $version is older than the supported 3.9+ range. Falling back to portable $PythonVersion."
-        } catch {
+        }
+        catch {
             Write-Warn 'System Python is available but pip setup failed. Falling back to portable Python.'
         }
 
@@ -549,7 +573,8 @@ function Get-PipRefreshState {
 
     try {
         return Get-Content -LiteralPath $PipRefreshStatePath -Raw | ConvertFrom-Json
-    } catch {
+    }
+    catch {
         Write-Warn 'Failed to read pip refresh state. A full packaging-tools refresh will be performed.'
         return $null
     }
@@ -557,10 +582,10 @@ function Get-PipRefreshState {
 
 function Save-PipRefreshState($Settings) {
     $payload = [PSCustomObject]@{
-        updatedAt = (Get-Date).ToString('o')
-        pythonExe = $script:PythonExe
+        updatedAt    = (Get-Date).ToString('o')
+        pythonExe    = $script:PythonExe
         pythonSource = $script:PythonSource
-        pipIndex = $Settings.PipIndex
+        pipIndex     = $Settings.PipIndex
     }
 
     $payload | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $PipRefreshStatePath -Encoding UTF8
@@ -569,8 +594,8 @@ function Save-PipRefreshState($Settings) {
 function Get-PipRefreshDecision($Settings) {
     if ($env:FORCE_PIP_REFRESH -eq '1') {
         return [PSCustomObject]@{
-            Refresh = $true
-            Reason = 'forced by FORCE_PIP_REFRESH=1'
+            Refresh       = $true
+            Reason        = 'forced by FORCE_PIP_REFRESH=1'
             LastUpdatedAt = $null
         }
     }
@@ -578,34 +603,35 @@ function Get-PipRefreshDecision($Settings) {
     $state = Get-PipRefreshState
     if ($null -eq $state) {
         return [PSCustomObject]@{
-            Refresh = $true
-            Reason = 'no previous refresh state'
+            Refresh       = $true
+            Reason        = 'no previous refresh state'
             LastUpdatedAt = $null
         }
     }
 
     if ($state.pythonExe -ne $script:PythonExe) {
         return [PSCustomObject]@{
-            Refresh = $true
-            Reason = 'python executable changed'
+            Refresh       = $true
+            Reason        = 'python executable changed'
             LastUpdatedAt = $state.updatedAt
         }
     }
 
     if ($state.pipIndex -ne $Settings.PipIndex) {
         return [PSCustomObject]@{
-            Refresh = $true
-            Reason = 'pip index changed'
+            Refresh       = $true
+            Reason        = 'pip index changed'
             LastUpdatedAt = $state.updatedAt
         }
     }
 
     try {
         $lastUpdatedAt = [DateTime]::Parse($state.updatedAt)
-    } catch {
+    }
+    catch {
         return [PSCustomObject]@{
-            Refresh = $true
-            Reason = 'previous refresh timestamp was invalid'
+            Refresh       = $true
+            Reason        = 'previous refresh timestamp was invalid'
             LastUpdatedAt = $state.updatedAt
         }
     }
@@ -613,15 +639,15 @@ function Get-PipRefreshDecision($Settings) {
     $ageHours = ((Get-Date) - $lastUpdatedAt).TotalHours
     if ($ageHours -ge $PipRefreshIntervalHours) {
         return [PSCustomObject]@{
-            Refresh = $true
-            Reason = "last refresh is older than $PipRefreshIntervalHours hours"
+            Refresh       = $true
+            Reason        = "last refresh is older than $PipRefreshIntervalHours hours"
             LastUpdatedAt = $lastUpdatedAt
         }
     }
 
     return [PSCustomObject]@{
-        Refresh = $false
-        Reason = 'packaging tools were refreshed recently'
+        Refresh       = $false
+        Reason        = 'packaging tools were refreshed recently'
         LastUpdatedAt = $lastUpdatedAt
     }
 }
@@ -631,7 +657,8 @@ function Upgrade-PipStack($Settings) {
     if (-not $decision.Refresh) {
         $lastUpdatedLabel = if ($decision.LastUpdatedAt) {
             ([DateTime]$decision.LastUpdatedAt).ToString('yyyy-MM-dd HH:mm:ss')
-        } else {
+        }
+        else {
             'unknown'
         }
         Write-Check "Python packaging tools are current. Skipping refresh (last successful refresh: $lastUpdatedLabel)."
@@ -777,7 +804,8 @@ try {
     }
     Export-BootstrapState
     exit 0
-} catch {
+}
+catch {
     Write-Host ''
     Write-Host "[ERR] $($_.Exception.Message)"
     exit 1
