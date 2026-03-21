@@ -19,6 +19,8 @@ python/
 *.log
 npm-debug.log*
 tmp-*.log
+__pycache__/
+*.pyc
 
 # Local app settings
 advanced-config.json
@@ -32,6 +34,7 @@ cookies_*.txt
 cookies.txt
 auth.json
 secrets.json
+paxsenix_token.txt
 
 yt-dlp.exe
 ffmpeg.exe

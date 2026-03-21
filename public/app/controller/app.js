@@ -54,9 +54,10 @@ createApp({
         const karaokeAvailable = computed(() => currentPlaying.value && currentPlaying.value.karaokeReady);
         const lyricsSourceOptions = computed(() => ([
             { value: 'auto', label: t('lyrics_source_auto') },
-            { value: 'sidecar', label: t('lyrics_source_sidecar') },
             { value: 'ytmusic', label: t('lyrics_source_ytmusic') },
-            { value: 'youtube_captions', label: t('lyrics_source_youtube_captions') },
+            { value: 'apple_music', label: t('lyrics_source_apple_music') },
+            { value: 'qq_music', label: t('lyrics_source_qq_music') },
+            { value: 'musixmatch', label: t('lyrics_source_musixmatch') },
             { value: 'lrclib', label: t('lyrics_source_lrclib') },
         ]));
 

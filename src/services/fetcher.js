@@ -7,6 +7,23 @@ const logger = require('../utils/logger');
 
 const isYouTubeLikeUrl = (url) => /(^https?:\/\/)?(www\.)?(youtube\.com|youtu\.be|music\.youtube\.com)\b/i.test(url);
 
+const detectSourcePlatform = (url = '') => {
+    const normalizedUrl = String(url || '').trim();
+    if (!normalizedUrl) return null;
+    try {
+        const parsed = new URL(normalizedUrl);
+        const host = parsed.hostname.toLowerCase();
+        if (host === 'music.youtube.com') return 'ytmusic';
+        if (host.endsWith('youtube.com') || host === 'youtu.be') return 'youtube';
+        if (host.endsWith('bilibili.com')) return 'bilibili';
+    } catch (error) {
+        if (/music\.youtube\.com/i.test(normalizedUrl)) return 'ytmusic';
+        if (/youtube\.com|youtu\.be/i.test(normalizedUrl)) return 'youtube';
+        if (/bilibili\.com/i.test(normalizedUrl)) return 'bilibili';
+    }
+    return null;
+};
+
 const isPlaylistLikeUrl = (url) => {
     try {
         const parsed = new URL(url);
@@ -150,6 +167,7 @@ const runYtDlp = (url, options = {}) => new Promise((resolve) => {
                     extractor: data.ie_key || null,
                     pic: null,
                     originalUrl: buildOriginalUrl(data, url),
+                    sourcePlatform: detectSourcePlatform(url),
                 };
             });
 
@@ -236,6 +254,7 @@ const fetchBilibiliFavorites = async (url, mediaId) => {
             extractor: 'BiliBili',
             pic: null,
             originalUrl: item.bvid ? `https://www.bilibili.com/video/${item.bvid}` : url,
+            sourcePlatform: detectSourcePlatform(url),
         })),
     };
 };

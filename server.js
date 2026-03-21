@@ -16,7 +16,7 @@ const { fetchUrlInfo } = require('./src/services/fetcher');
 const { getLyricsBySongId, invalidateLyricsSession } = require('./src/services/lyrics');
 const { cleanupRuntimeArtifacts } = require('./src/services/maintenance');
 
-const ALLOWED_LYRICS_SOURCES = new Set(['auto', 'sidecar', 'ytmusic', 'youtube_captions', 'lrclib']);
+const ALLOWED_LYRICS_SOURCES = new Set(['auto', 'ytmusic', 'apple_music', 'qq_music', 'musixmatch', 'lrclib']);
 const ALLOWED_QUEUE_ACTIONS = new Set(['delete', 'top']);
 const pendingDeleteTimers = new Map();
 let shutdownInProgress = false;

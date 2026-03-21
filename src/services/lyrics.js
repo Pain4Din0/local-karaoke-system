@@ -1,21 +1,18 @@
 const fs = require('fs');
 const path = require('path');
-const https = require('https');
 const { spawn } = require('child_process');
 
-const { DOWNLOAD_DIR, SCRIPTS_DIR, YT_DLP_EXE, PYTHON_EXE, ensureRuntimeDirs, getCookiesPath, buildChildProcessEnv, appendYtDlpJsRuntimeArgs } = require('../config/runtime');
+const { DOWNLOAD_DIR, SCRIPTS_DIR, PYTHON_EXE, ensureRuntimeDirs, buildChildProcessEnv } = require('../config/runtime');
 const state = require('../utils/state');
 const logger = require('../utils/logger');
 
 const inflightLyrics = new Map();
-const CAPTION_LANGS = ['zh-Hans', 'zh-Hant', 'zh-CN', 'zh-TW', 'zh', 'en', 'ja'];
-const YTMUSIC_HELPER = path.join(SCRIPTS_DIR, 'lyrics', 'fetch_ytmusic_lyrics.py');
+const LYRICS_HELPER = path.join(SCRIPTS_DIR, 'lyrics', 'fetch_lyrics.py');
 const MISSING_LYRICS_CACHE_TTL_MS = 5 * 60 * 1000;
+const SUPPORTED_PROVIDER_KEYS = new Set(['ytmusic', 'apple_music', 'qq_music', 'musixmatch', 'lrclib']);
 let lyricsSessionId = 0;
 
 ensureRuntimeDirs();
-
-const isYouTubeLikeUrl = (url = '') => /(^https?:\/\/)?(www\.)?(youtube\.com|youtu\.be|music\.youtube\.com)\b/i.test(url);
 
 const normalizeSpace = (value) => String(value || '').replace(/\s+/g, ' ').trim();
 const stripDecorators = (value) => normalizeSpace(value)
@@ -25,176 +22,63 @@ const stripDecorators = (value) => normalizeSpace(value)
     .replace(/[|｜].*$/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
-const normalizeKey = (value) => stripDecorators(value).toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff\u3040-\u30ff]+/gi, '');
 
-const parseTimeTag = (timeText) => {
-    const match = String(timeText || '').trim().match(/^(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?$/);
-    if (!match) return null;
-    const minutes = Number(match[1]);
-    const seconds = Number(match[2]);
-    const fractionRaw = match[3] || '0';
-    const fraction = fractionRaw.length === 3 ? Number(fractionRaw) / 1000 : Number(fractionRaw) / 100;
-    return (minutes * 60) + seconds + fraction;
-};
-
-const parseSrtOrVttTime = (value) => {
-    const match = String(value || '').trim().match(/^(?:(\d{1,2}):)?(\d{2}):(\d{2})[.,](\d{3})$/);
-    if (!match) return null;
-    const hours = Number(match[1] || 0);
-    const minutes = Number(match[2]);
-    const seconds = Number(match[3]);
-    const ms = Number(match[4]);
-    return (hours * 3600) + (minutes * 60) + seconds + (ms / 1000);
-};
-
-const stripHtml = (value) => String(value || '')
-    .replace(/<\d{2}:\d{2}(?::\d{2})?[.,]\d{2,3}>/g, '')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-const buildWordSegments = (lineText, words, lineEnd) => {
+const buildWordSegments = (words, lineEnd) => {
     if (!Array.isArray(words) || words.length === 0) return null;
     const filtered = words
-        .filter((word) => word && Number.isFinite(word.start) && word.text)
+        .map((word) => ({
+            text: word && word.text !== undefined && word.text !== null ? String(word.text) : '',
+            start: Number(word && word.start),
+            end: Number.isFinite(Number(word && word.end)) ? Number(word.end) : null,
+        }))
+        .filter((word) => Number.isFinite(word.start) && word.text.trim() !== '')
         .sort((a, b) => a.start - b.start);
     if (filtered.length === 0) return null;
-    return filtered.map((word, index) => ({
-        text: word.text,
-        start: word.start,
-        end: index < filtered.length - 1 ? filtered[index + 1].start : lineEnd,
-    }));
+
+    return filtered.map((word, index) => {
+        const next = filtered[index + 1];
+        const fallbackEnd = next ? next.start : lineEnd;
+        const candidateEnd = Number.isFinite(word.end) && word.end > word.start ? word.end : fallbackEnd;
+        return {
+            text: word.text,
+            start: word.start,
+            end: Math.max(word.start + 0.01, candidateEnd),
+        };
+    });
 };
 
 const finalizeTimedLines = (lines, fallbackDuration) => {
     if (!Array.isArray(lines) || lines.length === 0) return [];
-    const sorted = lines
-        .filter((line) => line && Number.isFinite(line.start) && line.text)
+
+    const normalized = lines
+        .map((line) => ({
+            start: Number(line && line.start),
+            end: Number.isFinite(Number(line && line.end)) ? Number(line.end) : null,
+            text: normalizeSpace(line && line.text),
+            words: Array.isArray(line && line.words) ? line.words : null,
+        }))
+        .filter((line) => Number.isFinite(line.start) && line.text)
         .sort((a, b) => a.start - b.start);
 
-    for (let i = 0; i < sorted.length; i++) {
-        const current = sorted[i];
-        const next = sorted[i + 1];
+    for (let i = 0; i < normalized.length; i++) {
+        const current = normalized[i];
+        const next = normalized[i + 1];
         const fallbackEnd = Number.isFinite(fallbackDuration) ? fallbackDuration : current.start + 5;
         const candidateEnd = next ? next.start : fallbackEnd;
         current.end = Number.isFinite(current.end) && current.end > current.start
             ? current.end
             : Math.max(current.start + 0.4, candidateEnd);
-        current.words = buildWordSegments(current.text, current.words, current.end);
+        current.words = buildWordSegments(current.words, current.end);
     }
 
-    return sorted;
+    return normalized;
 };
 
-const parseLrc = (rawText, fallbackDuration) => {
-    const lines = [];
-    let hasWordTiming = false;
-
-    for (const rawLine of String(rawText || '').split(/\r?\n/)) {
-        const timeTags = [...rawLine.matchAll(/\[(\d{1,2}:\d{2}(?:[.:]\d{1,3})?)\]/g)];
-        if (!timeTags.length) continue;
-
-        const textWithoutLineTags = rawLine.replace(/\[(\d{1,2}:\d{2}(?:[.:]\d{1,3})?)\]/g, '');
-        const wordMatches = [...textWithoutLineTags.matchAll(/<(\d{1,2}:\d{2}(?:[.:]\d{1,3})?)>([^<]+)/g)];
-        const plainText = stripHtml(textWithoutLineTags.replace(/<(\d{1,2}:\d{2}(?:[.:]\d{1,3})?)>/g, ''));
-
-        const inlineWords = wordMatches.map((match) => ({
-            start: parseTimeTag(match[1]),
-            text: normalizeSpace(match[2]),
-        })).filter((word) => Number.isFinite(word.start) && word.text);
-
-        if (inlineWords.length > 0) hasWordTiming = true;
-
-        for (const match of timeTags) {
-            const start = parseTimeTag(match[1]);
-            if (!Number.isFinite(start) || !plainText) continue;
-            lines.push({
-                start,
-                end: null,
-                text: plainText,
-                words: inlineWords.length > 0 ? inlineWords : null,
-            });
-        }
-    }
-
-    const normalized = finalizeTimedLines(lines, fallbackDuration);
-    if (normalized.length === 0) return null;
-    return {
-        type: hasWordTiming ? 'word' : 'line',
-        lines: normalized,
-    };
-};
-
-const parseVtt = (rawText, fallbackDuration) => {
-    const blocks = String(rawText || '')
-        .replace(/\r/g, '')
-        .split(/\n\s*\n/)
-        .map((block) => block.trim())
-        .filter(Boolean);
-    const lines = [];
-
-    for (const block of blocks) {
-        const parts = block.split('\n').map((line) => line.trim()).filter(Boolean);
-        const timeLineIndex = parts.findIndex((line) => line.includes('-->'));
-        if (timeLineIndex === -1) continue;
-        const timeLine = parts[timeLineIndex];
-        const timeMatch = timeLine.match(/^(.+?)\s+-->\s+(.+?)(?:\s|$)/);
-        if (!timeMatch) continue;
-
-        const start = parseSrtOrVttTime(timeMatch[1].trim());
-        const end = parseSrtOrVttTime(timeMatch[2].trim());
-        const text = stripHtml(parts.slice(timeLineIndex + 1).join(' '));
-
-        if (!Number.isFinite(start) || !text) continue;
-        const previous = lines[lines.length - 1];
-        if (previous && previous.text === text && Math.abs(previous.end - start) < 0.05) {
-            previous.end = Number.isFinite(end) ? end : previous.end;
-            continue;
-        }
-        lines.push({ start, end, text, words: null });
-    }
-
-    const normalized = finalizeTimedLines(lines, fallbackDuration);
-    if (normalized.length === 0) return null;
-    return {
-        type: 'line',
-        lines: normalized,
-    };
-};
-
-const requestJson = (url, timeoutMs = 15000) => new Promise((resolve, reject) => {
-    const request = https.get(url, {
-        timeout: timeoutMs,
-        headers: {
-            'User-Agent': 'local-karaoke-system/1.0',
-            'Accept': 'application/json, text/plain;q=0.9, */*;q=0.8',
-        }
-    }, (response) => {
-        let body = '';
-        response.on('data', (chunk) => body += chunk);
-        response.on('end', () => {
-            if (response.statusCode && response.statusCode >= 400) {
-                reject(new Error(`HTTP ${response.statusCode}`));
-                return;
-            }
-            try {
-                resolve(body ? JSON.parse(body) : null);
-            } catch (error) {
-                reject(error);
-            }
-        });
+const runPythonJson = (scriptPath, payload, timeoutMs = 30000) => new Promise((resolve, reject) => {
+    const proc = spawn(PYTHON_EXE, [scriptPath], {
+        shell: false,
+        env: buildChildProcessEnv(),
     });
-
-    request.on('timeout', () => request.destroy(new Error(`timeout_${timeoutMs}`)));
-    request.on('error', reject);
-});
-
-const runPythonJson = (scriptPath, payload, timeoutMs = 25000) => new Promise((resolve, reject) => {
-    const proc = spawn(PYTHON_EXE, [scriptPath], { shell: false });
     let stdout = '';
     let stderr = '';
     let settled = false;
@@ -202,7 +86,7 @@ const runPythonJson = (scriptPath, payload, timeoutMs = 25000) => new Promise((r
     const done = (error, result) => {
         if (settled) return;
         settled = true;
-        if (timer) clearTimeout(timer);
+        clearTimeout(timer);
         if (error) reject(error);
         else resolve(result);
     };
@@ -234,6 +118,22 @@ const runPythonJson = (scriptPath, payload, timeoutMs = 25000) => new Promise((r
 const normalizeSourceKey = (sourceKey = 'auto') => String(sourceKey || 'auto').replace(/[^a-z0-9_-]/gi, '_');
 const getLyricsCachePath = (songId, sourceKey = 'auto') => path.join(DOWNLOAD_DIR, `${songId}_lyrics_${normalizeSourceKey(sourceKey)}.json`);
 
+const isLegacyAppleLineCache = (parsed) => {
+    if (!parsed || parsed.provider !== 'apple_music' || parsed.type !== 'word' || !Array.isArray(parsed.lines) || parsed.lines.length < 2) {
+        return false;
+    }
+    const comparableLines = parsed.lines.filter((line) => line && typeof line.text === 'string' && Array.isArray(line.words) && line.words.length === 1);
+    if (comparableLines.length < 2) return false;
+    return comparableLines.length === parsed.lines.length && comparableLines.every((line) => {
+        const [word] = line.words;
+        return word
+            && typeof word.text === 'string'
+            && normalizeSpace(word.text) === normalizeSpace(line.text)
+            && Math.abs(Number(word.start) - Number(line.start)) < 0.001
+            && Math.abs(Number(word.end) - Number(line.end)) < 0.001;
+    });
+};
+
 const loadCachedLyrics = (songId, sourceKey = 'auto') => {
     const cachePath = getLyricsCachePath(songId, sourceKey);
     if (!fs.existsSync(cachePath)) return null;
@@ -245,6 +145,14 @@ const loadCachedLyrics = (songId, sourceKey = 'auto') => {
             return null;
         }
         if (parsed.found !== true && parsed.found !== false) return null;
+        if (parsed.found === true && parsed.provider && !SUPPORTED_PROVIDER_KEYS.has(parsed.provider)) {
+            try { fs.unlinkSync(cachePath); } catch (error) { }
+            return null;
+        }
+        if (parsed.found === true && isLegacyAppleLineCache(parsed)) {
+            try { fs.unlinkSync(cachePath); } catch (error) { }
+            return null;
+        }
         return parsed;
     } catch (error) {
         logger.warn('Lyrics', `Failed to read lyrics cache for song ${songId}`, error);
@@ -255,10 +163,7 @@ const loadCachedLyrics = (songId, sourceKey = 'auto') => {
 const saveCachedLyrics = (songId, data, sourceKey = 'auto') => {
     if (!data || (data.found !== true && data.found !== false)) return;
     try {
-        const payload = {
-            ...data,
-            cachedAt: Date.now(),
-        };
+        const payload = { ...data, cachedAt: Date.now() };
         if (data.found !== true) {
             payload.expiresAt = Date.now() + MISSING_LYRICS_CACHE_TTL_MS;
         }
@@ -300,45 +205,16 @@ const buildSongQuery = (song) => {
     };
 };
 
-const scoreSearchResult = (result, query) => {
-    const trackName = result.trackName || result.track_name || result.name || '';
-    const artistName = result.artistName || result.artist_name || result.artist || '';
-    const resultDuration = Number(result.duration || result.length || 0);
-    const normalizedTrack = normalizeKey(trackName);
-    const normalizedArtist = normalizeKey(artistName);
-    const normalizedQueryTitle = normalizeKey(query.title);
-    const normalizedQueryArtist = normalizeKey(query.artist);
-
-    let score = 0;
-    if (normalizedQueryTitle) {
-        if (normalizedTrack === normalizedQueryTitle) score += 80;
-        else if (normalizedTrack.includes(normalizedQueryTitle) || normalizedQueryTitle.includes(normalizedTrack)) score += 50;
-    }
-
-    if (normalizedQueryArtist) {
-        if (normalizedArtist === normalizedQueryArtist) score += 40;
-        else if (normalizedArtist.includes(normalizedQueryArtist) || normalizedQueryArtist.includes(normalizedArtist)) score += 20;
-    }
-
-    if (query.duration && resultDuration) {
-        const delta = Math.abs(query.duration - resultDuration);
-        if (delta <= 2) score += 25;
-        else if (delta <= 5) score += 15;
-        else if (delta <= 10) score += 5;
-    }
-
-    if (result.syncedLyrics || result.synced_lyrics) score += 20;
-    return score;
-};
-
 const createLyricsPayload = ({ source, provider, type, lines, plainLyrics, metadata, attemptedSources }) => {
+    const explicitType = type === 'word' || type === 'line' ? type : null;
+    const inferredType = explicitType || (Array.isArray(lines) && lines.some((line) => Array.isArray(line && line.words) && line.words.length > 0) ? 'word' : 'line');
     const cleanedLines = Array.isArray(lines)
         ? lines.map((line, index) => ({
             id: index + 1,
             start: Number(line.start.toFixed(3)),
             end: Number((line.end || line.start + 4).toFixed(3)),
             text: line.text,
-            words: Array.isArray(line.words) && line.words.length > 0
+            words: inferredType === 'word' && Array.isArray(line.words) && line.words.length > 0
                 ? line.words.map((word, wordIndex) => ({
                     id: wordIndex + 1,
                     text: word.text,
@@ -353,196 +229,15 @@ const createLyricsPayload = ({ source, provider, type, lines, plainLyrics, metad
         found: cleanedLines.length > 0,
         source,
         provider,
-        type,
-        attemptedSources,
+        type: inferredType,
+        attemptedSources: Array.isArray(attemptedSources) ? attemptedSources : [],
         plainLyrics: plainLyrics || cleanedLines.map((line) => line.text).join('\n'),
         metadata,
         lines: cleanedLines,
     };
 };
 
-const fetchLyricsFromYouTubeCaptions = async (song, attemptedSources) => {
-    if (!isYouTubeLikeUrl(song.originalUrl)) return null;
-    attemptedSources.push('youtube_captions');
-
-    const tempBase = path.join(DOWNLOAD_DIR, `${song.id}_lyriccap`);
-    const args = [
-        '--skip-download',
-        '--no-playlist',
-        '--write-subs',
-        '--write-auto-subs',
-        '--sub-format', 'vtt',
-        '--sub-langs', CAPTION_LANGS.join(','),
-        '-o', `${tempBase}.%(ext)s`,
-        song.originalUrl
-    ];
-    appendYtDlpJsRuntimeArgs(args, song.originalUrl);
-    const cookies = getCookiesPath(song.originalUrl);
-    if (cookies) {
-        args.splice(args.length - 1, 0, '--cookies', cookies);
-    }
-
-    await new Promise((resolve) => {
-        const proc = spawn(YT_DLP_EXE, args, { shell: false, env: buildChildProcessEnv() });
-        proc.on('close', () => resolve());
-        proc.on('error', () => resolve());
-    });
-
-    const candidates = fs.readdirSync(DOWNLOAD_DIR)
-        .filter((name) => name.startsWith(`${song.id}_lyriccap`) && name.endsWith('.vtt'))
-        .sort((a, b) => {
-            const aScore = CAPTION_LANGS.findIndex((lang) => a.includes(`.${lang}.`));
-            const bScore = CAPTION_LANGS.findIndex((lang) => b.includes(`.${lang}.`));
-            return (aScore === -1 ? 999 : aScore) - (bScore === -1 ? 999 : bScore);
-        });
-
-    try {
-        for (const filename of candidates) {
-            const fullPath = path.join(DOWNLOAD_DIR, filename);
-            const parsed = parseVtt(fs.readFileSync(fullPath, 'utf8'), song.duration);
-            if (parsed && parsed.lines.length > 0) {
-                return createLyricsPayload({
-                    source: 'YouTube Captions',
-                    provider: 'youtube_captions',
-                    type: parsed.type,
-                    lines: parsed.lines,
-                    metadata: {
-                        track: song.track || song.title,
-                        artist: song.artist || song.uploader,
-                    },
-                    attemptedSources,
-                });
-            }
-        }
-    } finally {
-        for (const filename of candidates) {
-            try { fs.unlinkSync(path.join(DOWNLOAD_DIR, filename)); } catch (error) { }
-        }
-    }
-
-    return null;
-};
-
-const fetchLyricsFromYtMusic = async (song, attemptedSources) => {
-    attemptedSources.push('ytmusic');
-    if (!fs.existsSync(YTMUSIC_HELPER)) return null;
-
-    const query = buildSongQuery(song);
-    const result = await runPythonJson(YTMUSIC_HELPER, {
-        sourceId: song.sourceId || null,
-        track: query.title,
-        artist: query.artist,
-        album: query.album,
-        duration: query.duration,
-        originalUrl: song.originalUrl || null,
-    }).catch((error) => {
-        logger.warn('Lyrics', `YTMusic helper failed for ${song.title}`, error);
-        return null;
-    });
-
-    if (!result || !result.ok || !Array.isArray(result.lines) || result.lines.length === 0) {
-        return null;
-    }
-
-    const normalized = finalizeTimedLines(result.lines.map((line) => ({
-        start: Number(line.start),
-        end: Number.isFinite(line.end) ? Number(line.end) : null,
-        text: normalizeSpace(line.text),
-        words: null,
-    })), song.duration);
-
-    if (normalized.length === 0) return null;
-
-    return createLyricsPayload({
-        source: 'YouTube Music',
-        provider: 'ytmusic',
-        type: 'line',
-        lines: normalized,
-        metadata: {
-            track: result.metadata && result.metadata.track ? result.metadata.track : song.track || song.title,
-            artist: result.metadata && result.metadata.artist ? result.metadata.artist : song.artist || song.uploader,
-            album: result.metadata && result.metadata.album ? result.metadata.album : song.album || '',
-            videoId: result.videoId || song.sourceId || null,
-            browseId: result.browseId || null,
-        },
-        attemptedSources,
-    });
-};
-
-const fetchLyricsFromLrclib = async (song, attemptedSources) => {
-    attemptedSources.push('lrclib');
-    const query = buildSongQuery(song);
-    const search = new URL('https://lrclib.net/api/search');
-    if (query.title) search.searchParams.set('track_name', query.title);
-    if (query.artist) search.searchParams.set('artist_name', query.artist);
-    if (query.album) search.searchParams.set('album_name', query.album);
-
-    const results = await requestJson(search.toString()).catch((error) => {
-        logger.warn('Lyrics', `LRCLIB lookup failed for ${song.title}`, error);
-        return [];
-    });
-    if (!Array.isArray(results) || results.length === 0) return null;
-
-    const best = [...results].sort((a, b) => scoreSearchResult(b, query) - scoreSearchResult(a, query))[0];
-    if (!best) return null;
-
-    const syncedLyrics = best.syncedLyrics || best.synced_lyrics || '';
-    const plainLyrics = best.plainLyrics || best.plain_lyrics || '';
-    const parsed = syncedLyrics ? parseLrc(syncedLyrics, query.duration) : null;
-
-    if (parsed && parsed.lines.length > 0) {
-        return createLyricsPayload({
-            source: 'LRCLIB',
-            provider: 'lrclib',
-            type: parsed.type,
-            lines: parsed.lines,
-            plainLyrics,
-            metadata: {
-                track: best.trackName || best.track_name || song.track || song.title,
-                artist: best.artistName || best.artist_name || song.artist || song.uploader,
-                album: best.albumName || best.album_name || song.album || '',
-            },
-            attemptedSources,
-        });
-    }
-
-    return null;
-};
-
-const fetchLyricsFromSidecar = async (song, attemptedSources) => {
-    attemptedSources.push('sidecar');
-    const sidecars = [
-        path.join(DOWNLOAD_DIR, `${song.id}.lrc`),
-        path.join(DOWNLOAD_DIR, `${song.id}.vtt`),
-        path.join(DOWNLOAD_DIR, `${song.id}.srt`),
-    ];
-
-    for (const filePath of sidecars) {
-        if (!fs.existsSync(filePath)) continue;
-        const raw = fs.readFileSync(filePath, 'utf8');
-        const parsed = filePath.endsWith('.lrc')
-            ? parseLrc(raw, song.duration)
-            : parseVtt(raw, song.duration);
-        if (parsed && parsed.lines.length > 0) {
-            return createLyricsPayload({
-                source: 'Local Sidecar',
-                provider: 'sidecar',
-                type: parsed.type,
-                lines: parsed.lines,
-                metadata: {
-                    track: song.track || song.title,
-                    artist: song.artist || song.uploader,
-                    album: song.album || '',
-                },
-                attemptedSources,
-            });
-        }
-    }
-
-    return null;
-};
-
-const buildMissingPayload = (song, attemptedSources) => ({
+const buildMissingPayload = (song, attemptedSources = []) => ({
     found: false,
     source: null,
     provider: null,
@@ -557,6 +252,58 @@ const buildMissingPayload = (song, attemptedSources) => ({
     lines: [],
 });
 
+const helperResultToPayload = (song, result) => {
+    if (!result || result.ok !== true) return null;
+    if (result.found !== true || !Array.isArray(result.lines) || result.lines.length === 0) {
+        return buildMissingPayload(song, Array.isArray(result.attemptedSources) ? result.attemptedSources : []);
+    }
+
+    const normalizedLines = finalizeTimedLines(result.lines, song.duration);
+    if (normalizedLines.length === 0) {
+        return buildMissingPayload(song, Array.isArray(result.attemptedSources) ? result.attemptedSources : []);
+    }
+
+    return createLyricsPayload({
+        source: result.source || result.provider || 'Lyrics',
+        provider: result.provider || 'unknown',
+        type: result.type || 'line',
+        lines: normalizedLines,
+        plainLyrics: result.plainLyrics || '',
+        metadata: result.metadata || {
+            track: song.track || song.title,
+            artist: song.artist || song.uploader,
+            album: song.album || '',
+        },
+        attemptedSources: result.attemptedSources || [],
+    });
+};
+
+const isYouTubeMusicSong = (song) => {
+    if (!song) return false;
+    if (song.sourcePlatform === 'ytmusic') return true;
+    return /(^https?:\/\/)?music\.youtube\.com\b/i.test(String(song.originalUrl || ''));
+};
+
+const fetchLyricsFromHelper = async (song, sourceKey) => {
+    if (!fs.existsSync(LYRICS_HELPER)) return null;
+
+    const query = buildSongQuery(song);
+    const result = await runPythonJson(LYRICS_HELPER, {
+        sourceId: song.sourceId || null,
+        track: query.title,
+        artist: query.artist,
+        album: query.album,
+        duration: query.duration,
+        originalUrl: song.originalUrl || null,
+        preferredSource: sourceKey,
+    }).catch((error) => {
+        logger.warn('Lyrics', `Lyrics helper failed for ${song.title}`, error);
+        return null;
+    });
+
+    return helperResultToPayload(song, result);
+};
+
 const findSongById = (songId) => {
     const lookupId = String(songId);
     const candidates = [
@@ -570,6 +317,7 @@ const findSongById = (songId) => {
 const fetchLyricsForSong = async (song, options = {}) => {
     if (!song || !song.id) return null;
     const sourceKey = options.preferredSource || 'auto';
+
     if (!options.force) {
         const cached = loadCachedLyrics(song.id, sourceKey);
         if (cached) {
@@ -588,47 +336,16 @@ const fetchLyricsForSong = async (song, options = {}) => {
     const isStale = () => startedSessionId !== lyricsSessionId;
 
     const task = (async () => {
-        const attemptedSources = [];
-        const providerMap = {
-            sidecar: fetchLyricsFromSidecar,
-            ytmusic: fetchLyricsFromYtMusic,
-            youtube_captions: fetchLyricsFromYouTubeCaptions,
-            lrclib: fetchLyricsFromLrclib,
-        };
-        const providerOrder = sourceKey === 'auto'
-            ? ['sidecar', 'ytmusic', 'youtube_captions', 'lrclib']
-            : [sourceKey];
+        let data = null;
 
-        for (const providerKey of providerOrder) {
-            const provider = providerMap[providerKey];
-            if (!provider) continue;
-            try {
-                const data = await provider(song, attemptedSources);
-                if (isStale()) {
-                    logger.info('Lyrics', 'Discarded stale lyrics result after session change', {
-                        songId: song.id,
-                        sourceKey,
-                        providerKey,
-                        startedSessionId,
-                        currentSessionId: lyricsSessionId,
-                    });
-                    return null;
-                }
-                if (data && data.found) {
-                    if (sourceKey === 'auto') {
-                        song.lyricsData = data;
-                        updateSongLyricsState(song, data);
-                    }
-                    saveCachedLyrics(song.id, data, sourceKey);
-                    return data;
-                }
-            } catch (error) {
-                logger.warn('Lyrics', `Lyrics provider ${providerKey} failed for ${song.title}`, error);
-            }
+        if (!isYouTubeMusicSong(song)) {
+            data = buildMissingPayload(song, []);
+        } else {
+            data = await fetchLyricsFromHelper(song, sourceKey);
         }
 
         if (isStale()) {
-            logger.info('Lyrics', 'Skipped writing missing-lyrics cache after session change', {
+            logger.info('Lyrics', 'Discarded stale lyrics result after session change', {
                 songId: song.id,
                 sourceKey,
                 startedSessionId,
@@ -637,13 +354,13 @@ const fetchLyricsForSong = async (song, options = {}) => {
             return null;
         }
 
-        const missing = buildMissingPayload(song, attemptedSources);
+        const finalData = data || buildMissingPayload(song, []);
         if (sourceKey === 'auto') {
-            song.lyricsData = missing;
-            updateSongLyricsState(song, missing);
+            song.lyricsData = finalData;
+            updateSongLyricsState(song, finalData);
         }
-        saveCachedLyrics(song.id, missing, sourceKey);
-        return missing;
+        saveCachedLyrics(song.id, finalData, sourceKey);
+        return finalData;
     })().finally(() => {
         inflightLyrics.delete(inflightKey);
     });
@@ -671,7 +388,7 @@ const getLyricsBySongId = async (songId, options = {}) => {
 const deleteLyricsCache = (songId) => {
     if (!fs.existsSync(DOWNLOAD_DIR)) return;
     for (const file of fs.readdirSync(DOWNLOAD_DIR)) {
-        if (file.startsWith(`${songId}_lyriccap`) || file.startsWith(`${songId}_lyrics_`)) {
+        if (file.startsWith(`${songId}_lyrics_`)) {
             try { fs.unlinkSync(path.join(DOWNLOAD_DIR, file)); } catch (error) { }
         }
     }

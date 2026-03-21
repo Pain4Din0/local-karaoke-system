@@ -3,7 +3,7 @@ const path = require('path');
 const logger = require('../utils/logger');
 
 const ADVANCED_CONFIG_PATH = path.join(__dirname, '../../advanced-config.json');
-const ALLOWED_LYRICS_SOURCES = new Set(['auto', 'sidecar', 'ytmusic', 'youtube_captions', 'lrclib']);
+const ALLOWED_LYRICS_SOURCES = new Set(['auto', 'ytmusic', 'apple_music', 'qq_music', 'musixmatch', 'lrclib']);
 
 const DEFAULT_ADVANCED_CONFIG = {
     ytdlp: {

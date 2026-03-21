@@ -42,6 +42,7 @@ const buildBaseSong = (meta = {}, requester = 'Guest') => {
         duration: normalizeDuration(meta.duration),
         sourceId: clampText(meta.sourceId, '', 120) || null,
         extractor: clampText(meta.extractor, '', 80) || null,
+        sourcePlatform: clampText(meta.sourcePlatform, '', 40) || null,
         pic: meta.pic || null,
         requester: getRequesterName(requester),
         originalUrl: clampText(meta.originalUrl, '', 2048),
@@ -74,6 +75,7 @@ const createSongFromHistoryItem = (historyItem = {}) => {
     replaySong.pic = historyItem.pic || null;
     replaySong.sourceId = clampText(historyItem.sourceId, replaySong.sourceId || '', 120) || null;
     replaySong.extractor = clampText(historyItem.extractor, replaySong.extractor || '', 80) || null;
+    replaySong.sourcePlatform = clampText(historyItem.sourcePlatform, replaySong.sourcePlatform || '', 40) || null;
     return replaySong;
 };
 
