@@ -1,0 +1,363 @@
+/* ═══════════════════════════════════════════════════════════
+   Apple Music-like Lyrics Overlay
+   Inspired by @applemusic-like-lyrics/core
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── Overlay Container ──────────────────────────────────── */
+
+.amll-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 25;
+    background-color: #000;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+    overflow: hidden;
+    contain: layout style paint;
+}
+
+.amll-overlay.amll-visible {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+/* ── Background Layer ───────────────────────────────────── */
+
+.amll-bg {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    overflow: hidden;
+}
+
+.amll-bg-canvas {
+    position: absolute;
+    inset: -20px;
+    width: calc(100% + 40px) !important;
+    height: calc(100% + 40px) !important;
+    filter: blur(60px) saturate(1.6) brightness(0.55);
+    transform: scale(1.1);
+    image-rendering: optimizeSpeed;
+}
+
+/* ── Content Layout ─────────────────────────────────────── */
+
+.amll-content {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    width: 100%;
+    height: 100%;
+    padding: 3vh 3vw;
+    gap: 2vw;
+    box-sizing: border-box;
+}
+
+.amll-left-panel {
+    flex: 0 0 38%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    padding-bottom: 4vh;
+}
+
+.amll-right-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    overflow: hidden;
+    position: relative;
+    min-width: 0;
+}
+
+/* ── Album Cover ────────────────────────────────────────── */
+
+.amll-cover-wrapper {
+    position: relative;
+    width: min(32vh, 32vw, 380px);
+    aspect-ratio: 1;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow:
+        0 8px 40px rgba(0, 0, 0, 0.5),
+        0 2px 12px rgba(0, 0, 0, 0.3);
+    flex-shrink: 0;
+}
+
+.amll-cover-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    border-radius: 12px;
+}
+
+/* Subtle breathing animation when playing */
+.amll-overlay:not(.amll-paused) .amll-cover-wrapper {
+    animation: amll-cover-breathe 4s ease-in-out infinite;
+}
+
+@keyframes amll-cover-breathe {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.015); }
+}
+
+/* ── Song Meta ──────────────────────────────────────────── */
+
+.amll-meta {
+    text-align: center;
+    margin-top: 2.5vh;
+    max-width: min(32vh, 32vw, 380px);
+    width: 100%;
+}
+
+.amll-meta-title {
+    font-size: clamp(1rem, 2vh, 1.5rem);
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.95);
+    line-height: 1.3;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-shadow: 0 1px 6px rgba(0, 0, 0, 0.4);
+    letter-spacing: 0.01em;
+}
+
+.amll-meta-artist {
+    font-size: clamp(0.8rem, 1.5vh, 1.1rem);
+    font-weight: 400;
+    color: rgba(255, 255, 255, 0.6);
+    margin-top: 0.3em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    letter-spacing: 0.02em;
+}
+
+/* ── QR Code Corner ─────────────────────────────────────── */
+
+.amll-qr-corner {
+    position: absolute;
+    bottom: 2vh;
+    left: 50%;
+    transform: translateX(-50%);
+    opacity: 0.55;
+    transition: opacity 0.3s ease;
+    border-radius: 8px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.95);
+    padding: 4px;
+}
+
+.amll-qr-corner:hover {
+    opacity: 0.9;
+}
+
+/* ── Lyrics Container ───────────────────────────────────── */
+
+.amll-lyrics-container {
+    width: 100%;
+    height: 100%;
+    position: relative;
+    overflow: hidden;
+}
+
+.amll-lyrics-scroll {
+    width: 100%;
+    height: 100%;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    mask-image: linear-gradient(
+        to bottom,
+        transparent 0%,
+        black 12%,
+        black 80%,
+        transparent 100%
+    );
+    -webkit-mask-image: linear-gradient(
+        to bottom,
+        transparent 0%,
+        black 12%,
+        black 80%,
+        transparent 100%
+    );
+}
+
+.amll-lyrics-scroll::-webkit-scrollbar {
+    display: none;
+}
+
+.amll-lyrics-inner {
+    padding: 2vh 1vw;
+}
+
+.amll-lyrics-spacer {
+    height: 35vh;
+}
+
+/* ── Lyric Lines ────────────────────────────────────────── */
+
+.amll-lyrics-line {
+    font-size: clamp(1.8rem, 3.8vw, 3.2rem);
+    font-weight: 800;
+    line-height: 1.25;
+    padding: 0.3em 0;
+    color: rgba(255, 255, 255, 0.28);
+    transition:
+        filter 0.6s cubic-bezier(0.4, 0, 0.2, 1),
+        opacity 0.6s cubic-bezier(0.4, 0, 0.2, 1),
+        transform 0.6s cubic-bezier(0.4, 0, 0.2, 1),
+        color 0.4s ease;
+    transform-origin: left center;
+    will-change: filter, opacity, transform;
+    user-select: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    letter-spacing: -0.01em;
+}
+
+/* Active line: full brightness, no blur */
+.amll-lyrics-line.amll-active {
+    color: rgba(255, 255, 255, 0.98);
+    text-shadow: 0 0 40px rgba(255, 255, 255, 0.15);
+}
+
+/* Passed line: dimmed */
+.amll-lyrics-line.amll-passed {
+    color: rgba(255, 255, 255, 0.22);
+}
+
+/* ── Word-by-Word Highlighting ──────────────────────────── */
+
+.amll-lyrics-line-words {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0;
+}
+
+.amll-word {
+    display: inline;
+    transition: color 0.08s linear;
+    position: relative;
+    color: rgba(255, 255, 255, 0.28);
+}
+
+/* Active line words base state */
+.amll-lyrics-line.amll-active .amll-word {
+    color: rgba(255, 255, 255, 0.28);
+}
+
+/* Word being sung (current) — fills progressively with brightness */
+.amll-lyrics-line.amll-active .amll-word.amll-word-singing {
+    color: rgba(255, 255, 255, 0.98);
+    text-shadow: 0 0 20px rgba(255, 255, 255, 0.25);
+}
+
+/* Word fully sung */
+.amll-lyrics-line.amll-active .amll-word.amll-word-sung {
+    color: rgba(255, 255, 255, 0.95);
+}
+
+/* Word upcoming */
+.amll-lyrics-line.amll-active .amll-word.amll-word-upcoming {
+    color: rgba(255, 255, 255, 0.28);
+}
+
+/* Non-active line words — all same dim color */
+.amll-lyrics-line:not(.amll-active) .amll-word {
+    color: inherit;
+    text-shadow: none;
+}
+
+/* ── Artplayer Integration ──────────────────────────────── */
+
+/* When AMLL overlay is active, hide Artplayer visually */
+.amll-mode-active #artplayer {
+    opacity: 0 !important;
+    pointer-events: none !important;
+    transition: opacity 0.5s ease;
+}
+
+/* Hide old lyrics overlay and song info in AMLL mode */
+.amll-mode-active .lyrics-overlay,
+.amll-mode-active .song-info-enter-active,
+.amll-mode-active .song-info-leave-active,
+.amll-mode-active [class*="song-info"] {
+    display: none !important;
+}
+
+/* Hide Artplayer controls in AMLL mode */
+.amll-mode-active .art-bottom,
+.amll-mode-active .art-controls,
+.amll-mode-active .art-control,
+.amll-mode-active .art-progress {
+    display: none !important;
+}
+
+/* ── Responsive ─────────────────────────────────────────── */
+
+@media (max-width: 1024px) {
+    .amll-content {
+        padding: 2vh 2vw;
+        gap: 1.5vw;
+    }
+
+    .amll-left-panel {
+        flex: 0 0 35%;
+    }
+
+    .amll-lyrics-line {
+        font-size: clamp(1.4rem, 3.2vw, 2.4rem);
+    }
+}
+
+@media (max-width: 768px) {
+    .amll-content {
+        flex-direction: column;
+        padding: 2vh 3vw;
+    }
+
+    .amll-left-panel {
+        flex: 0 0 auto;
+        flex-direction: row;
+        gap: 1rem;
+        padding-bottom: 0;
+    }
+
+    .amll-cover-wrapper {
+        width: min(15vh, 120px);
+    }
+
+    .amll-meta {
+        text-align: left;
+        margin-top: 0;
+    }
+
+    .amll-right-panel {
+        flex: 1;
+    }
+
+    .amll-qr-corner {
+        display: none;
+    }
+
+    .amll-lyrics-spacer {
+        height: 20vh;
+    }
+}
+
+/* ── Performance Hints ──────────────────────────────────── */
+
+.amll-lyrics-line {
+    contain: layout style;
+}
+
+.amll-bg-canvas {
+    contain: strict;
+}

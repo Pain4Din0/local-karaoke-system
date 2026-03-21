@@ -16,10 +16,11 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <link href="https://cdn.bootcdn.net/ajax/libs/remixicon/3.5.0/remixicon.css" rel="stylesheet">
     <link rel="stylesheet" href="/styles/player.css">
+    <link rel="stylesheet" href="/styles/amll-player.css">
 </head>
 
 <body class="bg-black text-white overflow-hidden h-screen w-screen selection:bg-white selection:text-black">
-    <div id="app" class="relative w-full h-full">
+    <div id="app" class="relative w-full h-full" :class="{ 'amll-mode-active': isAMLLMode }">
 
         <div v-if="!hasInteracted" @click="startInteraction"
             class="absolute inset-0 z-50 bg-black flex flex-col items-center justify-center cursor-pointer">
@@ -137,7 +138,7 @@
             </div>
         </Transition>
         <Transition name="song-info">
-            <div v-if="isPlayingVideo && showInfo" class="absolute top-8 left-8 max-w-2xl z-30 pointer-events-none">
+            <div v-if="isPlayingVideo && showInfo && !isAMLLMode" class="absolute top-8 left-8 max-w-2xl z-30 pointer-events-none">
                 <div class="bg-black/40 backdrop-blur-md rounded-2xl p-6 border border-white/10 shadow-2xl">
                     <h1 class="text-4xl font-bold leading-tight text-white mb-3 line-clamp-2 drop-shadow-sm">{{
                         currentSong.title }}</h1>
@@ -151,7 +152,7 @@
             </div>
         </Transition>
 
-        <div v-if="isPlayingVideo && lyricsState.visible" class="lyrics-overlay z-30 pointer-events-none">
+        <div v-if="isPlayingVideo && lyricsState.visible && !isAMLLMode" class="lyrics-overlay z-30 pointer-events-none">
             <div class="lyrics-panel">
                 <div class="lyrics-current" :class="{ 'lyrics-current-word': lyricsState.currentWords.length > 0 }">
                     <template v-if="lyricsState.currentWords.length > 0">
