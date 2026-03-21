@@ -117,6 +117,15 @@ const runPythonJson = (scriptPath, payload, timeoutMs = 30000) => new Promise((r
 
 const normalizeSourceKey = (sourceKey = 'auto') => String(sourceKey || 'auto').replace(/[^a-z0-9_-]/gi, '_');
 const getLyricsCachePath = (songId, sourceKey = 'auto') => path.join(DOWNLOAD_DIR, `${songId}_lyrics_${normalizeSourceKey(sourceKey)}.json`);
+const removeLyricsCacheFile = (cachePath, reason) => {
+    if (!cachePath || !fs.existsSync(cachePath)) return;
+    try {
+        fs.unlinkSync(cachePath);
+        logger.info('Lyrics', 'Deleted invalid lyrics cache', { cachePath, reason });
+    } catch (error) {
+        logger.warn('Lyrics', `Failed to delete lyrics cache: ${cachePath}`, error);
+    }
+};
 
 const isLegacyAppleLineCache = (parsed) => {
     if (!parsed || parsed.provider !== 'apple_music' || parsed.type !== 'word' || !Array.isArray(parsed.lines) || parsed.lines.length < 2) {
@@ -139,23 +148,34 @@ const loadCachedLyrics = (songId, sourceKey = 'auto') => {
     if (!fs.existsSync(cachePath)) return null;
     try {
         const parsed = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
-        if (!parsed || typeof parsed !== 'object') return null;
-        if (parsed.expiresAt && Date.now() > parsed.expiresAt) {
-            try { fs.unlinkSync(cachePath); } catch (error) { }
+        if (!parsed || typeof parsed !== 'object') {
+            removeLyricsCacheFile(cachePath, 'invalid_payload');
             return null;
         }
-        if (parsed.found !== true && parsed.found !== false) return null;
+        if (parsed.expiresAt && Date.now() > parsed.expiresAt) {
+            removeLyricsCacheFile(cachePath, 'expired');
+            return null;
+        }
+        if (parsed.found !== true && parsed.found !== false) {
+            removeLyricsCacheFile(cachePath, 'invalid_found_flag');
+            return null;
+        }
         if (parsed.found === true && parsed.provider && !SUPPORTED_PROVIDER_KEYS.has(parsed.provider)) {
-            try { fs.unlinkSync(cachePath); } catch (error) { }
+            removeLyricsCacheFile(cachePath, 'unsupported_provider');
             return null;
         }
         if (parsed.found === true && isLegacyAppleLineCache(parsed)) {
-            try { fs.unlinkSync(cachePath); } catch (error) { }
+            removeLyricsCacheFile(cachePath, 'legacy_apple_line_cache');
+            return null;
+        }
+        if (parsed.found === true && !Array.isArray(parsed.lines)) {
+            removeLyricsCacheFile(cachePath, 'invalid_lines');
             return null;
         }
         return parsed;
     } catch (error) {
         logger.warn('Lyrics', `Failed to read lyrics cache for song ${songId}`, error);
+        removeLyricsCacheFile(cachePath, 'parse_error');
         return null;
     }
 };
@@ -388,8 +408,8 @@ const getLyricsBySongId = async (songId, options = {}) => {
 const deleteLyricsCache = (songId) => {
     if (!fs.existsSync(DOWNLOAD_DIR)) return;
     for (const file of fs.readdirSync(DOWNLOAD_DIR)) {
-        if (file.startsWith(`${songId}_lyrics_`)) {
-            try { fs.unlinkSync(path.join(DOWNLOAD_DIR, file)); } catch (error) { }
+        if (file.startsWith(`${songId}_lyrics_`) || file.startsWith(`${songId}_lyriccap`)) {
+            removeLyricsCacheFile(path.join(DOWNLOAD_DIR, file), 'song_cleanup');
         }
     }
 };

@@ -605,6 +605,7 @@ const performShutdownCleanup = () => {
     for (const song of state.getAllSongs()) {
         deleteSongFile(song);
     }
+    cleanupRuntimeArtifacts({ removeMedia: true, reason: 'shutdown' });
 };
 
 const shutdownProcess = (exitCode, reason, error) => {

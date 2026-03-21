@@ -7,22 +7,47 @@ const { DOWNLOAD_DIR, PYTHON_EXE, SEPARATED_DIR, ensureRuntimeDirs } = require('
 const state = require('../utils/state');
 const logger = require('../utils/logger');
 const { setSongError } = require('../utils/song');
+const { removeSeparatedSongArtifacts } = require('./system');
 
 ensureRuntimeDirs();
 
 let manualKaraokeQueue = [];
 
-const cleanupSeparatedFiles = (songId) => {
-    const modelName = (getAdvancedConfig().demucs && getAdvancedConfig().demucs.model) ? getAdvancedConfig().demucs.model : 'htdemucs';
-    const songSeparatedDir = path.join(SEPARATED_DIR, modelName, `${songId}_audio`);
-    if (!fs.existsSync(songSeparatedDir)) return;
+const normalizeOutputFormat = (value) => {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (normalized === 'wav' || normalized === 'flac') return normalized;
+    return 'mp3';
+};
 
-    try {
-        fs.rmSync(songSeparatedDir, { recursive: true, force: true });
-        logger.info('Karaoke', 'Removed separated files', { songId, path: songSeparatedDir });
-    } catch (error) {
-        logger.warn('Karaoke', `Failed to remove separated files for ${songId}`, error);
+const getInstrumentStemBaseName = (twoStems) => {
+    const stem = String(twoStems || 'vocals').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
+    if (!stem) return 'no_vocals';
+    return stem.startsWith('no_') ? stem : `no_${stem}`;
+};
+
+const buildKaraokeOutputCandidates = (songId, demucsConfig = {}) => {
+    const modelName = demucsConfig.model || 'htdemucs';
+    const outputFormat = normalizeOutputFormat(demucsConfig.outputFormat);
+    const separatedBaseDir = path.join(SEPARATED_DIR, modelName, `${songId}_audio`);
+    const instrumentStem = getInstrumentStemBaseName(demucsConfig.twoStems);
+    const extensions = [outputFormat, 'mp3', 'wav', 'flac'];
+    const stemNames = [instrumentStem, 'no_vocals'];
+    const candidates = [];
+
+    for (const stemName of stemNames) {
+        for (const extension of extensions) {
+            const candidate = path.join(separatedBaseDir, `${stemName}.${extension}`);
+            if (!candidates.includes(candidate)) {
+                candidates.push(candidate);
+            }
+        }
     }
+
+    return candidates;
+};
+
+const cleanupSeparatedFiles = (songId) => {
+    removeSeparatedSongArtifacts(songId);
 };
 
 const emitSongError = (song, message, stage = 'karaoke', extra = {}) => {
@@ -69,6 +94,9 @@ const terminateKaraokeProcess = (songId) => {
         }
 
         state.activeKaraokeProcesses.delete(songId);
+        if (state.activeKaraokeProcesses.size === 0) {
+            state.isProcessingKaraoke = false;
+        }
         cleanupSeparatedFiles(songId);
     }
 
@@ -86,7 +114,12 @@ const clearKaraokeQueue = () => {
 const processVocalSeparation = (song) => {
     const audioPath = song && song.localAudioPath;
     if (!song || !audioPath || !fs.existsSync(audioPath)) {
+        if (song) {
+            song.karaokeProcessing = false;
+            song.karaokeProgress = 0;
+        }
         emitSongError(song, 'Cannot start karaoke processing: audio file is missing');
+        state.emitSync();
         state.isProcessingKaraoke = false;
         processNextKaraoke();
         return;
@@ -106,7 +139,8 @@ const processVocalSeparation = (song) => {
     const args = ['-m', 'demucs', '-n', dcfg.model || 'htdemucs', '-o', SEPARATED_DIR];
 
     if (dcfg.twoStems) args.push('--two-stems', dcfg.twoStems);
-    if (dcfg.outputFormat === 'mp3' || dcfg.outputFormat) args.push('--mp3');
+    if (normalizeOutputFormat(dcfg.outputFormat) === 'mp3') args.push('--mp3');
+    if (normalizeOutputFormat(dcfg.outputFormat) === 'flac') args.push('--flac');
     if (dcfg.overlap != null && dcfg.overlap !== 0.25) args.push('--overlap', String(dcfg.overlap));
     if (dcfg.segment != null && dcfg.segment !== 7.8) args.push('--segment', String(dcfg.segment));
     if (dcfg.shifts != null && dcfg.shifts !== 1) args.push('--shifts', String(dcfg.shifts));
@@ -161,19 +195,21 @@ const processVocalSeparation = (song) => {
                 });
                 cleanupSeparatedFiles(song.id);
             } else if (code === 0) {
-                const modelName = (getAdvancedConfig().demucs || {}).model || 'htdemucs';
-                const noVocalsPath = path.join(SEPARATED_DIR, modelName, `${song.id}_audio`, 'no_vocals.mp3');
-                if (fs.existsSync(noVocalsPath)) {
-                    const karaokePath = path.join(DOWNLOAD_DIR, `${song.id}_karaoke.mp3`);
+                const outputCandidates = buildKaraokeOutputCandidates(song.id, dcfg);
+                const noVocalsPath = outputCandidates.find((candidate) => fs.existsSync(candidate));
+                if (noVocalsPath) {
+                    const karaokeExt = path.extname(noVocalsPath) || '.mp3';
+                    const karaokeFilename = `${song.id}_karaoke${karaokeExt}`;
+                    const karaokePath = path.join(DOWNLOAD_DIR, karaokeFilename);
                     fs.copyFileSync(noVocalsPath, karaokePath);
-                    song.karaokeSrc = `/downloads/${song.id}_karaoke.mp3?t=${Date.now()}`;
+                    song.karaokeSrc = `/downloads/${karaokeFilename}?t=${Date.now()}`;
                     song.karaokeReady = true;
                     song.karaokeProgress = 100;
                     logger.info('Karaoke', `Karaoke track ready for ${song.title}`, { songId: song.id });
                     cleanupSeparatedFiles(song.id);
                 } else {
-                    emitSongError(song, 'Demucs finished but no_vocals.mp3 was not produced', 'karaoke', {
-                        expectedOutput: noVocalsPath,
+                    emitSongError(song, 'Demucs finished but no instrumental stem was produced', 'karaoke', {
+                        expectedOutputCandidates: outputCandidates,
                     });
                     cleanupSeparatedFiles(song.id);
                 }
@@ -215,15 +251,13 @@ const processVocalSeparation = (song) => {
 const processNextKaraoke = () => {
     if (state.isProcessingKaraoke) return;
 
-    if (manualKaraokeQueue.length > 0) {
+    while (manualKaraokeQueue.length > 0) {
         const nextSong = manualKaraokeQueue.shift();
         if (nextSong && nextSong.status === 'ready' && !nextSong.karaokeReady && !nextSong.karaokeProcessing) {
             state.isProcessingKaraoke = true;
             processVocalSeparation(nextSong);
             return;
         }
-        processNextKaraoke();
-        return;
     }
 
     if (state.autoProcessKaraoke) {
@@ -243,8 +277,9 @@ const processNextKaraoke = () => {
 const queueKaraokeProcessing = (song, prioritize = false) => {
     if (!song || song.karaokeReady || song.karaokeProcessing) return;
 
-    if (prioritize && !manualKaraokeQueue.find((item) => item && item.id === song.id)) {
-        manualKaraokeQueue.push(song);
+    if (prioritize) {
+        manualKaraokeQueue = manualKaraokeQueue.filter((item) => item && item.id !== song.id);
+        manualKaraokeQueue.unshift(song);
     }
 
     if (!state.isProcessingKaraoke) {

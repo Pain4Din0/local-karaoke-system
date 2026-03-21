@@ -4,6 +4,7 @@ const logger = require('../utils/logger');
 
 const ADVANCED_CONFIG_PATH = path.join(__dirname, '../../advanced-config.json');
 const ALLOWED_LYRICS_SOURCES = new Set(['auto', 'ytmusic', 'apple_music', 'qq_music', 'musixmatch', 'lrclib']);
+const ALLOWED_DEMUCS_OUTPUT_FORMATS = new Set(['mp3', 'wav', 'flac']);
 
 const DEFAULT_ADVANCED_CONFIG = {
     ytdlp: {
@@ -88,6 +89,11 @@ const normalizeHeaders = (headers) => {
         .slice(0, 20);
 };
 
+const normalizeText = (value, fallback = '') => {
+    const text = String(value || '').trim();
+    return text || fallback;
+};
+
 function deepMerge(target, source) {
     if (!source || typeof source !== 'object') return target;
     for (const key of Object.keys(source)) {
@@ -131,6 +137,11 @@ function normalizeAdvancedConfig(inputConfig = {}) {
     merged.demucs.overlapOutput = !!merged.demucs.overlapOutput;
     merged.demucs.float32 = !!merged.demucs.float32;
     merged.demucs.noSegment = !!merged.demucs.noSegment;
+    merged.demucs.model = normalizeText(merged.demucs.model, DEFAULT_ADVANCED_CONFIG.demucs.model);
+    merged.demucs.twoStems = normalizeText(merged.demucs.twoStems, DEFAULT_ADVANCED_CONFIG.demucs.twoStems);
+    merged.demucs.outputFormat = ALLOWED_DEMUCS_OUTPUT_FORMATS.has(String(merged.demucs.outputFormat || '').trim().toLowerCase())
+        ? String(merged.demucs.outputFormat).trim().toLowerCase()
+        : DEFAULT_ADVANCED_CONFIG.demucs.outputFormat;
 
     merged.ffmpeg.loudnessI = clampNumber(merged.ffmpeg.loudnessI, DEFAULT_ADVANCED_CONFIG.ffmpeg.loudnessI, { min: -70, max: 0 });
     merged.ffmpeg.loudnessTP = clampNumber(merged.ffmpeg.loudnessTP, DEFAULT_ADVANCED_CONFIG.ffmpeg.loudnessTP, { min: -9, max: 0 });

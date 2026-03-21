@@ -11,6 +11,8 @@ const { deleteLyricsCache } = require('./lyrics');
 
 ensureRuntimeDirs();
 
+const pendingFileDeleteRetries = new Map();
+
 const safeKillProcessTree = (proc, label) => {
     if (!proc || !proc.pid) return;
 
@@ -40,17 +42,48 @@ const safeReadDir = (dirPath) => {
     }
 };
 
+const safeReadDirEntries = (dirPath) => {
+    try {
+        return fs.readdirSync(dirPath, { withFileTypes: true });
+    } catch (error) {
+        logger.warn('System', `Failed to list directory entries: ${dirPath}`, error);
+        return [];
+    }
+};
+
+const clearPendingFileDeleteRetry = (filePath) => {
+    const timer = pendingFileDeleteRetries.get(filePath);
+    if (!timer) return;
+    clearTimeout(timer);
+    pendingFileDeleteRetries.delete(filePath);
+};
+
+const scheduleFileDeleteRetry = (filePath, retries, delayMs) => {
+    clearPendingFileDeleteRetry(filePath);
+    const timer = setTimeout(() => {
+        pendingFileDeleteRetries.delete(filePath);
+        deleteFileWithRetries(filePath, retries, delayMs);
+    }, delayMs);
+    pendingFileDeleteRetries.set(filePath, timer);
+};
+
 const deleteFileWithRetries = (filePath, retries = 3, delayMs = 1000) => {
-    if (!filePath || !fs.existsSync(filePath)) return;
+    if (!filePath) return;
+    if (!fs.existsSync(filePath)) {
+        clearPendingFileDeleteRetry(filePath);
+        return;
+    }
 
     try {
         fs.unlinkSync(filePath);
+        clearPendingFileDeleteRetry(filePath);
         logger.info('System', 'Deleted file', { filePath });
     } catch (error) {
         if (retries > 0) {
-            setTimeout(() => deleteFileWithRetries(filePath, retries - 1, delayMs), delayMs);
+            scheduleFileDeleteRetry(filePath, retries - 1, delayMs);
             return;
         }
+        clearPendingFileDeleteRetry(filePath);
         logger.warn('System', `Failed to delete file after retries: ${filePath}`, error);
     }
 };
@@ -69,6 +102,43 @@ const deleteGeneratedFilesBySongId = (songId) => {
         if (!prefixes.some((prefix) => filename.startsWith(prefix))) continue;
         deleteFileWithRetries(path.join(DOWNLOAD_DIR, filename));
     }
+};
+
+const removeSeparatedSongArtifacts = (songId) => {
+    if (!songId) return 0;
+
+    const removedPaths = [];
+    const directOutputDir = path.join(SEPARATED_DIR, `${songId}_audio`);
+
+    if (fs.existsSync(directOutputDir)) {
+        try {
+            fs.rmSync(directOutputDir, { recursive: true, force: true });
+            removedPaths.push(directOutputDir);
+        } catch (error) {
+            logger.warn('System', `Failed to delete separated directory: ${directOutputDir}`, error);
+        }
+    }
+
+    for (const entry of safeReadDirEntries(SEPARATED_DIR)) {
+        if (!entry.isDirectory()) continue;
+        const songSeparatedDir = path.join(SEPARATED_DIR, entry.name, `${songId}_audio`);
+        if (!fs.existsSync(songSeparatedDir)) continue;
+        try {
+            fs.rmSync(songSeparatedDir, { recursive: true, force: true });
+            removedPaths.push(songSeparatedDir);
+        } catch (error) {
+            logger.warn('System', `Failed to delete separated directory: ${songSeparatedDir}`, error);
+        }
+    }
+
+    if (removedPaths.length > 0) {
+        logger.info('System', 'Deleted separated directories', {
+            songId,
+            paths: removedPaths,
+        });
+    }
+
+    return removedPaths.length;
 };
 
 const getNetworkInterfaces = () => {
@@ -134,19 +204,17 @@ const deleteSongFile = (song) => {
         activeKaraoke.proc.__terminatedBySystem = true;
         activeKaraoke.proc.__terminationReason = 'song_cleanup';
         safeKillProcessTree(activeKaraoke.proc, `karaoke:${song.id}`);
+        if (activeKaraoke.song) {
+            activeKaraoke.song.karaokeProcessing = false;
+            activeKaraoke.song.karaokeProgress = 0;
+        }
         state.activeKaraokeProcesses.delete(song.id);
-    }
-
-    const modelName = (getAdvancedConfig().demucs && getAdvancedConfig().demucs.model) ? getAdvancedConfig().demucs.model : 'htdemucs';
-    const songSeparatedDir = path.join(SEPARATED_DIR, modelName, `${song.id}_audio`);
-    if (fs.existsSync(songSeparatedDir)) {
-        try {
-            fs.rmSync(songSeparatedDir, { recursive: true, force: true });
-            logger.info('System', 'Deleted separated directory', { path: songSeparatedDir });
-        } catch (error) {
-            logger.warn('System', `Failed to delete separated directory: ${songSeparatedDir}`, error);
+        if (state.activeKaraokeProcesses.size === 0) {
+            state.isProcessingKaraoke = false;
         }
     }
+
+    removeSeparatedSongArtifacts(song.id);
 
     if (song.localVideoPath) deleteFileWithRetries(song.localVideoPath);
     if (song.localAudioPath) deleteFileWithRetries(song.localAudioPath);
@@ -232,5 +300,6 @@ module.exports = {
     getWifiSSID,
     getCookiesPath,
     deleteSongFile,
+    removeSeparatedSongArtifacts,
     analyzeLoudness,
 };
