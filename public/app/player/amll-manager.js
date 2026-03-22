@@ -212,11 +212,11 @@ class MeshGradientBackground {
             blob.x += blob.vx * delta + Math.sin(blob.phase) * 0.0001 * delta;
             blob.y += blob.vy * delta + Math.cos(blob.phase * 0.7) * 0.0001 * delta;
 
-            // Wrap around
-            if (blob.x < -0.1) blob.x = 1.1;
-            if (blob.x > 1.1) blob.x = -0.1;
-            if (blob.y < -0.1) blob.y = 1.1;
-            if (blob.y > 1.1) blob.y = -0.1;
+            // Bounce instead of wrap to prevent visual twitching
+            if (blob.x < -0.2) { blob.x = -0.2; blob.vx = Math.abs(blob.vx); }
+            if (blob.x > 1.2) { blob.x = 1.2; blob.vx = -Math.abs(blob.vx); }
+            if (blob.y < -0.2) { blob.y = -0.2; blob.vy = Math.abs(blob.vy); }
+            if (blob.y > 1.2) { blob.y = 1.2; blob.vy = -Math.abs(blob.vy); }
         }
 
         this._draw();
@@ -359,9 +359,9 @@ class AppleMusicLyrics {
         for (let i = 0; i < this.lineElements.length; i++) {
             const el = this.lineElements[i];
             const line = this.lines[i];
-            const isActive = i === activeIndex && t >= line.start && t < line.end;
-            const isPassed = t >= line.end;
-            const isUpcoming = !isActive && !isPassed;
+            const isActive = i === activeIndex;
+            const isPassed = i < activeIndex;
+            const isUpcoming = i > activeIndex;
             const distance = Math.abs(i - activeIndex);
 
             el.classList.toggle('amll-active', isActive);
@@ -428,14 +428,21 @@ class AppleMusicLyrics {
         const el = this.lineElements[index];
         if (!el) return;
 
-        const containerRect = this.scrollContainer.getBoundingClientRect();
-        const elRect = el.getBoundingClientRect();
-        const targetCenter = containerRect.top + containerRect.height * 0.35; // position at ~35% from top
-        const elCenter = elRect.top + elRect.height / 2;
-        const scrollDelta = elCenter - targetCenter;
+        // Use offsetTop to compute absolute layout position (ignores CSS transforms and ongoing smooth scrolls)
+        let offsetTop = el.offsetTop;
+        let offsetParent = el.offsetParent;
 
-        this.scrollContainer.scrollBy({
-            top: scrollDelta,
+        // Traverse up to scrollContainer in case of nested positioning
+        while (offsetParent && offsetParent !== this.scrollContainer && this.scrollContainer.contains(offsetParent)) {
+            offsetTop += offsetParent.offsetTop;
+            offsetParent = offsetParent.offsetParent;
+        }
+
+        const targetCenter = this.scrollContainer.clientHeight * 0.35;
+        const targetScrollTop = offsetTop + (el.offsetHeight / 2) - targetCenter;
+
+        this.scrollContainer.scrollTo({
+            top: targetScrollTop,
             behavior: 'smooth',
         });
     }
