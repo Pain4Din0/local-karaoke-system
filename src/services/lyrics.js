@@ -10,7 +10,7 @@ const inflightLyrics = new Map();
 const LYRICS_HELPER = path.join(SCRIPTS_DIR, 'lyrics', 'fetch_lyrics.py');
 const MISSING_LYRICS_CACHE_TTL_MS = 5 * 60 * 1000;
 const SUPPORTED_PROVIDER_KEYS = new Set(['ytmusic', 'apple_music', 'qq_music', 'musixmatch', 'lrclib']);
-const APPLE_MUSIC_CACHE_VERSION = 3;
+const APPLE_MUSIC_CACHE_VERSION = 5;
 let lyricsSessionId = 0;
 
 ensureRuntimeDirs();
@@ -62,11 +62,64 @@ const buildWordSegments = (words, lineEnd) => {
     });
 };
 
+const copyExtraFields = (source, target, blockedKeys) => {
+    Object.entries(source || {}).forEach(([key, value]) => {
+        if (blockedKeys.has(key) || value === undefined || value === null) return;
+        target[key] = value;
+    });
+};
+
+const normalizeAuxiliaryTracks = (tracks, fallbackStart, fallbackEnd) => {
+    if (!Array.isArray(tracks) || tracks.length === 0) return [];
+    const blockedKeys = new Set(['lang', 'source', 'type', 'timing', 'text', 'words', 'backgroundText', 'backgroundWords', 'start', 'end', 'backgroundStart', 'backgroundEnd']);
+    return tracks.map((track) => {
+        const normalizedTrack = {
+            lang: track && track.lang ? String(track.lang) : null,
+            source: track && track.source ? String(track.source) : null,
+            type: track && track.type ? String(track.type) : null,
+            timing: track && track.timing ? String(track.timing) : null,
+            text: normalizeSpace(track && track.text),
+            backgroundText: normalizeSpace(track && track.backgroundText),
+        };
+        const trackEnd = Number.isFinite(Number(track && track.end)) ? Number(track.end) : fallbackEnd;
+        const backgroundTrackEnd = Number.isFinite(Number(track && track.backgroundEnd)) ? Number(track.backgroundEnd) : fallbackEnd;
+        normalizedTrack.words = buildWordSegments(Array.isArray(track && track.words) ? track.words : null, trackEnd);
+        normalizedTrack.backgroundWords = buildWordSegments(Array.isArray(track && track.backgroundWords) ? track.backgroundWords : null, backgroundTrackEnd);
+        if (!normalizedTrack.text && normalizedTrack.words) {
+            normalizedTrack.text = normalizedTrack.words.map((word) => word.text).join('').trim();
+        }
+        if (!normalizedTrack.backgroundText && normalizedTrack.backgroundWords) {
+            normalizedTrack.backgroundText = normalizedTrack.backgroundWords.map((word) => word.text).join('').trim();
+        }
+
+        const trackStart = Number(track && track.start);
+        const trackEndValue = Number(track && track.end);
+        const backgroundTrackStart = Number(track && track.backgroundStart);
+        const backgroundTrackEndValue = Number(track && track.backgroundEnd);
+        if (Number.isFinite(trackStart)) normalizedTrack.start = trackStart;
+        else if (normalizedTrack.text || normalizedTrack.words) normalizedTrack.start = fallbackStart;
+        if (Number.isFinite(trackEndValue)) normalizedTrack.end = trackEndValue;
+        else if (normalizedTrack.text || normalizedTrack.words) normalizedTrack.end = fallbackEnd;
+        if (Number.isFinite(backgroundTrackStart)) normalizedTrack.backgroundStart = backgroundTrackStart;
+        if (Number.isFinite(backgroundTrackEndValue)) normalizedTrack.backgroundEnd = backgroundTrackEndValue;
+
+        copyExtraFields(track, normalizedTrack, blockedKeys);
+        return (normalizedTrack.text || normalizedTrack.backgroundText || normalizedTrack.words || normalizedTrack.backgroundWords) ? normalizedTrack : null;
+    }).filter(Boolean);
+};
+
 const finalizeTimedLines = (lines, fallbackDuration) => {
     if (!Array.isArray(lines) || lines.length === 0) return [];
 
+    const blockedLineKeys = new Set([
+        'start', 'end', 'text', 'words',
+        'backgroundText', 'backgroundWords',
+        'section', 'agent', 'agentName', 'agentType', 'oppositeTurn',
+        'key', 'lang', 'translations', 'romanizations',
+    ]);
     const normalized = lines
-        .map((line) => ({
+        .map((line) => {
+            const normalizedLine = {
             start: Number(line && line.start),
             end: Number.isFinite(Number(line && line.end)) ? Number(line.end) : null,
             text: normalizeSpace(line && line.text),
@@ -78,7 +131,14 @@ const finalizeTimedLines = (lines, fallbackDuration) => {
             agentName: line && line.agentName ? String(line.agentName) : null,
             agentType: line && line.agentType ? String(line.agentType) : null,
             oppositeTurn: !!(line && line.oppositeTurn),
-        }))
+            key: line && line.key ? String(line.key) : null,
+            lang: line && line.lang ? String(line.lang) : null,
+            translations: Array.isArray(line && line.translations) ? line.translations : [],
+            romanizations: Array.isArray(line && line.romanizations) ? line.romanizations : [],
+            };
+            copyExtraFields(line, normalizedLine, blockedLineKeys);
+            return normalizedLine;
+        })
         .filter((line) => Number.isFinite(line.start) && line.text)
         .sort((a, b) => a.start - b.start);
 
@@ -92,6 +152,8 @@ const finalizeTimedLines = (lines, fallbackDuration) => {
             : Math.max(current.start + 0.4, candidateEnd);
         current.words = buildWordSegments(current.words, current.end);
         current.backgroundWords = buildWordSegments(current.backgroundWords, current.end);
+        current.translations = normalizeAuxiliaryTracks(current.translations, current.start, current.end);
+        current.romanizations = normalizeAuxiliaryTracks(current.romanizations, current.start, current.end);
     }
 
     return normalized;
@@ -263,6 +325,12 @@ const buildSongQuery = (song) => {
 const createLyricsPayload = ({ source, provider, type, lines, plainLyrics, metadata, attemptedSources }) => {
     const explicitType = type === 'word' || type === 'line' ? type : null;
     const inferredType = explicitType || (Array.isArray(lines) && lines.some((line) => Array.isArray(line && line.words) && line.words.length > 0) ? 'word' : 'line');
+    const blockedLineKeys = new Set([
+        'start', 'end', 'text', 'words',
+        'backgroundText', 'backgroundWords',
+        'section', 'agent', 'agentName', 'agentType', 'oppositeTurn',
+        'key', 'lang', 'translations', 'romanizations',
+    ]);
     const mapWords = (words, lineEnd) => (
         Array.isArray(words) && words.length > 0
             ? words.map((word, wordIndex) => {
@@ -280,21 +348,71 @@ const createLyricsPayload = ({ source, provider, type, lines, plainLyrics, metad
             })
             : null
     );
+    const mapAuxiliaryTracks = (tracks, lineStart, lineEnd) => (
+        Array.isArray(tracks) && tracks.length > 0
+            ? tracks.map((track) => {
+                const knownKeys = new Set(['lang', 'source', 'type', 'timing', 'text', 'words', 'backgroundText', 'backgroundWords', 'start', 'end', 'backgroundStart', 'backgroundEnd']);
+                const trackEnd = Number.isFinite(Number(track && track.end)) ? Number(track.end) : lineEnd;
+                const backgroundTrackEnd = Number.isFinite(Number(track && track.backgroundEnd)) ? Number(track.backgroundEnd) : lineEnd;
+                const nextTrack = {
+                    lang: track && track.lang ? String(track.lang) : null,
+                    source: track && track.source ? String(track.source) : null,
+                    type: track && track.type ? String(track.type) : null,
+                    timing: track && track.timing ? String(track.timing) : null,
+                    text: track && track.text ? String(track.text) : '',
+                    words: mapWords(track && track.words, trackEnd),
+                    backgroundText: track && track.backgroundText ? String(track.backgroundText) : '',
+                    backgroundWords: mapWords(track && track.backgroundWords, backgroundTrackEnd),
+                };
+                if (!nextTrack.text && nextTrack.words) {
+                    nextTrack.text = nextTrack.words.map((word) => word.text).join('').trim();
+                }
+                if (!nextTrack.backgroundText && nextTrack.backgroundWords) {
+                    nextTrack.backgroundText = nextTrack.backgroundWords.map((word) => word.text).join('').trim();
+                }
+
+                const trackStart = Number(track && track.start);
+                const trackEndValue = Number(track && track.end);
+                const backgroundTrackStart = Number(track && track.backgroundStart);
+                const backgroundTrackEndValue = Number(track && track.backgroundEnd);
+                if (Number.isFinite(trackStart)) nextTrack.start = Number(trackStart.toFixed(3));
+                else if (nextTrack.text || nextTrack.words) nextTrack.start = Number(lineStart.toFixed(3));
+                if (Number.isFinite(trackEndValue)) nextTrack.end = Number(trackEndValue.toFixed(3));
+                else if (nextTrack.text || nextTrack.words) nextTrack.end = Number(lineEnd.toFixed(3));
+                if (Number.isFinite(backgroundTrackStart)) nextTrack.backgroundStart = Number(backgroundTrackStart.toFixed(3));
+                if (Number.isFinite(backgroundTrackEndValue)) nextTrack.backgroundEnd = Number(backgroundTrackEndValue.toFixed(3));
+                Object.entries(track || {}).forEach(([key, value]) => {
+                    if (knownKeys.has(key) || value === undefined || value === null) return;
+                    nextTrack[key] = value;
+                });
+                nextTrack.timing = nextTrack.timing || (nextTrack.words || nextTrack.backgroundWords ? 'word' : 'line');
+                return (nextTrack.text || nextTrack.words || nextTrack.backgroundText || nextTrack.backgroundWords) ? nextTrack : null;
+            }).filter(Boolean)
+            : []
+    );
     const cleanedLines = Array.isArray(lines)
-        ? lines.map((line, index) => ({
-            id: index + 1,
-            start: Number(line.start.toFixed(3)),
-            end: Number((line.end || line.start + 4).toFixed(3)),
-            text: line.text,
-            words: inferredType === 'word' ? mapWords(line.words, line.end) : null,
-            backgroundText: line.backgroundText || '',
-            backgroundWords: inferredType === 'word' ? mapWords(line.backgroundWords, line.end) : null,
-            section: line.section || null,
-            agent: line.agent || null,
-            agentName: line.agentName || null,
-            agentType: line.agentType || null,
-            oppositeTurn: !!line.oppositeTurn,
-        }))
+        ? lines.map((line, index) => {
+            const nextLine = {
+                id: index + 1,
+                start: Number(line.start.toFixed(3)),
+                end: Number((line.end || line.start + 4).toFixed(3)),
+                text: line.text,
+                words: inferredType === 'word' ? mapWords(line.words, line.end) : null,
+                backgroundText: line.backgroundText || '',
+                backgroundWords: inferredType === 'word' ? mapWords(line.backgroundWords, line.end) : null,
+                section: line.section || null,
+                agent: line.agent || null,
+                agentName: line.agentName || null,
+                agentType: line.agentType || null,
+                oppositeTurn: !!line.oppositeTurn,
+                key: line.key || null,
+                lang: line.lang || null,
+                translations: mapAuxiliaryTracks(line.translations, line.start, line.end),
+                romanizations: mapAuxiliaryTracks(line.romanizations, line.start, line.end),
+            };
+            copyExtraFields(line, nextLine, blockedLineKeys);
+            return nextLine;
+        })
         : [];
 
     return {

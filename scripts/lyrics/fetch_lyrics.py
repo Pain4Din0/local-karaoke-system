@@ -169,64 +169,99 @@ def has_timed_descendants(node):
     return False
 
 
-def collect_ttml_events(node, role="main", agent_id=None, events=None):
-    if events is None:
-        events = []
+def make_ttml_bucket_key(track_type="main", lang=None, background=False, source="inline", track_subtype=None):
+    return (
+        normalize_space(track_type) or "main",
+        normalize_space(lang) or None,
+        bool(background),
+        normalize_space(source) or "inline",
+        normalize_space(track_subtype) or None,
+    )
 
+
+def append_ttml_bucket_event(buckets, key, text, start=None, end=None, agent_id=None, timed=False):
+    if text is None:
+        return
+    text = str(text)
+    if not text:
+        return
+    buckets.setdefault(key, []).append({
+        "text": text,
+        "start": start,
+        "end": end,
+        "agent": agent_id,
+        "timed": bool(timed),
+    })
+
+
+def collect_ttml_track_events(node, track_type="main", lang=None, background=False, source="inline", track_subtype=None, agent_id=None, buckets=None):
+    if buckets is None:
+        buckets = {}
+
+    bucket_key = make_ttml_bucket_key(track_type, lang, background, source, track_subtype)
     text = normalize_inline_text(getattr(node, "text", ""))
     if text:
-        events.append({
-            "role": role,
-            "text": text,
-            "start": None,
-            "end": None,
-            "agent": agent_id,
-            "timed": False,
-        })
+        append_ttml_bucket_event(buckets, bucket_key, text, agent_id=agent_id, timed=False)
 
     for child in (list(node) if node is not None else []):
-        child_role = role
-        if normalize_xml_name(get_xml_attr(child, "role")) == "xbg":
-            child_role = "background"
+        role = normalize_xml_name(get_xml_attr(child, "role"))
+        child_track_type = track_type
+        child_lang = lang
+        child_background = background
+        child_source = source
+        child_track_subtype = track_subtype
+        if role == "xbg":
+            child_background = True
+        elif role == "xtranslation":
+            child_track_type = "translation"
+            child_lang = get_xml_attr(child, "lang") or child_lang
+            child_source = "inline"
+        elif role == "xroman":
+            child_track_type = "roman"
+            child_lang = get_xml_attr(child, "lang") or child_lang
+            child_source = "inline"
+
         child_agent = get_xml_attr(child, "agent") or agent_id
         child_start = parse_clock_time(get_xml_attr(child, "begin"))
         child_end = parse_clock_time(get_xml_attr(child, "end"))
-        is_leaf_timed_span = local_name(child.tag) == "span" and child_start is not None and not has_timed_descendants(child)
+        is_leaf_timed_span = local_name(child.tag) == "span" and child_start is not None and not list(child)
+        child_bucket_key = make_ttml_bucket_key(child_track_type, child_lang, child_background, child_source, child_track_subtype)
 
         if is_leaf_timed_span:
             token_text = normalize_inline_text("".join(child.itertext()))
             if token_text:
-                events.append({
-                    "role": child_role,
-                    "text": token_text,
-                    "start": child_start,
-                    "end": child_end,
-                    "agent": child_agent,
-                    "timed": True,
-                })
+                append_ttml_bucket_event(
+                    buckets,
+                    child_bucket_key,
+                    token_text,
+                    start=child_start,
+                    end=child_end,
+                    agent_id=child_agent,
+                    timed=True,
+                )
         else:
-            collect_ttml_events(child, role=child_role, agent_id=child_agent, events=events)
+            collect_ttml_track_events(
+                child,
+                track_type=child_track_type,
+                lang=child_lang,
+                background=child_background,
+                source=child_source,
+                track_subtype=child_track_subtype,
+                agent_id=child_agent,
+                buckets=buckets,
+            )
 
         tail = normalize_inline_text(getattr(child, "tail", ""))
         if tail:
-            events.append({
-                "role": role,
-                "text": tail,
-                "start": None,
-                "end": None,
-                "agent": agent_id,
-                "timed": False,
-            })
+            append_ttml_bucket_event(buckets, bucket_key, tail, agent_id=agent_id, timed=False)
 
-    return events
+    return buckets
 
 
-def build_words_from_events(events, role="main"):
+def build_words_from_bucket_events(events):
     words = []
     pending_prefix = ""
     for event in events or []:
-        if event.get("role") != role:
-            continue
         text = str(event.get("text") or "")
         if not event.get("timed"):
             pending_prefix += text
@@ -243,12 +278,72 @@ def build_words_from_events(events, role="main"):
         if event.get("agent"):
             next_word["agent"] = event.get("agent")
         words.append(next_word)
+    if pending_prefix and words:
+        words[-1]["text"] = f"{words[-1]['text']}{pending_prefix}"
     return words
 
 
-def build_plain_text_from_events(events, role="main"):
-    text = "".join(str(event.get("text") or "") for event in (events or []) if event.get("role") == role)
+def build_plain_text_from_bucket_events(events):
+    text = "".join(str(event.get("text") or "") for event in (events or []))
     return normalize_space(text)
+
+
+def build_track_content_from_bucket_events(events, fallback_start=None, fallback_end=None):
+    words = build_words_from_bucket_events(events)
+    text = "".join(word["text"] for word in words).strip() if words else build_plain_text_from_bucket_events(events)
+    if not text:
+        return None
+    start = fallback_start
+    end = fallback_end
+    if words:
+        if start is None:
+            start = words[0].get("start")
+        if end is None:
+            end = words[-1].get("end")
+    return {
+        "text": text,
+        "words": words or None,
+        "start": start,
+        "end": end,
+        "timing": "word" if words else "line",
+    }
+
+
+def build_auxiliary_track_entries(buckets, fallback_start=None, fallback_end=None):
+    grouped = {}
+    for key, events in (buckets or {}).items():
+        track_type, lang, background, source, track_subtype = key
+        if track_type not in {"translation", "roman"}:
+            continue
+        grouped.setdefault((track_type, lang, source, track_subtype), {})["background" if background else "main"] = events
+
+    tracks = []
+    for (track_type, lang, source, track_subtype), group in grouped.items():
+        main_content = build_track_content_from_bucket_events(group.get("main"), fallback_start=fallback_start, fallback_end=fallback_end)
+        background_content = build_track_content_from_bucket_events(group.get("background"), fallback_start=fallback_start, fallback_end=fallback_end)
+        if not main_content and not background_content:
+            continue
+        track = {
+            "role": track_type,
+            "lang": lang,
+            "source": source,
+            "type": track_subtype,
+            "timing": "word" if ((main_content and main_content.get("words")) or (background_content and background_content.get("words"))) else "line",
+            "text": main_content.get("text") if main_content else "",
+            "words": main_content.get("words") if main_content else None,
+            "backgroundText": background_content.get("text") if background_content else "",
+            "backgroundWords": background_content.get("words") if background_content else None,
+        }
+        if main_content and main_content.get("start") is not None:
+            track["start"] = main_content.get("start")
+        if main_content and main_content.get("end") is not None:
+            track["end"] = main_content.get("end")
+        if background_content and background_content.get("start") is not None:
+            track["backgroundStart"] = background_content.get("start")
+        if background_content and background_content.get("end") is not None:
+            track["backgroundEnd"] = background_content.get("end")
+        tracks.append(track)
+    return tracks
 
 
 def extract_line_agent(words, default_agent=None):
@@ -652,41 +747,187 @@ def parse_ttml_songwriters(root):
     return songwriters
 
 
-def build_line_from_ttml_paragraph(paragraph, section=None):
+def strip_auxiliary_track_role(track):
+    return {key: value for key, value in (track or {}).items() if key != "role"}
+
+
+def build_ttml_head_auxiliary_track(text_element, track_type, lang=None, source="itunes_metadata", track_subtype=None):
+    buckets = collect_ttml_track_events(
+        text_element,
+        track_type=track_type,
+        lang=lang,
+        background=False,
+        source=source,
+        track_subtype=track_subtype,
+        agent_id=None,
+        buckets={},
+    )
+    tracks = build_auxiliary_track_entries(buckets)
+    for track in tracks:
+        if track.get("role") == track_type:
+            return track
+    return None
+
+
+def parse_ttml_head_auxiliary_tracks(root):
+    tracks_by_line_key = {}
+    metadata = {}
+
+    for element in root.iter():
+        if normalize_xml_name(getattr(element, "tag", "")) != "itunesmetadata":
+            continue
+
+        leading_silence_raw = normalize_space(get_xml_attr(element, "leadingSilence"))
+        if leading_silence_raw and "leadingSilenceRaw" not in metadata:
+            metadata["leadingSilenceRaw"] = leading_silence_raw
+            parsed_leading_silence = parse_clock_time(leading_silence_raw)
+            if parsed_leading_silence is not None:
+                metadata["leadingSilence"] = parsed_leading_silence
+
+        for container in list(element):
+            container_name = normalize_xml_name(getattr(container, "tag", ""))
+            if container_name not in {"translations", "transliterations"}:
+                continue
+            track_type = "translation" if container_name == "translations" else "roman"
+            expected_child_name = "translation" if track_type == "translation" else "transliteration"
+
+            for language_block in list(container):
+                if normalize_xml_name(getattr(language_block, "tag", "")) != expected_child_name:
+                    continue
+
+                lang = normalize_space(get_xml_attr(language_block, "lang")) or None
+                track_subtype = normalize_space(get_xml_attr(language_block, "type")) or None
+
+                for text_element in list(language_block):
+                    if normalize_xml_name(getattr(text_element, "tag", "")) != "text":
+                        continue
+                    line_key = normalize_space(get_xml_attr(text_element, "for"))
+                    if not line_key:
+                        continue
+                    track = build_ttml_head_auxiliary_track(
+                        text_element,
+                        track_type=track_type,
+                        lang=lang,
+                        source="itunes_metadata",
+                        track_subtype=track_subtype,
+                    )
+                    if not track:
+                        continue
+                    tracks_by_line_key.setdefault(line_key, []).append(track)
+
+    return tracks_by_line_key, metadata
+
+
+def summarize_auxiliary_track_support(lines):
+    summary = {
+        "hasTranslations": False,
+        "hasRomanizations": False,
+        "translationLanguages": [],
+        "romanizationLanguages": [],
+        "translationSources": [],
+        "romanizationSources": [],
+        "translationTypes": [],
+        "hasBackgroundVocals": False,
+        "hasDuet": False,
+    }
+
+    for line in lines or []:
+        if line.get("backgroundText") or line.get("backgroundWords"):
+            summary["hasBackgroundVocals"] = True
+        if line.get("oppositeTurn"):
+            summary["hasDuet"] = True
+
+        for translation in line.get("translations") or []:
+            summary["hasTranslations"] = True
+            lang = normalize_space(translation.get("lang"))
+            source = normalize_space(translation.get("source"))
+            track_type = normalize_space(translation.get("type"))
+            if lang and lang not in summary["translationLanguages"]:
+                summary["translationLanguages"].append(lang)
+            if source and source not in summary["translationSources"]:
+                summary["translationSources"].append(source)
+            if track_type and track_type not in summary["translationTypes"]:
+                summary["translationTypes"].append(track_type)
+
+        for romanization in line.get("romanizations") or []:
+            summary["hasRomanizations"] = True
+            lang = normalize_space(romanization.get("lang"))
+            source = normalize_space(romanization.get("source"))
+            if lang and lang not in summary["romanizationLanguages"]:
+                summary["romanizationLanguages"].append(lang)
+            if source and source not in summary["romanizationSources"]:
+                summary["romanizationSources"].append(source)
+
+    return summary
+
+
+def build_line_from_ttml_paragraph(paragraph, section=None, head_auxiliary_tracks=None):
     line_start = parse_clock_time(get_xml_attr(paragraph, "begin"))
     line_end = parse_clock_time(get_xml_attr(paragraph, "end"))
     line_agent = normalize_space(get_xml_attr(paragraph, "agent")) or None
-    events = collect_ttml_events(paragraph, role="main", agent_id=line_agent, events=[])
-    words = build_words_from_events(events, role="main")
-    background_words = build_words_from_events(events, role="background")
-    text = "".join(word["text"] for word in words).strip() if words else build_plain_text_from_events(events, role="main")
-    background_text = "".join(word["text"] for word in background_words).strip() if background_words else build_plain_text_from_events(events, role="background")
+    line_key = normalize_space(get_xml_attr(paragraph, "key")) or None
+    line_lang = normalize_space(get_xml_attr(paragraph, "lang")) or None
 
-    if not text:
+    buckets = collect_ttml_track_events(
+        paragraph,
+        track_type="main",
+        lang=line_lang,
+        background=False,
+        source="inline",
+        track_subtype=None,
+        agent_id=line_agent,
+        buckets={},
+    )
+    main_content = build_track_content_from_bucket_events(
+        buckets.get(make_ttml_bucket_key("main", line_lang, False, "inline", None)),
+        fallback_start=line_start,
+        fallback_end=line_end,
+    )
+    background_content = build_track_content_from_bucket_events(
+        buckets.get(make_ttml_bucket_key("main", line_lang, True, "inline", None)),
+        fallback_start=line_start,
+        fallback_end=line_end,
+    )
+    if not main_content or not main_content.get("text"):
         return None
 
-    if line_start is None and words:
-        line_start = words[0].get("start")
-    if line_end is None and words:
-        line_end = words[-1].get("end")
+    if line_start is None:
+        line_start = main_content.get("start")
+    if line_end is None:
+        line_end = main_content.get("end")
     if line_start is None:
         return None
 
     line = {
-        "text": text,
+        "text": main_content.get("text"),
         "start": line_start,
         "end": line_end,
-        "words": words or None,
+        "words": main_content.get("words"),
     }
     if section:
         line["section"] = section
-    effective_agent = extract_line_agent(words, default_agent=line_agent)
+    if line_key:
+        line["key"] = line_key
+    if line_lang:
+        line["lang"] = line_lang
+    effective_agent = extract_line_agent(main_content.get("words"), default_agent=line_agent)
     if effective_agent:
         line["agent"] = effective_agent
-    if background_text:
-        line["backgroundText"] = background_text
-    if background_words:
-        line["backgroundWords"] = background_words
+    if background_content and background_content.get("text"):
+        line["backgroundText"] = background_content.get("text")
+    if background_content and background_content.get("words"):
+        line["backgroundWords"] = background_content.get("words")
+
+    inline_auxiliary_tracks = build_auxiliary_track_entries(buckets, fallback_start=line_start, fallback_end=line_end)
+    combined_auxiliary_tracks = list(head_auxiliary_tracks.get(line_key) or []) if line_key and isinstance(head_auxiliary_tracks, dict) else []
+    combined_auxiliary_tracks.extend(inline_auxiliary_tracks)
+
+    translations = [strip_auxiliary_track_role(track) for track in combined_auxiliary_tracks if track.get("role") == "translation"]
+    romanizations = [strip_auxiliary_track_role(track) for track in combined_auxiliary_tracks if track.get("role") == "roman"]
+    if translations:
+        line["translations"] = translations
+    if romanizations:
+        line["romanizations"] = romanizations
     return line
 
 
@@ -781,15 +1022,22 @@ def parse_apple_music_ttml(ttml_content, fallback_duration=None):
     if body is None:
         return None
 
+    head_auxiliary_tracks, head_auxiliary_metadata = parse_ttml_head_auxiliary_tracks(root)
     lines = []
-    for element in body.iter():
-        if local_name(getattr(element, "tag", "")) != "div":
+    for child in list(body):
+        child_name = local_name(getattr(child, "tag", ""))
+        if child_name == "p":
+            line = build_line_from_ttml_paragraph(child, section=None, head_auxiliary_tracks=head_auxiliary_tracks)
+            if line:
+                lines.append(line)
             continue
-        section = normalize_space(get_xml_attr(element, "songPart", "song-part")) or None
-        for child in list(element):
-            if local_name(getattr(child, "tag", "")) != "p":
+        if child_name != "div":
+            continue
+        section = normalize_space(get_xml_attr(child, "songPart", "song-part")) or None
+        for paragraph in list(child):
+            if local_name(getattr(paragraph, "tag", "")) != "p":
                 continue
-            line = build_line_from_ttml_paragraph(child, section=section)
+            line = build_line_from_ttml_paragraph(paragraph, section=section, head_auxiliary_tracks=head_auxiliary_tracks)
             if line:
                 lines.append(line)
 
@@ -799,6 +1047,7 @@ def parse_apple_music_ttml(ttml_content, fallback_duration=None):
 
     agents = parse_ttml_agents(root)
     annotate_agent_layout(finalized, agents)
+    auxiliary_summary = summarize_auxiliary_track_support(finalized)
 
     return {
         "type": "word" if has_word_level(finalized) else "line",
@@ -807,8 +1056,20 @@ def parse_apple_music_ttml(ttml_content, fallback_duration=None):
             "sourceFormat": "ttml",
             "timing": normalize_space(get_xml_attr(root, "timing")) or None,
             "duration": parse_clock_time(get_xml_attr(body, "dur")),
+            "xmlLang": normalize_space(get_xml_attr(root, "lang")) or None,
             "agents": agents,
             "songwriters": parse_ttml_songwriters(root),
+            "leadingSilence": head_auxiliary_metadata.get("leadingSilence"),
+            "leadingSilenceRaw": head_auxiliary_metadata.get("leadingSilenceRaw"),
+            "hasTranslations": auxiliary_summary.get("hasTranslations"),
+            "hasRomanizations": auxiliary_summary.get("hasRomanizations"),
+            "translationLanguages": auxiliary_summary.get("translationLanguages"),
+            "romanizationLanguages": auxiliary_summary.get("romanizationLanguages"),
+            "translationSources": auxiliary_summary.get("translationSources"),
+            "romanizationSources": auxiliary_summary.get("romanizationSources"),
+            "translationTypes": auxiliary_summary.get("translationTypes"),
+            "hasBackgroundVocals": auxiliary_summary.get("hasBackgroundVocals"),
+            "hasDuet": auxiliary_summary.get("hasDuet"),
         },
     }
 
@@ -1056,6 +1317,7 @@ def fetch_apple_music(query, attempted_sources):
         result_type = "word" if apple_type in WORDLIKE_TYPES else ("line" if apple_type else parsed.get("type") or ("word" if has_word_level(lines) else "line"))
         parsed_metadata = parsed.get("metadata") if isinstance(parsed.get("metadata"), dict) else {}
         lyrics_metadata = lyrics_data.get("metadata") if isinstance(lyrics_data.get("metadata"), dict) else {}
+        track_metadata = lyrics_data.get("track") if isinstance(lyrics_data.get("track"), dict) else {}
         result = build_result(
             source="Apple Music",
             provider="apple_music",
@@ -1070,8 +1332,33 @@ def fetch_apple_music(query, attempted_sources):
                 "sourceFormat": parsed_metadata.get("sourceFormat"),
                 "timing": parsed_metadata.get("timing"),
                 "lyricsDuration": parsed_metadata.get("duration"),
+                "xmlLang": parsed_metadata.get("xmlLang"),
+                "leadingSilence": parsed_metadata.get("leadingSilence"),
+                "leadingSilenceRaw": parsed_metadata.get("leadingSilenceRaw"),
                 "agents": parsed_metadata.get("agents") or [],
                 "songwriters": parsed_metadata.get("songwriters") or lyrics_metadata.get("songwriters") or [],
+                "hasTranslations": bool(parsed_metadata.get("hasTranslations")),
+                "hasRomanizations": bool(parsed_metadata.get("hasRomanizations")),
+                "translationLanguages": parsed_metadata.get("translationLanguages") or [],
+                "romanizationLanguages": parsed_metadata.get("romanizationLanguages") or [],
+                "translationSources": parsed_metadata.get("translationSources") or [],
+                "romanizationSources": parsed_metadata.get("romanizationSources") or [],
+                "translationTypes": parsed_metadata.get("translationTypes") or [],
+                "hasBackgroundVocals": bool(parsed_metadata.get("hasBackgroundVocals")),
+                "hasDuet": bool(parsed_metadata.get("hasDuet")),
+                "appleTrack": {
+                    "audioLocale": track_metadata.get("audioLocale"),
+                    "composerName": track_metadata.get("composerName"),
+                    "discNumber": track_metadata.get("discNumber"),
+                    "trackNumber": track_metadata.get("trackNumber"),
+                    "genreNames": track_metadata.get("genreNames") or [],
+                    "isrc": track_metadata.get("isrc") or item.get("isrc"),
+                    "releaseDate": track_metadata.get("releaseDate") or item.get("releaseDate"),
+                    "hasTimeSyncedLyrics": track_metadata.get("hasTimeSyncedLyrics"),
+                    "isVocalAttenuationAllowed": track_metadata.get("isVocalAttenuationAllowed"),
+                    "isAppleDigitalMaster": track_metadata.get("isAppleDigitalMaster"),
+                    "isMasteredForItunes": track_metadata.get("isMasteredForItunes"),
+                },
             },
             result_type=result_type,
         )
