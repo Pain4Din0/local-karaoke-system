@@ -4,6 +4,7 @@ import os
 import re
 import sys
 import time
+import xml.etree.ElementTree as ET
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -98,6 +99,190 @@ def to_seconds(value):
 
 def is_cjk_like_char(value):
     return bool(re.match(r"[\u4e00-\u9fff\u3040-\u30ff]", value or ""))
+
+
+def local_name(value):
+    text = str(value or "")
+    if "}" in text:
+        return text.split("}", 1)[1]
+    if ":" in text:
+        return text.split(":", 1)[1]
+    return text
+
+
+def normalize_xml_name(value):
+    return re.sub(r"[^a-z0-9]+", "", local_name(value).lower())
+
+
+def normalize_inline_text(value):
+    text = str(value or "")
+    if not text:
+        return ""
+    if text.isspace():
+        return "" if re.search(r"[\r\n\t]", text) else " "
+    return text
+
+
+def get_xml_attr(element, *names):
+    if element is None or not hasattr(element, "attrib"):
+        return None
+    wanted = {normalize_xml_name(name) for name in names if name}
+    for key, value in element.attrib.items():
+        if normalize_xml_name(key) in wanted and value is not None:
+            return str(value)
+    return None
+
+
+def parse_clock_time(value):
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("s") and re.match(r"^\d+(?:\.\d+)?s$", text):
+        try:
+            return round(float(text[:-1]), 3)
+        except Exception:
+            return None
+    try:
+        if ":" not in text:
+            return round(float(text), 3)
+        parts = text.split(":")
+        if len(parts) == 2:
+            minutes = int(parts[0])
+            seconds = float(parts[1])
+            return round((minutes * 60) + seconds, 3)
+        if len(parts) == 3:
+            hours = int(parts[0])
+            minutes = int(parts[1])
+            seconds = float(parts[2])
+            return round((hours * 3600) + (minutes * 60) + seconds, 3)
+    except Exception:
+        return None
+    return None
+
+
+def has_timed_descendants(node):
+    for child in (list(node) if node is not None else []):
+        if parse_clock_time(get_xml_attr(child, "begin")) is not None:
+            return True
+        if has_timed_descendants(child):
+            return True
+    return False
+
+
+def collect_ttml_events(node, role="main", agent_id=None, events=None):
+    if events is None:
+        events = []
+
+    text = normalize_inline_text(getattr(node, "text", ""))
+    if text:
+        events.append({
+            "role": role,
+            "text": text,
+            "start": None,
+            "end": None,
+            "agent": agent_id,
+            "timed": False,
+        })
+
+    for child in (list(node) if node is not None else []):
+        child_role = role
+        if normalize_xml_name(get_xml_attr(child, "role")) == "xbg":
+            child_role = "background"
+        child_agent = get_xml_attr(child, "agent") or agent_id
+        child_start = parse_clock_time(get_xml_attr(child, "begin"))
+        child_end = parse_clock_time(get_xml_attr(child, "end"))
+        is_leaf_timed_span = local_name(child.tag) == "span" and child_start is not None and not has_timed_descendants(child)
+
+        if is_leaf_timed_span:
+            token_text = normalize_inline_text("".join(child.itertext()))
+            if token_text:
+                events.append({
+                    "role": child_role,
+                    "text": token_text,
+                    "start": child_start,
+                    "end": child_end,
+                    "agent": child_agent,
+                    "timed": True,
+                })
+        else:
+            collect_ttml_events(child, role=child_role, agent_id=child_agent, events=events)
+
+        tail = normalize_inline_text(getattr(child, "tail", ""))
+        if tail:
+            events.append({
+                "role": role,
+                "text": tail,
+                "start": None,
+                "end": None,
+                "agent": agent_id,
+                "timed": False,
+            })
+
+    return events
+
+
+def build_words_from_events(events, role="main"):
+    words = []
+    pending_prefix = ""
+    for event in events or []:
+        if event.get("role") != role:
+            continue
+        text = str(event.get("text") or "")
+        if not event.get("timed"):
+            pending_prefix += text
+            continue
+        token_text = f"{pending_prefix}{text}"
+        pending_prefix = ""
+        if not token_text or token_text.isspace():
+            continue
+        next_word = {
+            "text": token_text,
+            "start": event.get("start"),
+            "end": event.get("end"),
+        }
+        if event.get("agent"):
+            next_word["agent"] = event.get("agent")
+        words.append(next_word)
+    return words
+
+
+def build_plain_text_from_events(events, role="main"):
+    text = "".join(str(event.get("text") or "") for event in (events or []) if event.get("role") == role)
+    return normalize_space(text)
+
+
+def extract_line_agent(words, default_agent=None):
+    if default_agent:
+        return default_agent
+    unique_agents = []
+    for word in words or []:
+        agent_id = normalize_space(word.get("agent"))
+        if agent_id and agent_id not in unique_agents:
+            unique_agents.append(agent_id)
+    return unique_agents[0] if len(unique_agents) == 1 else None
+
+
+def normalize_word_entries(words, fallback_end):
+    normalized_words = []
+    for word in words or []:
+        start = word.get("start")
+        if start is None or word.get("text") is None:
+            continue
+        end = word.get("end")
+        if end is None or end <= start:
+            end = fallback_end
+        normalized_word = {
+            "text": str(word.get("text")),
+            "start": round(float(start), 3),
+            "end": round(float(end), 3),
+        }
+        for key, value in word.items():
+            if key in {"text", "start", "end"} or value is None:
+                continue
+            normalized_word[key] = value
+        normalized_words.append(normalized_word)
+    normalized_words.sort(key=lambda item: item["start"])
+    return normalized_words or None
 
 
 def load_paxsenix_token():
@@ -242,14 +427,14 @@ def is_credit_like_text(text, query, start):
     return False
 
 
-def clean_lines(lines, query):
+def clean_lines(lines, query, preserve_symbol_only=False):
     cleaned = []
     dropped_intro = 0
     for line in lines:
         text = normalize_space(line.get("text"))
         if not text:
             continue
-        if re.fullmatch(r"[♪♩♫♬♭♯・·•\s]+", text):
+        if not preserve_symbol_only and re.fullmatch(r"[♪♩♫♬♭♯・·•\s]+", text):
             continue
         next_line = {
             "text": text,
@@ -257,6 +442,14 @@ def clean_lines(lines, query):
             "end": line.get("end"),
             "words": line.get("words"),
         }
+        if line.get("backgroundText"):
+            next_line["backgroundText"] = normalize_space(line.get("backgroundText"))
+        if line.get("backgroundWords"):
+            next_line["backgroundWords"] = line.get("backgroundWords")
+        for key, value in line.items():
+            if key in {"text", "start", "end", "words", "backgroundText", "backgroundWords"} or value is None:
+                continue
+            next_line[key] = value
         if is_credit_like_text(text, query, next_line["start"]) and not cleaned and dropped_intro < 4:
             dropped_intro += 1
             continue
@@ -265,16 +458,25 @@ def clean_lines(lines, query):
 
 
 def finalize_lines(lines, fallback_duration=None):
-    normalized = [
-        {
+    normalized = []
+    for line in lines or []:
+        if not line or not line.get("text") or line.get("start") is None:
+            continue
+        normalized_line = {
             "text": normalize_space(line.get("text")),
             "start": round(float(line["start"]), 3),
             "end": round(float(line["end"]), 3) if line.get("end") is not None else None,
             "words": line.get("words"),
         }
-        for line in lines
-        if line and line.get("text") and line.get("start") is not None
-    ]
+        if line.get("backgroundText"):
+            normalized_line["backgroundText"] = normalize_space(line.get("backgroundText"))
+        if line.get("backgroundWords"):
+            normalized_line["backgroundWords"] = line.get("backgroundWords")
+        for key, value in line.items():
+            if key in {"text", "start", "end", "words", "backgroundText", "backgroundWords"} or value is None:
+                continue
+            normalized_line[key] = value
+        normalized.append(normalized_line)
     normalized.sort(key=lambda item: item["start"])
     for index, line in enumerate(normalized):
         next_line = normalized[index + 1] if index + 1 < len(normalized) else None
@@ -282,24 +484,8 @@ def finalize_lines(lines, fallback_duration=None):
         candidate_end = next_line["start"] if next_line else fallback_end
         if line["end"] is None or line["end"] <= line["start"]:
             line["end"] = round(max(line["start"] + 0.4, candidate_end), 3)
-        if line.get("words"):
-            words = []
-            for word in line["words"]:
-                start = word.get("start")
-                if start is None or word.get("text") is None:
-                    continue
-                end = word.get("end")
-                if end is None or end <= start:
-                    end = line["end"]
-                words.append(
-                    {
-                        "text": str(word.get("text")),
-                        "start": round(float(start), 3),
-                        "end": round(float(end), 3),
-                    }
-                )
-            words.sort(key=lambda item: item["start"])
-            line["words"] = words or None
+        line["words"] = normalize_word_entries(line.get("words"), line["end"])
+        line["backgroundWords"] = normalize_word_entries(line.get("backgroundWords"), line["end"])
     return normalized
 
 
@@ -433,6 +619,240 @@ def parse_paxsenix_timed_content(content):
     return lines
 
 
+def parse_ttml_agents(root):
+    agents = []
+    for element in root.iter():
+        if local_name(getattr(element, "tag", "")) != "agent":
+            continue
+        agent_id = get_xml_attr(element, "id")
+        if not agent_id:
+            continue
+        name = ""
+        for child in list(element):
+            if local_name(getattr(child, "tag", "")) == "name":
+                name = normalize_space("".join(child.itertext()))
+                if name:
+                    break
+        agents.append({
+            "id": agent_id,
+            "type": normalize_space(get_xml_attr(element, "type")) or "other",
+            "name": name or None,
+        })
+    return agents
+
+
+def parse_ttml_songwriters(root):
+    songwriters = []
+    for element in root.iter():
+        if local_name(getattr(element, "tag", "")) != "songwriter":
+            continue
+        value = normalize_space("".join(element.itertext()))
+        if value:
+            songwriters.append(value)
+    return songwriters
+
+
+def build_line_from_ttml_paragraph(paragraph, section=None):
+    line_start = parse_clock_time(get_xml_attr(paragraph, "begin"))
+    line_end = parse_clock_time(get_xml_attr(paragraph, "end"))
+    line_agent = normalize_space(get_xml_attr(paragraph, "agent")) or None
+    events = collect_ttml_events(paragraph, role="main", agent_id=line_agent, events=[])
+    words = build_words_from_events(events, role="main")
+    background_words = build_words_from_events(events, role="background")
+    text = "".join(word["text"] for word in words).strip() if words else build_plain_text_from_events(events, role="main")
+    background_text = "".join(word["text"] for word in background_words).strip() if background_words else build_plain_text_from_events(events, role="background")
+
+    if not text:
+        return None
+
+    if line_start is None and words:
+        line_start = words[0].get("start")
+    if line_end is None and words:
+        line_end = words[-1].get("end")
+    if line_start is None:
+        return None
+
+    line = {
+        "text": text,
+        "start": line_start,
+        "end": line_end,
+        "words": words or None,
+    }
+    if section:
+        line["section"] = section
+    effective_agent = extract_line_agent(words, default_agent=line_agent)
+    if effective_agent:
+        line["agent"] = effective_agent
+    if background_text:
+        line["backgroundText"] = background_text
+    if background_words:
+        line["backgroundWords"] = background_words
+    return line
+
+
+def annotate_agent_layout(lines, agents):
+    agent_map = {agent.get("id"): agent for agent in agents or [] if agent.get("id")}
+    ordered_agents = []
+    for line in lines or []:
+        agent_id = normalize_space(line.get("agent"))
+        if agent_id and agent_id not in ordered_agents:
+            ordered_agents.append(agent_id)
+
+    if len(ordered_agents) < 2:
+        for line in lines or []:
+            agent_id = normalize_space(line.get("agent"))
+            if not agent_id:
+                continue
+            agent = agent_map.get(agent_id) or {}
+            if agent.get("name"):
+                line["agentName"] = agent.get("name")
+            if agent.get("type"):
+                line["agentType"] = agent.get("type")
+        return
+
+    for index, agent_id in enumerate(ordered_agents):
+        agent = agent_map.get(agent_id) or {}
+        opposite_turn = (index % 2) == 1
+        for line in lines or []:
+            if normalize_space(line.get("agent")) != agent_id:
+                continue
+            line["oppositeTurn"] = opposite_turn
+            if agent.get("name"):
+                line["agentName"] = agent.get("name")
+            if agent.get("type"):
+                line["agentType"] = agent.get("type")
+
+
+def build_background_from_paxsenix_tokens(raw_tokens, line_start, line_end):
+    parsed_line = build_line_from_tokens(raw_tokens, line_start, line_end)
+    if not parsed_line or not parsed_line.get("text"):
+        return None
+    return {
+        "text": parsed_line.get("text"),
+        "words": parsed_line.get("words"),
+    }
+
+
+def enrich_lines_from_paxsenix_content(lines, content):
+    if not isinstance(content, list) or not lines:
+        return lines
+
+    content_by_start = {}
+    for item in content:
+        if not isinstance(item, dict):
+            continue
+        start = to_seconds(item.get("timestamp"))
+        if start is None:
+            continue
+        content_by_start[round(start, 3)] = item
+
+    for line in lines:
+        match = content_by_start.get(round(float(line.get("start") or 0), 3))
+        if not isinstance(match, dict):
+            continue
+        structure = normalize_space(match.get("structure"))
+        if structure and not line.get("section"):
+            line["section"] = structure
+        if isinstance(match.get("oppositeTurn"), bool):
+            line["oppositeTurn"] = match.get("oppositeTurn")
+        if (not line.get("backgroundText")) and match.get("backgroundText"):
+            background = build_background_from_paxsenix_tokens(match.get("backgroundText"), line.get("start"), line.get("end"))
+            if background:
+                line["backgroundText"] = background.get("text")
+                if background.get("words"):
+                    line["backgroundWords"] = background.get("words")
+    return lines
+
+
+def parse_apple_music_ttml(ttml_content, fallback_duration=None):
+    raw_ttml = str(ttml_content or "").strip()
+    if not raw_ttml:
+        return None
+    try:
+        root = ET.fromstring(raw_ttml)
+    except Exception:
+        return None
+
+    body = None
+    for element in root.iter():
+        if local_name(getattr(element, "tag", "")) == "body":
+            body = element
+            break
+    if body is None:
+        return None
+
+    lines = []
+    for element in body.iter():
+        if local_name(getattr(element, "tag", "")) != "div":
+            continue
+        section = normalize_space(get_xml_attr(element, "songPart", "song-part")) or None
+        for child in list(element):
+            if local_name(getattr(child, "tag", "")) != "p":
+                continue
+            line = build_line_from_ttml_paragraph(child, section=section)
+            if line:
+                lines.append(line)
+
+    finalized = finalize_lines(lines, fallback_duration=fallback_duration)
+    if not finalized:
+        return None
+
+    agents = parse_ttml_agents(root)
+    annotate_agent_layout(finalized, agents)
+
+    return {
+        "type": "word" if has_word_level(finalized) else "line",
+        "lines": finalized,
+        "metadata": {
+            "sourceFormat": "ttml",
+            "timing": normalize_space(get_xml_attr(root, "timing")) or None,
+            "duration": parse_clock_time(get_xml_attr(body, "dur")),
+            "agents": agents,
+            "songwriters": parse_ttml_songwriters(root),
+        },
+    }
+
+
+def parse_apple_music_payload(lyrics_data, fallback_duration=None):
+    if not isinstance(lyrics_data, dict):
+        return None
+
+    parsed_ttml = parse_apple_music_ttml(lyrics_data.get("ttmlContent"), fallback_duration=fallback_duration)
+    if parsed_ttml and parsed_ttml.get("lines"):
+        parsed_ttml["lines"] = enrich_lines_from_paxsenix_content(parsed_ttml.get("lines"), lyrics_data.get("content"))
+        return parsed_ttml
+
+    for field_name in ("elrc", "lrc"):
+        parsed = parse_lrc(lyrics_data.get(field_name), fallback_duration=fallback_duration)
+        if parsed and parsed.get("lines"):
+            parsed["lines"] = enrich_lines_from_paxsenix_content(parsed.get("lines"), lyrics_data.get("content"))
+            parsed["metadata"] = {
+                "sourceFormat": field_name,
+                "timing": None,
+                "duration": fallback_duration,
+                "agents": [],
+                "songwriters": [],
+            }
+            return parsed
+
+    lines = parse_paxsenix_timed_content(lyrics_data.get("content"))
+    if not lines:
+        return None
+
+    lines = enrich_lines_from_paxsenix_content(lines, lyrics_data.get("content"))
+    return {
+        "type": "word" if has_word_level(lines) else "line",
+        "lines": lines,
+        "metadata": {
+            "sourceFormat": "content",
+            "timing": None,
+            "duration": fallback_duration,
+            "agents": [],
+            "songwriters": [],
+        },
+    }
+
+
 def parse_musixmatch_lines(content):
     lines = []
     if not isinstance(content, list):
@@ -462,15 +882,23 @@ def is_usable_lines(lines):
 
 
 def strip_line_words(lines):
-    return [
-        {
+    stripped = []
+    for line in lines or []:
+        next_line = {
             "text": line.get("text"),
             "start": line.get("start"),
             "end": line.get("end"),
             "words": None,
         }
-        for line in (lines or [])
-    ]
+        if line.get("backgroundText"):
+            next_line["backgroundText"] = line.get("backgroundText")
+            next_line["backgroundWords"] = None
+        for key, value in line.items():
+            if key in {"text", "start", "end", "words", "backgroundText", "backgroundWords"} or value is None:
+                continue
+            next_line[key] = value
+        stripped.append(next_line)
+    return stripped
 
 
 def build_result(source, provider, lines, attempted_sources, metadata=None, plain_lyrics=None, result_type=None):
@@ -618,11 +1046,16 @@ def fetch_apple_music(query, attempted_sources):
             lyrics_data = request_json(APPLE_LYRICS_API, params={"id": item["id"]}, timeout=10.0, retries=1)
         except Exception:
             continue
-        lines = clean_lines(parse_paxsenix_timed_content(lyrics_data.get("content")), query)
+        parsed = parse_apple_music_payload(lyrics_data, fallback_duration=query.get("duration"))
+        if not parsed:
+            continue
+        lines = clean_lines(parsed.get("lines"), query, preserve_symbol_only=True)
         apple_type = str(lyrics_data.get("type", "")).strip().lower()
         if apple_type and apple_type not in WORDLIKE_TYPES:
             lines = strip_line_words(lines)
-        result_type = "word" if apple_type in WORDLIKE_TYPES else ("line" if apple_type else ("word" if has_word_level(lines) else "line"))
+        result_type = "word" if apple_type in WORDLIKE_TYPES else ("line" if apple_type else parsed.get("type") or ("word" if has_word_level(lines) else "line"))
+        parsed_metadata = parsed.get("metadata") if isinstance(parsed.get("metadata"), dict) else {}
+        lyrics_metadata = lyrics_data.get("metadata") if isinstance(lyrics_data.get("metadata"), dict) else {}
         result = build_result(
             source="Apple Music",
             provider="apple_music",
@@ -634,6 +1067,11 @@ def fetch_apple_music(query, attempted_sources):
                 "album": item.get("albumName") or query.get("album"),
                 "appleMusicId": str(item.get("id")),
                 "url": item.get("url"),
+                "sourceFormat": parsed_metadata.get("sourceFormat"),
+                "timing": parsed_metadata.get("timing"),
+                "lyricsDuration": parsed_metadata.get("duration"),
+                "agents": parsed_metadata.get("agents") or [],
+                "songwriters": parsed_metadata.get("songwriters") or lyrics_metadata.get("songwriters") or [],
             },
             result_type=result_type,
         )

@@ -170,6 +170,44 @@
     overflow: hidden;
 }
 
+.amll-lyrics-header {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 2;
+    display: flex;
+    gap: 0.6rem;
+    padding: 1.5vh 1vw 0;
+    pointer-events: none;
+}
+
+.amll-section-indicator,
+.amll-agent-indicator {
+    display: inline-flex;
+    align-items: center;
+    min-height: 2rem;
+    padding: 0.35rem 0.8rem;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    backdrop-filter: blur(18px);
+    color: rgba(255, 255, 255, 0.72);
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    opacity: 0;
+    transform: translateY(-6px);
+    transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.amll-section-indicator.is-visible,
+.amll-agent-indicator.is-visible {
+    opacity: 1;
+    transform: translateY(0);
+}
+
 .amll-lyrics-scroll {
     width: 100%;
     height: 100%;
@@ -213,6 +251,7 @@
     font-weight: 800;
     line-height: 1.25;
     padding: 0.3em 0;
+    max-width: 88%;
     color: rgba(255, 255, 255, 0.28);
     transition:
         filter 0.6s cubic-bezier(0.4, 0, 0.2, 1),
@@ -227,6 +266,20 @@
     letter-spacing: -0.01em;
 }
 
+.amll-lyrics-line.amll-opposite-turn {
+    margin-left: auto;
+    text-align: right;
+    transform-origin: right center;
+}
+
+.amll-lyrics-container.amll-has-duet-lines .amll-lyrics-line:not(.amll-opposite-turn) {
+    padding-right: 12%;
+}
+
+.amll-lyrics-container.amll-has-duet-lines .amll-lyrics-line.amll-opposite-turn {
+    padding-left: 12%;
+}
+
 /* Active line: full brightness, no blur */
 .amll-lyrics-line.amll-active {
     color: rgba(255, 255, 255, 0.98);
@@ -238,47 +291,185 @@
     color: rgba(255, 255, 255, 0.22);
 }
 
+.amll-line-main,
+.amll-line-bg {
+    display: block;
+    white-space: pre-wrap;
+    word-break: keep-all;
+}
+
+.amll-line-bg {
+    font-size: 0.5em;
+    line-height: 1.18;
+    font-weight: 700;
+    margin-bottom: 0.08em;
+    color: rgba(255, 255, 255, 0.16);
+    letter-spacing: 0.02em;
+}
+
+.amll-lyrics-line.amll-active .amll-line-bg {
+    color: rgba(255, 255, 255, 0.42);
+}
+
+.amll-lyrics-line.amll-opposite-turn .amll-line-bg {
+    text-align: right;
+}
+
 /* ── Word-by-Word Highlighting ──────────────────────────── */
 
 .amll-lyrics-line-words {
     display: block;
+    white-space: pre-wrap;
 }
 
-.amll-word {
-    display: inline;
-    transition: color 0.15s ease-out, text-shadow 0.15s ease-out;
+.amll-word,
+.amll-bg-word {
+    display: inline-grid;
+    grid-template-areas: "word";
     position: relative;
-    color: rgba(255, 255, 255, 0.28);
-    text-shadow: 0 0 20px rgba(255, 255, 255, 0);
+    vertical-align: baseline;
+    white-space: pre;
+    transition:
+        transform 0.18s ease-out,
+        filter 0.18s ease-out,
+        opacity 0.2s ease-out;
+}
+
+.amll-word-base,
+.amll-word-fill-wrap,
+.amll-word-fill,
+.amll-bg-word-base,
+.amll-bg-word-fill-wrap,
+.amll-bg-word-fill {
+    grid-area: word;
+    display: block;
+    white-space: pre;
+}
+
+.amll-word-base,
+.amll-bg-word-base {
+    transition: color 0.2s ease-out, opacity 0.2s ease-out;
+}
+
+.amll-word-base {
+    color: rgba(255, 255, 255, 0.26);
+}
+
+.amll-bg-word-base {
+    color: rgba(255, 255, 255, 0.22);
+}
+
+.amll-word-fill-wrap,
+.amll-bg-word-fill-wrap {
+    width: calc(var(--word-progress, 0) * 100%);
+    max-width: 100%;
+    overflow: hidden;
+    opacity: 0;
+    transition:
+        width 0.08s linear,
+        opacity 0.14s ease-out,
+        filter 0.18s ease-out;
+    pointer-events: none;
+    will-change: width, opacity;
+    -webkit-mask-image: none;
+    mask-image: none;
+}
+
+.amll-lyrics-line.amll-active .amll-word.amll-word-singing .amll-word-fill-wrap,
+.amll-lyrics-line.amll-active .amll-bg-word.amll-word-singing .amll-bg-word-fill-wrap {
+    -webkit-mask-image: linear-gradient(
+        to right,
+        rgba(0, 0, 0, 1) 0%,
+        rgba(0, 0, 0, 1) calc(100% - 0.16em),
+        rgba(0, 0, 0, 0) 100%
+    );
+    mask-image: linear-gradient(
+        to right,
+        rgba(0, 0, 0, 1) 0%,
+        rgba(0, 0, 0, 1) calc(100% - 0.16em),
+        rgba(0, 0, 0, 0) 100%
+    );
+}
+
+.amll-word-fill,
+.amll-bg-word-fill {
+    color: rgba(255, 255, 255, 0.99);
+    text-shadow:
+        0 0 0.32em rgba(255, 255, 255, 0.26),
+        0 0 1.1em rgba(255, 255, 255, 0.1);
+}
+
+.amll-bg-word-fill {
+    color: rgba(255, 255, 255, 0.78);
+    text-shadow:
+        0 0 0.25em rgba(255, 255, 255, 0.18),
+        0 0 0.8em rgba(255, 255, 255, 0.08);
 }
 
 /* Active line words base state */
-.amll-lyrics-line.amll-active .amll-word {
-    color: rgba(255, 255, 255, 0.28);
+.amll-lyrics-line.amll-active .amll-word-base {
+    color: rgba(255, 255, 255, 0.24);
+}
+
+.amll-lyrics-line.amll-active .amll-bg-word-base {
+    color: rgba(255, 255, 255, 0.26);
+}
+
+.amll-lyrics-line.amll-active .amll-word-fill-wrap,
+.amll-lyrics-line.amll-active .amll-bg-word-fill-wrap {
+    opacity: 1;
 }
 
 /* Word being sung (current) — fills progressively with brightness */
 .amll-lyrics-line.amll-active .amll-word.amll-word-singing {
-    color: rgba(255, 255, 255, 0.98);
-    text-shadow: 0 0 20px rgba(255, 255, 255, 0.25);
+    transform: translateY(-0.02em) scale(1.012);
+    filter: brightness(1.06);
+}
+
+.amll-lyrics-line.amll-active .amll-bg-word.amll-word-singing {
+    filter: brightness(1.04);
 }
 
 /* Word fully sung */
-.amll-lyrics-line.amll-active .amll-word.amll-word-sung {
-    color: rgba(255, 255, 255, 0.98);
-    text-shadow: 0 0 20px rgba(255, 255, 255, 0.25);
+.amll-lyrics-line.amll-active .amll-word.amll-word-sung .amll-word-base {
+    color: rgba(255, 255, 255, 0.08);
+}
+
+.amll-lyrics-line.amll-active .amll-bg-word.amll-word-sung .amll-bg-word-base {
+    color: rgba(255, 255, 255, 0.06);
 }
 
 /* Word upcoming */
-.amll-lyrics-line.amll-active .amll-word.amll-word-upcoming {
-    color: rgba(255, 255, 255, 0.28);
+.amll-lyrics-line.amll-active .amll-word.amll-word-upcoming .amll-word-fill-wrap,
+.amll-lyrics-line.amll-active .amll-bg-word.amll-word-upcoming .amll-bg-word-fill-wrap {
+    opacity: 0;
+}
+
+.amll-lyrics-line.amll-active .amll-word.amll-word-sung .amll-word-fill-wrap,
+.amll-lyrics-line.amll-active .amll-bg-word.amll-word-sung .amll-bg-word-fill-wrap {
+    width: 100%;
+    opacity: 1;
+    -webkit-mask-image: none;
+    mask-image: none;
 }
 
 /* Non-active line words — all same dim color */
-.amll-lyrics-line:not(.amll-active) .amll-word {
+.amll-lyrics-line:not(.amll-active) .amll-word,
+.amll-lyrics-line:not(.amll-active) .amll-bg-word {
+    filter: none;
+    transform: none;
+}
+
+.amll-lyrics-line:not(.amll-active) .amll-word-base,
+.amll-lyrics-line:not(.amll-active) .amll-bg-word-base {
     color: inherit;
-    text-shadow: 0 0 20px rgba(255, 255, 255, 0);
-    transition: text-shadow 0.4s ease;
+    opacity: 1;
+}
+
+.amll-lyrics-line:not(.amll-active) .amll-word-fill-wrap,
+.amll-lyrics-line:not(.amll-active) .amll-bg-word-fill-wrap {
+    width: 0;
+    opacity: 0;
 }
 
 /* ── Artplayer Integration ──────────────────────────────── */
@@ -329,6 +520,10 @@
         padding: 2vh 3vw;
     }
 
+    .amll-lyrics-header {
+        padding-top: 0.5rem;
+    }
+
     .amll-left-panel {
         flex: 0 0 auto;
         flex-direction: row;
@@ -355,6 +550,18 @@
 
     .amll-lyrics-spacer {
         height: 20vh;
+    }
+
+    .amll-lyrics-line {
+        max-width: 100%;
+    }
+
+    .amll-lyrics-container.amll-has-duet-lines .amll-lyrics-line:not(.amll-opposite-turn) {
+        padding-right: 7%;
+    }
+
+    .amll-lyrics-container.amll-has-duet-lines .amll-lyrics-line.amll-opposite-turn {
+        padding-left: 7%;
     }
 }
 

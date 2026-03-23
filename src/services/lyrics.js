@@ -10,6 +10,7 @@ const inflightLyrics = new Map();
 const LYRICS_HELPER = path.join(SCRIPTS_DIR, 'lyrics', 'fetch_lyrics.py');
 const MISSING_LYRICS_CACHE_TTL_MS = 5 * 60 * 1000;
 const SUPPORTED_PROVIDER_KEYS = new Set(['ytmusic', 'apple_music', 'qq_music', 'musixmatch', 'lrclib']);
+const APPLE_MUSIC_CACHE_VERSION = 3;
 let lyricsSessionId = 0;
 
 ensureRuntimeDirs();
@@ -26,11 +27,20 @@ const stripDecorators = (value) => normalizeSpace(value)
 const buildWordSegments = (words, lineEnd) => {
     if (!Array.isArray(words) || words.length === 0) return null;
     const filtered = words
-        .map((word) => ({
-            text: word && word.text !== undefined && word.text !== null ? String(word.text) : '',
-            start: Number(word && word.start),
-            end: Number.isFinite(Number(word && word.end)) ? Number(word.end) : null,
-        }))
+        .map((word) => {
+            const nextWord = {
+                text: word && word.text !== undefined && word.text !== null ? String(word.text) : '',
+                start: Number(word && word.start),
+                end: Number.isFinite(Number(word && word.end)) ? Number(word.end) : null,
+            };
+            if (word && typeof word === 'object') {
+                Object.entries(word).forEach(([key, value]) => {
+                    if (key === 'text' || key === 'start' || key === 'end' || value === undefined || value === null) return;
+                    nextWord[key] = value;
+                });
+            }
+            return nextWord;
+        })
         .filter((word) => Number.isFinite(word.start) && word.text.trim() !== '')
         .sort((a, b) => a.start - b.start);
     if (filtered.length === 0) return null;
@@ -39,11 +49,16 @@ const buildWordSegments = (words, lineEnd) => {
         const next = filtered[index + 1];
         const fallbackEnd = next ? next.start : lineEnd;
         const candidateEnd = Number.isFinite(word.end) && word.end > word.start ? word.end : fallbackEnd;
-        return {
+        const nextWord = {
             text: word.text,
             start: word.start,
             end: Math.max(word.start + 0.01, candidateEnd),
         };
+        Object.entries(word).forEach(([key, value]) => {
+            if (key === 'text' || key === 'start' || key === 'end' || value === undefined || value === null) return;
+            nextWord[key] = value;
+        });
+        return nextWord;
     });
 };
 
@@ -56,6 +71,13 @@ const finalizeTimedLines = (lines, fallbackDuration) => {
             end: Number.isFinite(Number(line && line.end)) ? Number(line.end) : null,
             text: normalizeSpace(line && line.text),
             words: Array.isArray(line && line.words) ? line.words : null,
+            backgroundText: normalizeSpace(line && line.backgroundText),
+            backgroundWords: Array.isArray(line && line.backgroundWords) ? line.backgroundWords : null,
+            section: line && line.section ? String(line.section) : null,
+            agent: line && line.agent ? String(line.agent) : null,
+            agentName: line && line.agentName ? String(line.agentName) : null,
+            agentType: line && line.agentType ? String(line.agentType) : null,
+            oppositeTurn: !!(line && line.oppositeTurn),
         }))
         .filter((line) => Number.isFinite(line.start) && line.text)
         .sort((a, b) => a.start - b.start);
@@ -69,6 +91,7 @@ const finalizeTimedLines = (lines, fallbackDuration) => {
             ? current.end
             : Math.max(current.start + 0.4, candidateEnd);
         current.words = buildWordSegments(current.words, current.end);
+        current.backgroundWords = buildWordSegments(current.backgroundWords, current.end);
     }
 
     return normalized;
@@ -143,6 +166,11 @@ const isLegacyAppleLineCache = (parsed) => {
     });
 };
 
+const isOutdatedAppleMusicCache = (parsed) => parsed
+    && parsed.found === true
+    && parsed.provider === 'apple_music'
+    && Number(parsed.cacheVersion || 0) < APPLE_MUSIC_CACHE_VERSION;
+
 const loadCachedLyrics = (songId, sourceKey = 'auto') => {
     const cachePath = getLyricsCachePath(songId, sourceKey);
     if (!fs.existsSync(cachePath)) return null;
@@ -168,6 +196,10 @@ const loadCachedLyrics = (songId, sourceKey = 'auto') => {
             removeLyricsCacheFile(cachePath, 'legacy_apple_line_cache');
             return null;
         }
+        if (isOutdatedAppleMusicCache(parsed)) {
+            removeLyricsCacheFile(cachePath, 'apple_music_cache_version');
+            return null;
+        }
         if (parsed.found === true && !Array.isArray(parsed.lines)) {
             removeLyricsCacheFile(cachePath, 'invalid_lines');
             return null;
@@ -186,6 +218,9 @@ const saveCachedLyrics = (songId, data, sourceKey = 'auto') => {
         const payload = { ...data, cachedAt: Date.now() };
         if (data.found !== true) {
             payload.expiresAt = Date.now() + MISSING_LYRICS_CACHE_TTL_MS;
+        }
+        if (data.found === true && data.provider === 'apple_music') {
+            payload.cacheVersion = APPLE_MUSIC_CACHE_VERSION;
         }
         fs.writeFileSync(getLyricsCachePath(songId, sourceKey), JSON.stringify(payload, null, 2), 'utf8');
     } catch (error) {
@@ -228,20 +263,37 @@ const buildSongQuery = (song) => {
 const createLyricsPayload = ({ source, provider, type, lines, plainLyrics, metadata, attemptedSources }) => {
     const explicitType = type === 'word' || type === 'line' ? type : null;
     const inferredType = explicitType || (Array.isArray(lines) && lines.some((line) => Array.isArray(line && line.words) && line.words.length > 0) ? 'word' : 'line');
+    const mapWords = (words, lineEnd) => (
+        Array.isArray(words) && words.length > 0
+            ? words.map((word, wordIndex) => {
+                const nextWord = {
+                    id: wordIndex + 1,
+                    text: word.text,
+                    start: Number(word.start.toFixed(3)),
+                    end: Number((word.end || lineEnd || word.start + 0.5).toFixed(3)),
+                };
+                Object.entries(word || {}).forEach(([key, value]) => {
+                    if (key === 'text' || key === 'start' || key === 'end' || value === undefined || value === null) return;
+                    nextWord[key] = value;
+                });
+                return nextWord;
+            })
+            : null
+    );
     const cleanedLines = Array.isArray(lines)
         ? lines.map((line, index) => ({
             id: index + 1,
             start: Number(line.start.toFixed(3)),
             end: Number((line.end || line.start + 4).toFixed(3)),
             text: line.text,
-            words: inferredType === 'word' && Array.isArray(line.words) && line.words.length > 0
-                ? line.words.map((word, wordIndex) => ({
-                    id: wordIndex + 1,
-                    text: word.text,
-                    start: Number(word.start.toFixed(3)),
-                    end: Number((word.end || line.end || word.start + 0.5).toFixed(3)),
-                }))
-                : null,
+            words: inferredType === 'word' ? mapWords(line.words, line.end) : null,
+            backgroundText: line.backgroundText || '',
+            backgroundWords: inferredType === 'word' ? mapWords(line.backgroundWords, line.end) : null,
+            section: line.section || null,
+            agent: line.agent || null,
+            agentName: line.agentName || null,
+            agentType: line.agentType || null,
+            oppositeTurn: !!line.oppositeTurn,
         }))
         : [];
 

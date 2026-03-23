@@ -256,6 +256,22 @@ class AppleMusicLyrics {
         this.currentLineIndex = -1;
         this.currentTime = 0;
         this.isPlaying = false;
+        this.targetScrollTop = 0;
+        this.currentScrollTop = 0;
+        this.scrollVelocity = 0;
+        this.lastFrameTime = performance.now();
+
+        this.header = document.createElement('div');
+        this.header.className = 'amll-lyrics-header';
+        this.container.appendChild(this.header);
+
+        this.sectionIndicator = document.createElement('div');
+        this.sectionIndicator.className = 'amll-section-indicator';
+        this.header.appendChild(this.sectionIndicator);
+
+        this.agentIndicator = document.createElement('div');
+        this.agentIndicator.className = 'amll-agent-indicator';
+        this.header.appendChild(this.agentIndicator);
 
         this.scrollContainer = document.createElement('div');
         this.scrollContainer.className = 'amll-lyrics-scroll';
@@ -271,6 +287,13 @@ class AppleMusicLyrics {
         this.lineElements = [];
         this.currentLineIndex = -1;
         this.innerContainer.innerHTML = '';
+        this.targetScrollTop = 0;
+        this.currentScrollTop = 0;
+        this.scrollVelocity = 0;
+        this.lastFrameTime = performance.now();
+        this.scrollContainer.scrollTop = 0;
+        this.container.classList.remove('amll-has-duet-lines');
+        this._updateIndicators(null);
 
         if (!lyricsData || !lyricsData.found || !Array.isArray(lyricsData.lines) || lyricsData.lines.length === 0) {
             return;
@@ -288,26 +311,34 @@ class AppleMusicLyrics {
                 end: line.end,
                 text: line.text || '',
                 words: Array.isArray(line.words) ? line.words : null,
+                backgroundText: line.backgroundText || '',
+                backgroundWords: Array.isArray(line.backgroundWords) ? line.backgroundWords : null,
+                section: line.section || '',
+                agent: line.agent || '',
+                agentName: line.agentName || '',
+                oppositeTurn: !!line.oppositeTurn,
             };
             this.lines.push(lineData);
 
             const el = document.createElement('div');
             el.className = 'amll-lyrics-line';
             el.dataset.lineId = line.id;
-
-            if (lineData.words && lineData.words.length > 0) {
-                el.classList.add('amll-lyrics-line-words');
-                for (const word of lineData.words) {
-                    const wordEl = document.createElement('span');
-                    wordEl.className = 'amll-word';
-                    wordEl.textContent = word.text;
-                    wordEl.dataset.start = word.start;
-                    wordEl.dataset.end = word.end;
-                    el.appendChild(wordEl);
-                }
-            } else {
-                el.textContent = lineData.text;
+            if (lineData.oppositeTurn) {
+                el.classList.add('amll-opposite-turn');
+                this.container.classList.add('amll-has-duet-lines');
             }
+            if (lineData.backgroundText || (lineData.backgroundWords && lineData.backgroundWords.length > 0)) {
+                el.classList.add('amll-has-background');
+                const bgEl = document.createElement('div');
+                bgEl.className = 'amll-line-bg';
+                this._renderWordTrack(bgEl, lineData.backgroundWords, lineData.backgroundText, 'amll-bg-word');
+                el.appendChild(bgEl);
+            }
+
+            const mainEl = document.createElement('div');
+            mainEl.className = 'amll-line-main';
+            this._renderWordTrack(mainEl, lineData.words, lineData.text, 'amll-word');
+            el.appendChild(mainEl);
 
             this.innerContainer.appendChild(el);
             this.lineElements.push(el);
@@ -326,6 +357,89 @@ class AppleMusicLyrics {
 
     setPlaying(playing) {
         this.isPlaying = playing;
+    }
+
+    _renderWordTrack(container, words, text, wordClassName) {
+        if (Array.isArray(words) && words.length > 0) {
+            container.classList.add('amll-lyrics-line-words');
+            for (const word of words) {
+                const shellEl = document.createElement('span');
+                shellEl.className = wordClassName;
+                shellEl.dataset.start = word.start;
+                shellEl.dataset.end = word.end;
+                shellEl.style.setProperty('--word-progress', '0');
+
+                const baseEl = document.createElement('span');
+                baseEl.className = `${wordClassName}-base`;
+                baseEl.textContent = word.text;
+                shellEl.appendChild(baseEl);
+
+                const fillWrapEl = document.createElement('span');
+                fillWrapEl.className = `${wordClassName}-fill-wrap`;
+                const fillEl = document.createElement('span');
+                fillEl.className = `${wordClassName}-fill`;
+                fillEl.textContent = word.text;
+                fillWrapEl.appendChild(fillEl);
+                shellEl.appendChild(fillWrapEl);
+
+                container.appendChild(shellEl);
+            }
+            return;
+        }
+        container.textContent = text || '';
+    }
+
+    _syncWordState(wordEls, words, timeInSeconds) {
+        for (let index = 0; index < wordEls.length; index++) {
+            const word = words[index];
+            const wordEl = wordEls[index];
+            if (!word || !wordEl) continue;
+
+            if (timeInSeconds >= word.end) {
+                wordEl.classList.add('amll-word-sung');
+                wordEl.classList.remove('amll-word-singing', 'amll-word-upcoming');
+                wordEl.style.setProperty('--word-progress', '1');
+            } else if (timeInSeconds >= word.start) {
+                wordEl.classList.add('amll-word-singing');
+                wordEl.classList.remove('amll-word-sung', 'amll-word-upcoming');
+                const progress = Math.min(1, (timeInSeconds - word.start) / Math.max(0.001, word.end - word.start));
+                wordEl.style.setProperty('--word-progress', progress.toFixed(3));
+            } else {
+                wordEl.classList.add('amll-word-upcoming');
+                wordEl.classList.remove('amll-word-sung', 'amll-word-singing');
+                wordEl.style.setProperty('--word-progress', '0');
+            }
+        }
+    }
+
+    _updateIndicators(line) {
+        const section = line && line.section ? line.section : '';
+        const agent = line && line.agentName ? line.agentName : '';
+        this.sectionIndicator.textContent = section;
+        this.sectionIndicator.classList.toggle('is-visible', !!section);
+        this.agentIndicator.textContent = agent;
+        this.agentIndicator.classList.toggle('is-visible', !!agent);
+    }
+
+    _stepScrollSpring() {
+        const now = performance.now();
+        const delta = Math.min(0.05, Math.max(0.001, (now - this.lastFrameTime) / 1000));
+        this.lastFrameTime = now;
+
+        const stiffness = 240;
+        const damping = 28;
+        const displacement = this.targetScrollTop - this.currentScrollTop;
+        const acceleration = (displacement * stiffness) - (this.scrollVelocity * damping);
+
+        this.scrollVelocity += acceleration * delta;
+        this.currentScrollTop += this.scrollVelocity * delta;
+
+        if (Math.abs(displacement) < 0.5 && Math.abs(this.scrollVelocity) < 1) {
+            this.currentScrollTop = this.targetScrollTop;
+            this.scrollVelocity = 0;
+        }
+
+        this.scrollContainer.scrollTop = this.currentScrollTop;
     }
 
     _updateActiveState() {
@@ -363,6 +477,8 @@ class AppleMusicLyrics {
             const isPassed = i < activeIndex;
             const isUpcoming = i > activeIndex;
             const distance = Math.abs(i - activeIndex);
+            const mainWords = el.querySelectorAll('.amll-word');
+            const bgWords = el.querySelectorAll('.amll-bg-word');
 
             el.classList.toggle('amll-active', isActive);
             el.classList.toggle('amll-passed', isPassed);
@@ -391,37 +507,22 @@ class AppleMusicLyrics {
                 el.style.transform = 'scale(0.85)';
             }
 
-            // Word-by-word highlighting for active line
             if (isActive && line.words && line.words.length > 0) {
-                const wordEls = el.querySelectorAll('.amll-word');
-                for (let w = 0; w < wordEls.length; w++) {
-                    const word = line.words[w];
-                    const wordEl = wordEls[w];
-                    if (!word) continue;
-
-                    if (t >= word.end) {
-                        wordEl.classList.add('amll-word-sung');
-                        wordEl.classList.remove('amll-word-singing', 'amll-word-upcoming');
-                        wordEl.style.setProperty('--word-progress', '1');
-                    } else if (t >= word.start) {
-                        wordEl.classList.add('amll-word-singing');
-                        wordEl.classList.remove('amll-word-sung', 'amll-word-upcoming');
-                        const progress = Math.min(1, (t - word.start) / (word.end - word.start));
-                        wordEl.style.setProperty('--word-progress', progress.toFixed(3));
-                    } else {
-                        wordEl.classList.add('amll-word-upcoming');
-                        wordEl.classList.remove('amll-word-sung', 'amll-word-singing');
-                        wordEl.style.setProperty('--word-progress', '0');
-                    }
-                }
+                this._syncWordState(mainWords, line.words, t);
+            }
+            if (isActive && line.backgroundWords && line.backgroundWords.length > 0) {
+                this._syncWordState(bgWords, line.backgroundWords, t);
             }
         }
+
+        this._updateIndicators(activeIndex >= 0 ? this.lines[activeIndex] : null);
 
         // Scroll active line into center
         if (activeIndex !== this.currentLineIndex && activeIndex >= 0 && activeIndex < this.lineElements.length) {
             this.currentLineIndex = activeIndex;
             this._scrollToLine(activeIndex);
         }
+        this._stepScrollSpring();
     }
 
     _scrollToLine(index) {
@@ -439,12 +540,7 @@ class AppleMusicLyrics {
         }
 
         const targetCenter = this.scrollContainer.clientHeight * 0.35;
-        const targetScrollTop = offsetTop + (el.offsetHeight / 2) - targetCenter;
-
-        this.scrollContainer.scrollTo({
-            top: targetScrollTop,
-            behavior: 'smooth',
-        });
+        this.targetScrollTop = Math.max(0, offsetTop + (el.offsetHeight / 2) - targetCenter);
     }
 
     dispose() {
