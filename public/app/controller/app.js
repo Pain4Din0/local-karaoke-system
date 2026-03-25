@@ -104,6 +104,10 @@ createApp({
         const ytmDetailLoadingMore = ref(false);
         const ytmActiveDetailRequest = ref(null);
         const ytmErrorState = ref(null);
+        const showYtmCounterpartChoice = ref(false);
+        const ytmCounterpartChoiceTrack = ref(null);
+        const ytmCounterpartChoiceVideo = ref(null);
+        const ytmResolvingTrackId = ref('');
         const advancedConfig = ref({
             ytdlp: { videoFormat: 'bestvideo[ext=mp4]/bestvideo', audioFormat: 'bestaudio[ext=m4a]/bestaudio', concurrentFragments: 16, httpChunkSize: '10M', noPlaylist: true, proxy: '', socketTimeout: 0, retries: 10, fragmentRetries: 10, userAgent: '', extractorArgs: '', postprocessorArgs: '', noCheckCertificates: false, limitRate: '', geoBypass: true, addHeader: [], mergeOutputFormat: '', flatPlaylist: true, dumpJson: true, noWarnings: false, ignoreErrors: false, abortOnError: false, noPart: false, restrictFilenames: false, windowsFilenames: false, noOverwrites: false, forceIPv4: false, forceIPv6: false },
             demucs: { model: 'htdemucs', twoStems: 'vocals', outputFormat: 'mp3', overlap: 0.25, segment: 7.8, shifts: 1, overlapOutput: false, float32: false, clipMode: 'rescale', noSegment: false, jobs: 0, device: '', repo: '' },
@@ -160,6 +164,8 @@ createApp({
         let ytmSearchRequestMeta = null;
         let ytmDetailRequestMeta = null;
         let ytmLastAutoLoadAt = 0;
+        let ytmCounterpartRequestSeq = 0;
+        const ytmCounterpartRequests = new Map();
         const clearBrowserState = () => {
             ['ktv_lang', 'ktv_nickname', 'ktv_tutorial_completed'].forEach((key) => localStorage.removeItem(key));
         };
@@ -178,6 +184,92 @@ createApp({
                 : 0;
             return trackCount + sectionCount;
         };
+
+        const createYtmCancelledError = () => {
+            const error = new Error('ytm_counterpart_cancelled');
+            error.cancelled = true;
+            return error;
+        };
+
+        const closeYtmCounterpartChoice = () => {
+            showYtmCounterpartChoice.value = false;
+            ytmCounterpartChoiceTrack.value = null;
+            ytmCounterpartChoiceVideo.value = null;
+        };
+
+        const clearYtmCounterpartRequestState = () => {
+            for (const pending of ytmCounterpartRequests.values()) {
+                if (pending?.timer) clearTimeout(pending.timer);
+                if (typeof pending?.reject === 'function') {
+                    pending.reject(createYtmCancelledError());
+                }
+            }
+            ytmCounterpartRequests.clear();
+            ytmResolvingTrackId.value = '';
+            closeYtmCounterpartChoice();
+        };
+
+        const isYtmTrackResolving = (item) => {
+            const key = String(item?.id || item?.videoId || '').trim();
+            return !!key && key === ytmResolvingTrackId.value;
+        };
+
+        const buildYtmQueueItem = (item, variant = 'song', counterpartOverride = null) => {
+            if (!item || item.itemType !== 'track') return null;
+            if (variant === 'video') {
+                const counterpart = counterpartOverride && typeof counterpartOverride === 'object'
+                    ? counterpartOverride
+                    : null;
+                if (!counterpart || !String(counterpart.videoId || '').trim()) return null;
+                return {
+                    ...counterpart,
+                    title: counterpart.title || item.title,
+                    track: counterpart.track || counterpart.title || item.title,
+                    artist: counterpart.artist || counterpart.uploader || item.artist || item.uploader || 'Unknown',
+                    uploader: counterpart.uploader || counterpart.artist || item.artist || item.uploader || 'Unknown',
+                    duration: counterpart.duration ?? item.duration ?? null,
+                    durationText: counterpart.durationText || item.durationText || '',
+                    sourceId: counterpart.sourceId || counterpart.videoId || null,
+                    extractor: counterpart.extractor || 'Youtube',
+                    originalUrl: counterpart.originalUrl,
+                    sourcePlatform: counterpart.sourcePlatform || 'youtube',
+                    playlistId: null,
+                    counterpartOf: item.videoId || null,
+                };
+            }
+            return {
+                ...item,
+                sourcePlatform: 'ytmusic',
+                originalUrl: item.originalUrl,
+            };
+        };
+
+        const resolveYtmCounterpartForTrack = (item) => new Promise((resolve, reject) => {
+            const videoId = String(item?.videoId || '').trim();
+            if (!videoId) {
+                resolve(null);
+                return;
+            }
+            const requestId = `ytm_counterparts_${Date.now()}_${++ytmCounterpartRequestSeq}`;
+            const timer = setTimeout(() => {
+                ytmCounterpartRequests.delete(requestId);
+                reject(new Error('ytm_counterpart_timeout'));
+            }, 10000);
+
+            ytmCounterpartRequests.set(requestId, {
+                resolve,
+                reject,
+                timer,
+            });
+            socket.emit('ytmusic_resolve_counterparts', {
+                requestId,
+                language: lang.value,
+                tracks: [{
+                    videoId,
+                    playlistId: String(item?.playlistId || '').trim() || null,
+                }],
+            });
+        });
 
         const getYtmDetailPageSize = (detailRequest) => (
             detailRequest?.kind === 'playlist' ? YTM_PLAYLIST_PAGE_SIZE : YTM_DETAIL_PAGE_SIZE
@@ -366,6 +458,7 @@ createApp({
         };
 
         const resetYtmSearchState = () => {
+            clearYtmCounterpartRequestState();
             ytmQuery.value = '';
             ytmFilter.value = 'all';
             ytmSections.value = [];
@@ -429,6 +522,7 @@ createApp({
                 '觀看次數',
                 '观看次数',
                 '再生回数',
+                '高評価',
                 '每月观众',
                 '每月觀眾',
                 '月间听众',
@@ -440,9 +534,13 @@ createApp({
                 'monthly viewers',
                 'views',
                 'view count',
+                'likes',
                 'subscribers',
                 'subscriber count',
             ].some((prefix) => lowered.startsWith(prefix));
+            if (lowered.startsWith('高評価') || text.includes('回視聴') || text.includes('回观看') || text.includes('回觀看')) {
+                return true;
+            }
             if (startsWithMetric) {
                 return text.includes(':') || text.includes('：') || hasNumber;
             }
@@ -465,6 +563,12 @@ createApp({
                 '月間聽眾',
                 '每月听众',
                 '每月聽眾',
+                '回視聴',
+                '回观看',
+                '回觀看',
+                '高評価',
+                ' likes',
+                ' like',
             ].some((keyword) => lowered.includes(keyword));
         };
 
@@ -584,14 +688,55 @@ createApp({
             });
         };
 
-        const queueSingleYtmTrack = (item) => {
-            if (!queueSongs([item])) {
+        const queuePreparedYtmTrack = (item, variant = 'song', counterpartOverride = null) => {
+            const queuedItem = buildYtmQueueItem(item, variant, counterpartOverride);
+            if (!queuedItem || !queueSongs([queuedItem])) {
                 pushNotification(t('ytm_no_results'));
+                return false;
+            }
+            return true;
+        };
+
+        const chooseYtmCounterpartVariant = (variant = 'song') => {
+            const track = ytmCounterpartChoiceTrack.value;
+            const counterpart = ytmCounterpartChoiceVideo.value;
+            closeYtmCounterpartChoice();
+            queuePreparedYtmTrack(track, variant, counterpart);
+        };
+
+        const queueSingleYtmTrack = async (item) => {
+            if (!item || item.itemType !== 'track') return;
+            const resolvingKey = String(item.id || item.videoId || '').trim();
+            if (!resolvingKey) {
+                queuePreparedYtmTrack(item, 'song');
+                return;
+            }
+
+            ytmResolvingTrackId.value = resolvingKey;
+            try {
+                const counterpart = await resolveYtmCounterpartForTrack(item);
+                if (counterpart && typeof counterpart === 'object' && String(counterpart.videoId || '').trim()) {
+                    ytmCounterpartChoiceTrack.value = item;
+                    ytmCounterpartChoiceVideo.value = counterpart;
+                    showYtmCounterpartChoice.value = true;
+                    return;
+                }
+                queuePreparedYtmTrack(item, 'song');
+            } catch (error) {
+                if (error?.cancelled) return;
+                console.warn('[Controller][YTM] Counterpart lookup failed, falling back to song', error || '');
+                queuePreparedYtmTrack(item, 'song');
+            } finally {
+                if (ytmResolvingTrackId.value === resolvingKey) {
+                    ytmResolvingTrackId.value = '';
+                }
             }
         };
 
         const openYtmBatchSelection = (tracks) => {
-            const items = Array.isArray(tracks) ? tracks.filter(Boolean) : [];
+            const items = Array.isArray(tracks)
+                ? tracks.map((item) => buildYtmQueueItem(item, 'song')).filter(Boolean)
+                : [];
             if (items.length === 0) {
                 pushNotification(t('select_songs_first'));
                 return;
@@ -600,7 +745,9 @@ createApp({
         };
 
         const queueYtmDetailTracks = () => {
-            const tracks = Array.isArray(ytmDetail.value?.tracks) ? ytmDetail.value.tracks.filter(Boolean) : [];
+            const tracks = Array.isArray(ytmDetail.value?.tracks)
+                ? ytmDetail.value.tracks.map((item) => buildYtmQueueItem(item, 'song')).filter(Boolean)
+                : [];
             if (!queueSongs(tracks)) {
                 pushNotification(t('select_songs_first'));
             }
@@ -613,6 +760,7 @@ createApp({
                 ? { ...(ytmActiveDetailRequest.value || {}) }
                 : { ...detailRequest };
             cancelYtmPendingRequests({ search: !append, detail: true });
+            if (!append) clearYtmCounterpartRequestState();
             clearYtmErrorState();
             const pageSize = getYtmDetailPageSize(baseRequest);
             const nextLimit = Math.min(
@@ -747,6 +895,7 @@ createApp({
                 return;
             }
             cancelYtmPendingRequests();
+            if (!append) clearYtmCounterpartRequestState();
             clearYtmErrorState();
             ytmQuery.value = query;
             ytmFilter.value = filter;
@@ -1180,6 +1329,28 @@ createApp({
             ytmDetailRequestMeta = null;
         });
 
+        socket.on('ytmusic_counterparts_result', (payload) => {
+            const requestId = String(payload?.requestId || '').trim();
+            if (!requestId || !ytmCounterpartRequests.has(requestId)) return;
+            const pending = ytmCounterpartRequests.get(requestId);
+            ytmCounterpartRequests.delete(requestId);
+            if (pending?.timer) clearTimeout(pending.timer);
+
+            if (payload.ok !== true) {
+                if (typeof pending?.reject === 'function') {
+                    pending.reject(payload?.error || new Error('ytm_counterpart_failed'));
+                }
+                return;
+            }
+
+            const counterpart = Array.isArray(payload.items) && payload.items[0] && payload.items[0].counterpart
+                ? payload.items[0].counterpart
+                : null;
+            if (typeof pending?.resolve === 'function') {
+                pending.resolve(counterpart);
+            }
+        });
+
         socket.on('parse_result', (result) => {
             if (result && result.list) {
                 if (result.list.length === 1) {
@@ -1242,12 +1413,13 @@ createApp({
             showPlaylistModal, playlistItems, selectedItems, isAllSelected,
             closePlaylistModal, toggleItem, toggleSelectAll, confirmAddBatch,
             showYtmSearch, openYtmSearch, closeYtmSearch,
+            showYtmCounterpartChoice, ytmCounterpartChoiceTrack, closeYtmCounterpartChoice, chooseYtmCounterpartVariant,
             ytmQuery, ytmFilter, ytmFilterOptions, ytmSections, ytmDetail,
             ytmViewMode, ytmLoading, ytmDetailLoading, ytmHasSearched, ytmCanGoBack,
             ytmHasVisibleResults, ytmCanLoadMoreCurrent, ytmReachedEndCurrent, ytmLoadingMoreCurrent, ytmErrorState,
             onYtmQueryInput, submitYtmSearch, changeYtmFilter, goBackYtmView,
             getYtmSectionTitle, getYtmItemTypeLabel, openYtmItem, openYtmSection,
-            getYtmTrackArtistLinks, getYtmTrackAlbumLink, hasYtmTrackMetaLinks, openYtmArtistRef, openYtmAlbumRef,
+            getYtmTrackArtistLinks, getYtmTrackAlbumLink, hasYtmTrackMetaLinks, isYtmTrackResolving, openYtmArtistRef, openYtmAlbumRef,
             getYtmErrorTitle, getYtmErrorHint, getYtmLoadedAllText, retryYtmRequest,
             queueSingleYtmTrack, openYtmBatchSelection, queueYtmDetailTracks, loadMoreYtmResults, onYtmResultsScroll,
             showAdvancedSettings, advancedConfig, openAdvancedSettings, closeAdvancedSettings, saveAdvancedSettings, restoreAdvancedDefaults,

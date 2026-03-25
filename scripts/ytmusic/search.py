@@ -2,6 +2,8 @@ import json
 import os
 import re
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 for stream_name in ("stdin", "stdout", "stderr"):
     try:
@@ -15,8 +17,18 @@ except Exception:
     YTMusic = None
 
 
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
+YTMUSIC_AUTH_ENV_KEYS = ("YTMUSIC_BROWSER_AUTH", "YTMUSIC_AUTH")
+YTMUSIC_AUTH_FILENAMES = (
+    "ytmusic_browser.json",
+    "ytmusic_auth.json",
+    "browser.json",
+)
+
+
 SEARCH_FILTERS = {"all", "songs", "albums", "artists", "singles"}
-SUPPORTED_ACTIONS = {"search", "detail"}
+SUPPORTED_ACTIONS = {"search", "detail", "counterparts"}
 SUPPORTED_LANGUAGES = {
     "en",
     "ja",
@@ -86,6 +98,8 @@ NON_ARTIST_METADATA_PREFIXES = (
     "view count",
     "subscribers",
     "subscriber count",
+    "高評価",
+    "likes",
 )
 
 
@@ -122,6 +136,10 @@ def is_non_artist_metadata_text(value):
     if not text:
         return False
     lowered = text.casefold()
+    if lowered.startswith("高評価"):
+        return True
+    if "回視聴" in text or "回观看" in text or "回觀看" in text:
+        return True
     if any(lowered.startswith(prefix) for prefix in NON_ARTIST_METADATA_PREFIXES):
         return ":" in text or "：" in text or METRIC_TEXT_RE.search(text) is not None
     if METRIC_TEXT_RE.search(text) is None:
@@ -144,6 +162,12 @@ def is_non_artist_metadata_text(value):
         "月間聽眾",
         "每月听众",
         "每月聽眾",
+        "回視聴",
+        "回观看",
+        "回觀看",
+        "高評価",
+        " likes",
+        " like",
     ))
 
 
@@ -189,7 +213,7 @@ def get_client_for_language(language, client_cache=None):
     normalized = normalize_language(language)
     if isinstance(client_cache, dict) and normalized in client_cache:
         return client_cache[normalized]
-    client = YTMusic(language=normalized)
+    client = create_ytmusic_client(normalized)
     if isinstance(client_cache, dict):
         client_cache[normalized] = client
     return client
@@ -219,6 +243,39 @@ def build_browse_url(browse_id):
     if not browse_id:
         return ""
     return f"https://music.youtube.com/browse/{browse_id}"
+
+
+def build_youtube_watch_url(video_id):
+    video_id = normalize_space(video_id)
+    if not video_id:
+        return ""
+    return f"https://www.youtube.com/watch?v={video_id}"
+
+
+def extract_thumbnail_url(value):
+    thumbnails = value
+    if isinstance(value, dict):
+        thumbnails = value.get("thumbnails") or value.get("thumbnail")
+
+    if isinstance(thumbnails, list):
+        best_url = ""
+        best_area = -1
+        for item in thumbnails:
+            if not isinstance(item, dict):
+                continue
+            url = normalize_space(item.get("url"))
+            if not url:
+                continue
+            width = parse_int(item.get("width")) or 0
+            height = parse_int(item.get("height")) or 0
+            area = width * height
+            if area > best_area:
+                best_area = area
+                best_url = url
+        if best_url:
+            return best_url
+
+    return ""
 
 
 def strip_playlist_prefix(value):
@@ -547,6 +604,8 @@ def normalize_track_item(
     default_album_id=None,
     default_album_kind=None,
     default_playlist_id=None,
+    source_platform="ytmusic",
+    original_url_override=None,
 ):
     if not isinstance(item, dict):
         return None
@@ -564,13 +623,14 @@ def normalize_track_item(
         release_kind=default_album_kind,
     )
     duration_seconds = parse_int(item.get("duration_seconds") or item.get("durationSeconds") or item.get("lengthSeconds"))
-    duration_text = normalize_space(item.get("duration")) or format_duration_text(duration_seconds)
+    duration_text = normalize_space(item.get("duration") or item.get("length")) or format_duration_text(duration_seconds)
     result_type = normalize_space(item.get("resultType")) or default_result_type
     playlist_id = strip_playlist_prefix(item.get("playlistId") or default_playlist_id)
     subtitle = build_track_subtitle(artists, album=album, duration_text=duration_text)
     artist_text = join_artist_names(artists)
+    pic = extract_thumbnail_url(item.get("thumbnails") or item.get("thumbnail"))
 
-    return {
+    payload = {
         "id": f"track:{video_id}",
         "itemType": "track",
         "resultType": result_type or "song",
@@ -588,9 +648,125 @@ def normalize_track_item(
         "track": title,
         "sourceId": video_id,
         "extractor": "Youtube",
-        "originalUrl": build_watch_url(video_id, playlist_id),
-        "sourcePlatform": "ytmusic",
+        "originalUrl": normalize_space(original_url_override) or build_watch_url(video_id, playlist_id),
+        "sourcePlatform": normalize_space(source_platform) or "ytmusic",
     }
+    if pic:
+        payload["pic"] = pic
+    return payload
+
+
+_THREAD_CLIENTS = threading.local()
+
+
+def resolve_auth_path():
+    for env_key in YTMUSIC_AUTH_ENV_KEYS:
+        candidate = normalize_space(os.environ.get(env_key))
+        if candidate and os.path.isfile(candidate):
+            return candidate
+
+    for filename in YTMUSIC_AUTH_FILENAMES:
+        candidate = os.path.join(ROOT_DIR, filename)
+        if os.path.isfile(candidate):
+            return candidate
+
+    return None
+
+
+def create_ytmusic_client(language):
+    normalized_language = normalize_language(language)
+    auth_path = resolve_auth_path()
+    if auth_path:
+        try:
+            return YTMusic(auth=auth_path, language=normalized_language)
+        except Exception:
+            pass
+    return YTMusic(language=normalized_language)
+
+
+def get_thread_client(language):
+    normalized_language = normalize_language(language)
+    cache = getattr(_THREAD_CLIENTS, "cache", None)
+    if not isinstance(cache, dict):
+        cache = {}
+        _THREAD_CLIENTS.cache = cache
+    if normalized_language not in cache:
+        cache[normalized_language] = create_ytmusic_client(normalized_language)
+    return cache[normalized_language]
+
+
+def build_counterpart_payload(counterpart):
+    normalized = normalize_track_item(
+        counterpart,
+        default_result_type="video",
+        source_platform="youtube",
+        original_url_override=build_youtube_watch_url(counterpart.get("videoId")),
+    )
+    if not normalized:
+        return None
+    normalized["playlistId"] = None
+    normalized["resultType"] = "video"
+    return normalized
+
+
+def resolve_counterpart_entry(item, language):
+    video_id = normalize_space(item.get("videoId"))
+    if not video_id:
+        return {
+            "sourceVideoId": "",
+            "counterpart": None,
+        }
+
+    playlist_id = strip_playlist_prefix(item.get("playlistId"))
+    client = get_thread_client(language)
+    try:
+        watch_playlist = client.get_watch_playlist(
+            videoId=video_id,
+            playlistId=playlist_id or None,
+            limit=1,
+        )
+        tracks = watch_playlist.get("tracks") or []
+        selected_track = next((
+            track for track in tracks
+            if normalize_space(track.get("videoId")) == video_id
+        ), None)
+        if selected_track is None and tracks:
+            selected_track = tracks[0]
+        counterpart = selected_track.get("counterpart") if isinstance(selected_track, dict) else None
+        return {
+            "sourceVideoId": video_id,
+            "counterpart": build_counterpart_payload(counterpart) if counterpart else None,
+        }
+    except Exception as error:
+        return {
+            "sourceVideoId": video_id,
+            "counterpart": None,
+            "error": normalize_space(str(error))[:300],
+        }
+
+
+def normalize_counterpart_request_items(value):
+    items = []
+    seen = set()
+    if not isinstance(value, list):
+        return items
+
+    for raw_item in value:
+        if not isinstance(raw_item, dict):
+            continue
+        video_id = normalize_space(raw_item.get("videoId"))
+        if not video_id:
+            continue
+        playlist_id = strip_playlist_prefix(raw_item.get("playlistId"))
+        key = f"{video_id}:{playlist_id}"
+        if key in seen:
+            continue
+        seen.add(key)
+        items.append({
+            "videoId": video_id,
+            "playlistId": playlist_id or None,
+        })
+    return items
 
 
 def normalize_release_item(item, release_kind="album", fallback_artist=None):
@@ -1030,6 +1206,43 @@ def build_artist_collection_detail(items, title, collection_key):
     }
 
 
+def handle_counterparts(payload):
+    language = normalize_language(payload.get("language"))
+    items = normalize_counterpart_request_items(payload.get("tracks"))
+    if not items:
+        write_payload({
+            "ok": True,
+            "action": "counterparts",
+            "items": [],
+        })
+        return
+
+    max_workers = min(max(parse_int(payload.get("workers")) or 4, 1), 6)
+    ordered_results = [None] * len(items)
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_map = {
+            executor.submit(resolve_counterpart_entry, item, language): index
+            for index, item in enumerate(items)
+        }
+        for future in as_completed(future_map):
+            index = future_map[future]
+            try:
+                ordered_results[index] = future.result()
+            except Exception as error:
+                ordered_results[index] = {
+                    "sourceVideoId": items[index]["videoId"],
+                    "counterpart": None,
+                    "error": normalize_space(str(error))[:300],
+                }
+
+    write_payload({
+        "ok": True,
+        "action": "counterparts",
+        "items": ordered_results,
+    })
+
+
 def handle_search(client, payload, client_cache=None):
     query = normalize_space(payload.get("query"))
     requested_filter = normalize_space(payload.get("filter")).lower() or "all"
@@ -1190,8 +1403,11 @@ def main():
         return
 
     try:
+        if action == "counterparts":
+            handle_counterparts(payload)
+            return
         request_language = normalize_language(payload.get("language"))
-        client = YTMusic(language=request_language)
+        client = create_ytmusic_client(request_language)
         client_cache = {request_language: client}
         if action == "search":
             handle_search(client, payload, client_cache=client_cache)

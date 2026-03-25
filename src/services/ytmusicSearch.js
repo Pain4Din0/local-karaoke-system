@@ -265,6 +265,28 @@ const sanitizeDetailRequest = (request = {}) => {
     return payload;
 };
 
+const sanitizeCounterpartTracks = (tracks) => {
+    if (!Array.isArray(tracks)) return [];
+    const sanitized = [];
+    const seen = new Set();
+
+    for (const track of tracks) {
+        if (!track || typeof track !== 'object') continue;
+        const videoId = normalizeText(track.videoId, '', 120);
+        if (!videoId) continue;
+        const playlistId = normalizeText(track.playlistId, '', 120);
+        const key = `${videoId}:${playlistId}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        sanitized.push({
+            videoId,
+            playlistId: playlistId || null,
+        });
+    }
+
+    return sanitized;
+};
+
 const searchYouTubeMusic = async (query, options = {}) => {
     const normalizedQuery = normalizeText(query, '', 200);
     const filter = sanitizeFilter(options.filter);
@@ -331,6 +353,28 @@ const getYouTubeMusicDetail = async (request) => {
     });
 };
 
+const resolveYouTubeMusicCounterparts = async (tracks, options = {}) => {
+    const normalizedTracks = sanitizeCounterpartTracks(tracks);
+    const language = sanitizeLanguage(options.language);
+    if (normalizedTracks.length === 0) return [];
+    const timeoutMs = Math.min(60000, 12000 + (normalizedTracks.length * 2500));
+    const result = await runPythonJson({
+        action: 'counterparts',
+        language,
+        tracks: normalizedTracks,
+    }, timeoutMs);
+    const responseItems = Array.isArray(result.items) ? result.items : [];
+
+    return normalizedTracks.map((track) => (
+        responseItems.find((item) => (
+            normalizeText(item && item.sourceVideoId, '', 120) === track.videoId
+        )) || {
+            sourceVideoId: track.videoId,
+            counterpart: null,
+        }
+    ));
+};
+
 const serializeYtMusicError = (error) => {
     if (error instanceof YtMusicSearchError) {
         return {
@@ -350,5 +394,6 @@ const serializeYtMusicError = (error) => {
 module.exports = {
     searchYouTubeMusic,
     getYouTubeMusicDetail,
+    resolveYouTubeMusicCounterparts,
     serializeYtMusicError,
 };

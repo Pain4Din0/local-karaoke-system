@@ -83,6 +83,26 @@ Place the cookie files directly in the **root directory** of the project. The sy
 > 2.  **Git Safety**: Ensure these files are **never committed** to version control. An updated `.gitignore` is included to prevent accidental tracking.
 > 3.  **Risk Mitigation**: Using personal cookies with third-party tools may violate Terms of Service.
 
+## 🎵 YouTube Music Search Authentication
+
+For basic YouTube Music search and lyrics lookup, no extra authentication is required. However, if you want the search helper to reliably expose official **Song / Video** counterparts from YouTube Music's own switcher, you should also provide a `ytmusicapi` browser authentication file.
+
+### Important distinction
+- `cookies_youtube.txt` is for **`yt-dlp` downloads**.
+- `browser.json` / `ytmusic_browser.json` / `ytmusic_auth.json` is for **`ytmusicapi` search/detail/counterpart requests**.
+- These are **not interchangeable**.
+
+### Recommended setup
+1. Follow the official `ytmusicapi` browser authentication instructions:
+   [Browser authentication docs](https://ytmusicapi.readthedocs.io/en/stable/setup/browser.html)
+2. Save the generated JSON file in the project root as one of:
+   - `ytmusic_browser.json`
+   - `ytmusic_auth.json`
+   - `browser.json`
+3. Restart the server after adding or refreshing the file.
+
+If no browser auth file is present, the system falls back to unauthenticated YouTube Music requests. Search will still work, but official song/video counterpart detection may be incomplete.
+
 ## 🏗 Technologies Used
 
 -   **Node.js**: Backend Runtime

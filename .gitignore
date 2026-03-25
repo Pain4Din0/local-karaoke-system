@@ -33,6 +33,9 @@ bootstrap-get-pip.py
 cookies_*.txt
 cookies.txt
 auth.json
+browser.json
+ytmusic_browser.json
+ytmusic_auth.json
 secrets.json
 paxsenix_token.txt
 

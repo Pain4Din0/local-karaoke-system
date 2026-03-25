@@ -18,6 +18,7 @@ const { cleanupRuntimeArtifacts } = require('./src/services/maintenance');
 const {
     searchYouTubeMusic,
     getYouTubeMusicDetail,
+    resolveYouTubeMusicCounterparts,
     serializeYtMusicError,
 } = require('./src/services/ytmusicSearch');
 
@@ -437,6 +438,36 @@ io.on('connection', async (socket) => {
             emitSocketError(socket, normalizedError.message, normalizedError.details, normalizedError.code);
         }
     }, 'Failed to load YouTube Music detail');
+
+    wrapSocketHandler(socket, 'ytmusic_resolve_counterparts', async (payload) => {
+        const requestId = payload && payload.requestId ? payload.requestId : null;
+        const tracks = payload && Array.isArray(payload.tracks) ? payload.tracks : [];
+
+        try {
+            const items = await resolveYouTubeMusicCounterparts(tracks, {
+                language: payload && payload.language,
+            });
+            socket.emit('ytmusic_counterparts_result', {
+                requestId,
+                ok: true,
+                items,
+            });
+        } catch (error) {
+            const normalizedError = serializeYtMusicError(error);
+            logger.warn('YTMusic', 'Counterpart resolution failed', {
+                socketId: socket.id,
+                requestId,
+                trackCount: tracks.length,
+                error: normalizedError,
+            });
+            socket.emit('ytmusic_counterparts_result', {
+                requestId,
+                ok: false,
+                error: normalizedError,
+                items: [],
+            });
+        }
+    }, 'Failed to resolve YouTube Music counterparts');
 
     wrapSocketHandler(socket, 'readd_history', async (historyItem) => {
         if (!historyItem || typeof historyItem !== 'object') {
