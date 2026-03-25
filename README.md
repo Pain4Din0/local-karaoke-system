@@ -15,6 +15,7 @@ A robust, locally hosted karaoke solution that enables seamless queuing and play
 - **Interactive UX**:
   - **Smart Controller**: Mobile-first interface with intuitive status indicators and interactive tutorials for new users.
   - **Batch Import**: One-click import for Bilibili Collections, YouTube Playlists, and YouTube Music playlists.
+  - **YouTube Music Search**: Search songs, artists, albums, and playlists directly from the Controller, with host-side requests and drill-down detail views for albums and artists.
 - **Intelligent Queue System**:
   - **Reliable Downloading**: Sequential processing queue with auto-retry and robust error handling.
   - **Priority Management**: Move urgent requests to the top of the queue.
@@ -34,7 +35,7 @@ The system relies on the following core components. Please install them and ensu
 
 - **[Node.js](https://nodejs.org/)** (Runtime Environment): Powers the web server and application logic.
 - **[Python](https://www.python.org/)** (3.10+): Required for AI vocal separation (Demucs).
-- **Python package `ytmusicapi`**: Used for YouTube Music timed lyrics retrieval. The bundled `start.bat` now installs it automatically together with other Python-side dependencies.
+- **Python package `ytmusicapi`**: Used for YouTube Music timed lyrics retrieval and Controller-side YouTube Music search. The bundled `start.bat` now installs it automatically together with other Python-side dependencies.
 - **[FFmpeg](https://ffmpeg.org/)** (Multimedia Framework): Handles audio/video processing.
 - **[yt-dlp](https://github.com/yt-dlp/yt-dlp)** (Media Downloader): Extracts content from streaming platforms.
 - **[Visual C++ Redistributable](https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist)**: Often required for Python and media libraries to run correctly.

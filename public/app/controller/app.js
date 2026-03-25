@@ -2,6 +2,23 @@ import { messages } from './messages.js';
 
 const { createApp, ref, computed, nextTick } = window.Vue;
 const socket = window.io();
+const YTM_SEARCH_PAGE_SIZE = 24;
+const YTM_SEARCH_MAX_LIMIT = 120;
+const YTM_DETAIL_PAGE_SIZE = 100;
+const YTM_PLAYLIST_PAGE_SIZE = 200;
+const YTM_DETAIL_MAX_LIMIT = 500;
+const YTM_KNOWN_ERROR_CODES = new Set([
+    'helper_missing',
+    'helper_timeout',
+    'helper_spawn_failed',
+    'helper_empty_response',
+    'helper_invalid_json',
+    'helper_stdin_failed',
+    'upstream_failed',
+    'invalid_detail_payload',
+    'invalid_request',
+    'ytmusic_failed',
+]);
 
 function throttle(func, limit) {
     let lastFunc, lastRan;
@@ -23,6 +40,9 @@ createApp({
         }
 
         const t = (key) => messages[lang.value][key];
+        const formatMessage = (key, vars = {}) => String(t(key) || '').replace(/\{(\w+)\}/g, (_, name) => (
+            Object.prototype.hasOwnProperty.call(vars, name) ? String(vars[name]) : ''
+        ));
         const toggleLang = () => {
             const keys = Object.keys(messages);
             lang.value = keys[(keys.indexOf(lang.value) + 1) % keys.length];
@@ -64,6 +84,26 @@ createApp({
         const showShareModal = ref(false);
         const showPlaylistModal = ref(false);
         const showAdvancedSettings = ref(false);
+        const showYtmSearch = ref(false);
+        const ytmQuery = ref('');
+        const ytmFilter = ref('all');
+        const ytmSections = ref([]);
+        const ytmDetail = ref(null);
+        const ytmViewMode = ref('search');
+        const ytmLoading = ref(false);
+        const ytmDetailLoading = ref(false);
+        const ytmHasSearched = ref(false);
+        const ytmNavigationStack = ref([]);
+        const ytmSearchLimit = ref(YTM_SEARCH_PAGE_SIZE);
+        const ytmSearchCanLoadMore = ref(false);
+        const ytmSearchReachedEnd = ref(false);
+        const ytmSearchLoadingMore = ref(false);
+        const ytmDetailLimit = ref(0);
+        const ytmDetailCanLoadMore = ref(false);
+        const ytmDetailReachedEnd = ref(false);
+        const ytmDetailLoadingMore = ref(false);
+        const ytmActiveDetailRequest = ref(null);
+        const ytmErrorState = ref(null);
         const advancedConfig = ref({
             ytdlp: { videoFormat: 'bestvideo[ext=mp4]/bestvideo', audioFormat: 'bestaudio[ext=m4a]/bestaudio', concurrentFragments: 16, httpChunkSize: '10M', noPlaylist: true, proxy: '', socketTimeout: 0, retries: 10, fragmentRetries: 10, userAgent: '', extractorArgs: '', postprocessorArgs: '', noCheckCertificates: false, limitRate: '', geoBypass: true, addHeader: [], mergeOutputFormat: '', flatPlaylist: true, dumpJson: true, noWarnings: false, ignoreErrors: false, abortOnError: false, noPart: false, restrictFilenames: false, windowsFilenames: false, noOverwrites: false, forceIPv4: false, forceIPv6: false },
             demucs: { model: 'htdemucs', twoStems: 'vocals', outputFormat: 'mp3', overlap: 0.25, segment: 7.8, shifts: 1, overlapOutput: false, float32: false, clipMode: 'rescale', noSegment: false, jobs: 0, device: '', repo: '' },
@@ -81,9 +121,71 @@ createApp({
 
         const currentNetwork = computed(() => networks.value[currentNetIndex.value] || networks.value[0]);
         const isAllSelected = computed(() => playlistItems.value.length > 0 && selectedItems.value.size === playlistItems.value.length);
+        const ytmFilterOptions = computed(() => ([
+            { value: 'all', label: t('ytm_filter_all') },
+            { value: 'songs', label: t('ytm_filter_songs') },
+            { value: 'albums', label: t('ytm_filter_albums') },
+            { value: 'singles', label: t('ytm_filter_singles') },
+            { value: 'artists', label: t('ytm_filter_artists') },
+        ]));
+        const ytmCanGoBack = computed(() => ytmNavigationStack.value.length > 0);
+        const ytmHasVisibleResults = computed(() => (
+            ytmViewMode.value === 'detail'
+                ? countYtmDetailItems(ytmDetail.value) > 0
+                : countYtmSearchItems(ytmSections.value) > 0
+        ));
+        const ytmCanLoadMoreCurrent = computed(() => (
+            ytmViewMode.value === 'detail'
+                ? ytmDetailCanLoadMore.value
+                : ytmSearchCanLoadMore.value
+        ));
+        const ytmReachedEndCurrent = computed(() => (
+            ytmViewMode.value === 'detail'
+                ? ytmDetailReachedEnd.value
+                : ytmSearchReachedEnd.value
+        ));
+        const ytmLoadingMoreCurrent = computed(() => (
+            ytmViewMode.value === 'detail'
+                ? ytmDetailLoadingMore.value
+                : ytmSearchLoadingMore.value
+        ));
+        const ytmVisibleCountCurrent = computed(() => (
+            ytmViewMode.value === 'detail'
+                ? countYtmDetailItems(ytmDetail.value)
+                : countYtmSearchItems(ytmSections.value)
+        ));
         let notificationId = 0;
+        let ytmSearchRequestId = null;
+        let ytmDetailRequestId = null;
+        let ytmSearchRequestMeta = null;
+        let ytmDetailRequestMeta = null;
+        let ytmLastAutoLoadAt = 0;
         const clearBrowserState = () => {
             ['ktv_lang', 'ktv_nickname', 'ktv_tutorial_completed'].forEach((key) => localStorage.removeItem(key));
+        };
+
+        const countYtmSearchItems = (sections) => (
+            Array.isArray(sections)
+                ? sections.reduce((total, section) => total + (Array.isArray(section?.items) ? section.items.length : 0), 0)
+                : 0
+        );
+
+        const countYtmDetailItems = (detail) => {
+            if (!detail || typeof detail !== 'object') return 0;
+            const trackCount = Array.isArray(detail.tracks) ? detail.tracks.length : 0;
+            const sectionCount = Array.isArray(detail.sections)
+                ? detail.sections.reduce((total, section) => total + (Array.isArray(section?.items) ? section.items.length : 0), 0)
+                : 0;
+            return trackCount + sectionCount;
+        };
+
+        const getYtmDetailPageSize = (detailRequest) => (
+            detailRequest?.kind === 'playlist' ? YTM_PLAYLIST_PAGE_SIZE : YTM_DETAIL_PAGE_SIZE
+        );
+
+        const canPaginateYtmDetail = (detail, detailRequest = ytmActiveDetailRequest.value) => {
+            const kind = detail?.kind || detailRequest?.kind || '';
+            return kind === 'playlist' || kind === 'artist_collection';
         };
 
         const dismissNotification = (id) => {
@@ -136,6 +238,28 @@ createApp({
             socket.emit('parse_url', nextUrl);
         };
 
+        const queueSongs = (songs, options = {}) => {
+            const nextSongs = Array.isArray(songs)
+                ? songs.filter((item) => item && typeof item.originalUrl === 'string' && item.originalUrl)
+                : [];
+            if (nextSongs.length === 0) return false;
+            socket.emit('add_batch_songs', { songs: nextSongs, requester: nickname.value });
+            if (options.keepBusyState) {
+                isAdding.value = true;
+            }
+            return true;
+        };
+
+        const openSongSelection = (items, options = {}) => {
+            const nextItems = Array.isArray(items) ? items.filter(Boolean) : [];
+            playlistItems.value = nextItems;
+            selectedItems.value = new Set(nextItems.map((_, index) => index));
+            showPlaylistModal.value = true;
+            if (!options.keepBusyState) {
+                isAdding.value = false;
+            }
+        };
+
         const closePlaylistModal = (options = {}) => {
             const keepBusyState = !!options.keepBusyState;
             showPlaylistModal.value = false;
@@ -168,13 +292,536 @@ createApp({
                 .map(idx => playlistItems.value[idx])
                 .filter(Boolean);
             if (songsToAdd.length > 0) {
-                socket.emit('add_batch_songs', { songs: songsToAdd, requester: nickname.value });
-                isAdding.value = true;
+                queueSongs(songsToAdd, { keepBusyState: true });
                 closePlaylistModal({ keepBusyState: true });
             } else {
                 pushNotification(t('select_songs_first'));
                 closePlaylistModal();
             }
+        };
+
+        const cloneYtmViewState = () => JSON.parse(JSON.stringify({
+            viewMode: ytmViewMode.value,
+            query: ytmQuery.value,
+            filter: ytmFilter.value,
+            sections: ytmSections.value,
+            detail: ytmDetail.value,
+            hasSearched: ytmHasSearched.value,
+            searchLimit: ytmSearchLimit.value,
+            searchCanLoadMore: ytmSearchCanLoadMore.value,
+            searchReachedEnd: ytmSearchReachedEnd.value,
+            detailLimit: ytmDetailLimit.value,
+            detailCanLoadMore: ytmDetailCanLoadMore.value,
+            detailReachedEnd: ytmDetailReachedEnd.value,
+            activeDetailRequest: ytmActiveDetailRequest.value,
+        }));
+
+        const restoreYtmViewState = (snapshot) => {
+            if (!snapshot || typeof snapshot !== 'object') return;
+            ytmViewMode.value = snapshot.viewMode || 'search';
+            ytmQuery.value = snapshot.query || '';
+            ytmFilter.value = snapshot.filter || 'all';
+            ytmSections.value = Array.isArray(snapshot.sections) ? snapshot.sections : [];
+            ytmDetail.value = snapshot.detail || null;
+            ytmHasSearched.value = !!snapshot.hasSearched;
+            ytmSearchLimit.value = Number(snapshot.searchLimit) || YTM_SEARCH_PAGE_SIZE;
+            ytmSearchCanLoadMore.value = !!snapshot.searchCanLoadMore;
+            ytmSearchReachedEnd.value = !!snapshot.searchReachedEnd;
+            ytmSearchLoadingMore.value = false;
+            ytmDetailLimit.value = Number(snapshot.detailLimit) || 0;
+            ytmDetailCanLoadMore.value = !!snapshot.detailCanLoadMore;
+            ytmDetailReachedEnd.value = !!snapshot.detailReachedEnd;
+            ytmDetailLoadingMore.value = false;
+            ytmActiveDetailRequest.value = snapshot.activeDetailRequest || null;
+            ytmLoading.value = false;
+            ytmDetailLoading.value = false;
+            ytmErrorState.value = null;
+        };
+
+        const clearYtmErrorState = () => {
+            ytmErrorState.value = null;
+        };
+
+        const setYtmErrorState = (nextState) => {
+            ytmErrorState.value = nextState && typeof nextState === 'object'
+                ? { ...nextState }
+                : null;
+        };
+
+        const cancelYtmPendingRequests = (options = {}) => {
+            const cancelSearch = options.search !== false;
+            const cancelDetail = options.detail !== false;
+            if (cancelSearch) {
+                ytmSearchRequestId = null;
+                ytmSearchRequestMeta = null;
+                ytmLoading.value = false;
+                ytmSearchLoadingMore.value = false;
+            }
+            if (cancelDetail) {
+                ytmDetailRequestId = null;
+                ytmDetailRequestMeta = null;
+                ytmDetailLoading.value = false;
+                ytmDetailLoadingMore.value = false;
+            }
+        };
+
+        const resetYtmSearchState = () => {
+            ytmQuery.value = '';
+            ytmFilter.value = 'all';
+            ytmSections.value = [];
+            ytmDetail.value = null;
+            ytmViewMode.value = 'search';
+            ytmLoading.value = false;
+            ytmDetailLoading.value = false;
+            ytmHasSearched.value = false;
+            ytmNavigationStack.value = [];
+            ytmSearchLimit.value = YTM_SEARCH_PAGE_SIZE;
+            ytmSearchCanLoadMore.value = false;
+            ytmSearchReachedEnd.value = false;
+            ytmSearchLoadingMore.value = false;
+            ytmDetailLimit.value = 0;
+            ytmDetailCanLoadMore.value = false;
+            ytmDetailReachedEnd.value = false;
+            ytmDetailLoadingMore.value = false;
+            ytmActiveDetailRequest.value = null;
+            ytmSearchRequestId = null;
+            ytmDetailRequestId = null;
+            ytmSearchRequestMeta = null;
+            ytmDetailRequestMeta = null;
+            ytmErrorState.value = null;
+        };
+
+        const openYtmSearch = () => {
+            showYtmSearch.value = true;
+            nextTick(() => {
+                const input = document.getElementById('ytm-search-input');
+                if (input) input.focus();
+            });
+        };
+
+        const closeYtmSearch = () => {
+            cancelYtmPendingRequests();
+            showYtmSearch.value = false;
+            resetYtmSearchState();
+        };
+
+        const getYtmSectionTitle = (section) => {
+            const key = section && section.key ? `ytm_section_${section.key}` : '';
+            return (messages[lang.value] && messages[lang.value][key]) || section?.title || '';
+        };
+
+        const getYtmItemTypeLabel = (item) => {
+            if (!item || typeof item !== 'object') return '';
+            if (item.itemType === 'track') return t('ytm_filter_songs');
+            if (item.itemType === 'album') return t('ytm_filter_albums');
+            if (item.itemType === 'single') return t('ytm_filter_singles');
+            if (item.itemType === 'artist') return t('ytm_filter_artists');
+            return '';
+        };
+
+        const isYtmNonArtistMetaText = (value) => {
+            const text = String(value || '').trim();
+            if (!text) return false;
+            const lowered = text.toLowerCase();
+            const hasNumber = /\d/.test(text);
+            const startsWithMetric = [
+                '播放次数',
+                '觀看次數',
+                '观看次数',
+                '再生回数',
+                '每月观众',
+                '每月觀眾',
+                '月间听众',
+                '月間聽眾',
+                '每月听众',
+                '每月聽眾',
+                'monthly listeners',
+                'monthly audience',
+                'monthly viewers',
+                'views',
+                'view count',
+                'subscribers',
+                'subscriber count',
+            ].some((prefix) => lowered.startsWith(prefix));
+            if (startsWithMetric) {
+                return text.includes(':') || text.includes('：') || hasNumber;
+            }
+            if (!hasNumber) return false;
+            return [
+                ' views',
+                ' view',
+                ' subscribers',
+                ' subscriber',
+                ' listeners',
+                ' audience',
+                ' viewers',
+                '播放次数',
+                '觀看次數',
+                '观看次数',
+                '再生回数',
+                '每月观众',
+                '每月觀眾',
+                '月间听众',
+                '月間聽眾',
+                '每月听众',
+                '每月聽眾',
+            ].some((keyword) => lowered.includes(keyword));
+        };
+
+        const getYtmTrackArtistLinks = (item) => {
+            if (!item || item.itemType !== 'track' || !Array.isArray(item.artists)) return [];
+            const seen = new Set();
+            return item.artists
+                .map((artist) => ({
+                    name: String(artist?.name || '').trim(),
+                    id: String(artist?.id || '').trim(),
+                    key: `${String(artist?.id || '').trim() || 'name'}:${String(artist?.name || '').trim()}`,
+                }))
+                .filter((artist) => {
+                    if (!artist.name || isYtmNonArtistMetaText(artist.name)) return false;
+                    const key = artist.key.toLowerCase();
+                    if (seen.has(key)) return false;
+                    seen.add(key);
+                    return true;
+                });
+        };
+
+        const getYtmTrackAlbumLink = (item) => {
+            const albumName = String(item?.albumRef?.name || '').trim();
+            if (!albumName) return null;
+            return {
+                id: String(item?.albumRef?.id || '').trim(),
+                name: albumName,
+                searchFilter: String(item?.albumRef?.searchFilter || '').trim(),
+            };
+        };
+
+        const hasYtmTrackMetaLinks = (item) => (
+            getYtmTrackArtistLinks(item).length > 0 || !!getYtmTrackAlbumLink(item)
+        );
+
+        const openYtmSearchFallback = (query, filter = 'all') => {
+            const nextQuery = String(query || '').trim();
+            const nextFilter = ['all', 'songs', 'albums', 'artists', 'singles'].includes(filter) ? filter : 'all';
+            if (!nextQuery) return;
+            submitYtmSearch(nextQuery, {
+                filterOverride: nextFilter,
+                pushCurrentView: true,
+                restoreOnFailure: true,
+            });
+        };
+
+        const openYtmArtistRef = (artist) => {
+            const title = String(artist?.name || '').trim();
+            const browseId = String(artist?.id || '').trim();
+            if (!title) return;
+            if (!browseId) {
+                openYtmSearchFallback(title, 'artists');
+                return;
+            }
+            fetchYtmDetail({
+                kind: 'artist',
+                browseId,
+                title,
+            });
+        };
+
+        const openYtmAlbumRef = (album) => {
+            const title = String(album?.name || '').trim();
+            const browseId = String(album?.id || '').trim();
+            if (!title) return;
+            if (!browseId) {
+                openYtmSearchFallback(title, album?.searchFilter || 'all');
+                return;
+            }
+            fetchYtmDetail({
+                kind: 'album',
+                browseId,
+                title,
+            });
+        };
+
+        const getYtmErrorTitle = () => {
+            const code = String(ytmErrorState.value?.code || '').trim();
+            if (!code) return '';
+            if (code === 'helper_missing') return t('ytm_error_helper_missing');
+            if (code === 'helper_timeout') return t('ytm_error_helper_timeout');
+            if (code === 'upstream_failed') return t('ytm_error_upstream_failed');
+            if (['helper_spawn_failed', 'helper_empty_response', 'helper_invalid_json', 'helper_stdin_failed'].includes(code)) {
+                return t('ytm_error_host_failed');
+            }
+            if (ytmErrorState.value?.scope === 'detail') return t('ytm_error_detail_failed');
+            return t('ytm_error_search_failed');
+        };
+
+        const getYtmErrorHint = () => (
+            ytmVisibleCountCurrent.value > 0
+                ? t('ytm_error_showing_previous_results')
+                : t('ytm_error_retry_hint')
+        );
+
+        const getYtmLoadedAllText = () => formatMessage('ytm_loaded_all_count', {
+            count: ytmVisibleCountCurrent.value,
+        });
+
+        const retryYtmRequest = () => {
+            const retry = ytmErrorState.value?.retry;
+            if (!retry || typeof retry !== 'object') return;
+            clearYtmErrorState();
+            if (retry.type === 'detail') {
+                fetchYtmDetail(retry.detailRequest, {
+                    append: !!retry.append,
+                    limitOverride: retry.limitOverride,
+                });
+                return;
+            }
+            submitYtmSearch(retry.query, {
+                append: !!retry.append,
+                limitOverride: retry.limitOverride,
+                filterOverride: retry.filter,
+                pushCurrentView: !!retry.pushCurrentView,
+                restoreOnFailure: !!retry.restoreOnFailure,
+            });
+        };
+
+        const queueSingleYtmTrack = (item) => {
+            if (!queueSongs([item])) {
+                pushNotification(t('ytm_no_results'));
+            }
+        };
+
+        const openYtmBatchSelection = (tracks) => {
+            const items = Array.isArray(tracks) ? tracks.filter(Boolean) : [];
+            if (items.length === 0) {
+                pushNotification(t('select_songs_first'));
+                return;
+            }
+            openSongSelection(items);
+        };
+
+        const queueYtmDetailTracks = () => {
+            const tracks = Array.isArray(ytmDetail.value?.tracks) ? ytmDetail.value.tracks.filter(Boolean) : [];
+            if (!queueSongs(tracks)) {
+                pushNotification(t('select_songs_first'));
+            }
+        };
+
+        const fetchYtmDetail = (detailRequest, options = {}) => {
+            if (!detailRequest || typeof detailRequest !== 'object') return;
+            const append = !!options.append;
+            const baseRequest = append
+                ? { ...(ytmActiveDetailRequest.value || {}) }
+                : { ...detailRequest };
+            cancelYtmPendingRequests({ search: !append, detail: true });
+            clearYtmErrorState();
+            const pageSize = getYtmDetailPageSize(baseRequest);
+            const nextLimit = Math.min(
+                YTM_DETAIL_MAX_LIMIT,
+                Math.max(
+                    pageSize,
+                    Number(options.limitOverride) || (append ? (ytmDetailLimit.value + pageSize) : pageSize),
+                ),
+            );
+            if (append && nextLimit <= ytmDetailLimit.value) {
+                ytmDetailCanLoadMore.value = false;
+                ytmDetailReachedEnd.value = true;
+                return;
+            }
+
+            if (!append) {
+                ytmNavigationStack.value.push(cloneYtmViewState());
+                ytmViewMode.value = 'detail';
+                ytmDetail.value = {
+                    title: baseRequest.title || '',
+                    subtitle: '',
+                    description: '',
+                    tracks: [],
+                    sections: [],
+                    kind: baseRequest.kind || '',
+                };
+                ytmDetailReachedEnd.value = false;
+                ytmDetailCanLoadMore.value = false;
+            }
+
+            ytmActiveDetailRequest.value = { ...baseRequest };
+            ytmDetailLoadingMore.value = append;
+            ytmDetailLoading.value = !append;
+            ytmDetailRequestId = `ytm_detail_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+            ytmDetailRequestMeta = {
+                append,
+                requestedLimit: nextLimit,
+                previousCount: append ? countYtmDetailItems(ytmDetail.value) : 0,
+                detailRequest: { ...baseRequest },
+                retry: {
+                    type: 'detail',
+                    detailRequest: { ...baseRequest },
+                    append,
+                    limitOverride: nextLimit,
+                },
+            };
+            socket.emit('ytmusic_get_detail', {
+                requestId: ytmDetailRequestId,
+                detail: {
+                    ...baseRequest,
+                    limit: nextLimit,
+                },
+                language: lang.value,
+            });
+        };
+
+        const openYtmItem = (item) => {
+            if (!item || typeof item !== 'object') return;
+            if (item.itemType === 'track') {
+                queueSingleYtmTrack(item);
+                return;
+            }
+            if (item.openAction && typeof item.openAction === 'object') {
+                fetchYtmDetail(item.openAction);
+            }
+        };
+
+        const openYtmSection = (section) => {
+            if (!section || typeof section !== 'object') return;
+            if (section.openAction && typeof section.openAction === 'object') {
+                fetchYtmDetail(section.openAction);
+            }
+        };
+
+        const goBackYtmView = () => {
+            cancelYtmPendingRequests();
+            const snapshot = ytmNavigationStack.value.pop();
+            if (snapshot) {
+                restoreYtmViewState(snapshot);
+                return;
+            }
+            closeYtmSearch();
+        };
+
+        const onYtmQueryInput = () => {
+            const query = String(ytmQuery.value || '').trim();
+            if (ytmViewMode.value === 'search') {
+                clearYtmErrorState();
+            }
+            if (!query && ytmViewMode.value === 'search') {
+                ytmSections.value = [];
+                ytmHasSearched.value = false;
+                ytmSearchLimit.value = YTM_SEARCH_PAGE_SIZE;
+                ytmSearchCanLoadMore.value = false;
+                ytmSearchReachedEnd.value = false;
+                ytmSearchLoadingMore.value = false;
+                return;
+            }
+            if (ytmViewMode.value === 'search') {
+                ytmSearchLimit.value = YTM_SEARCH_PAGE_SIZE;
+                ytmSearchCanLoadMore.value = false;
+                ytmSearchReachedEnd.value = false;
+                ytmSearchLoadingMore.value = false;
+            }
+        };
+
+        const submitYtmSearch = (queryOverride = null, options = {}) => {
+            const query = String(queryOverride ?? ytmQuery.value ?? '').trim();
+            if (!query) {
+                pushNotification(t('ytm_empty_query'));
+                return;
+            }
+            const append = !!options.append;
+            const filter = ['all', 'songs', 'albums', 'artists', 'singles'].includes(options.filterOverride)
+                ? options.filterOverride
+                : ytmFilter.value;
+            const shouldPushCurrentView = !append && (
+                !!options.pushCurrentView
+                || ytmViewMode.value === 'detail'
+            );
+            const previousSnapshot = shouldPushCurrentView ? cloneYtmViewState() : null;
+            const nextLimit = Math.min(
+                YTM_SEARCH_MAX_LIMIT,
+                Math.max(
+                    YTM_SEARCH_PAGE_SIZE,
+                    Number(options.limitOverride) || (append ? (ytmSearchLimit.value + YTM_SEARCH_PAGE_SIZE) : YTM_SEARCH_PAGE_SIZE),
+                ),
+            );
+            if (append && nextLimit <= ytmSearchLimit.value) {
+                ytmSearchCanLoadMore.value = false;
+                ytmSearchReachedEnd.value = true;
+                return;
+            }
+            cancelYtmPendingRequests();
+            clearYtmErrorState();
+            ytmQuery.value = query;
+            ytmFilter.value = filter;
+            ytmViewMode.value = 'search';
+            ytmDetail.value = null;
+            ytmActiveDetailRequest.value = null;
+            if (shouldPushCurrentView && previousSnapshot) {
+                ytmNavigationStack.value.push(previousSnapshot);
+            } else if (!append) {
+                ytmNavigationStack.value = [];
+            }
+            ytmLoading.value = !append;
+            ytmSearchLoadingMore.value = append;
+            ytmHasSearched.value = true;
+            if (!append) {
+                ytmSearchReachedEnd.value = false;
+                ytmSearchCanLoadMore.value = false;
+            }
+            ytmSearchRequestId = `ytm_search_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+            ytmSearchRequestMeta = {
+                append,
+                requestedQuery: query,
+                requestedLimit: nextLimit,
+                previousCount: append ? countYtmSearchItems(ytmSections.value) : 0,
+                requestedFilter: filter,
+                previousSnapshot,
+                pushedNavigation: shouldPushCurrentView,
+                restoreOnFailure: !!options.restoreOnFailure || !!previousSnapshot,
+                retry: {
+                    type: 'search',
+                    query,
+                    filter,
+                    append,
+                    limitOverride: nextLimit,
+                    pushCurrentView: shouldPushCurrentView,
+                    restoreOnFailure: !!options.restoreOnFailure || !!previousSnapshot,
+                },
+            };
+            socket.emit('ytmusic_search', {
+                requestId: ytmSearchRequestId,
+                query,
+                filter,
+                limit: nextLimit,
+                language: lang.value,
+            });
+        };
+
+        const changeYtmFilter = (filter) => {
+            if (!filter || ytmFilter.value === filter) return;
+            ytmFilter.value = filter;
+            if (String(ytmQuery.value || '').trim()) {
+                submitYtmSearch();
+            }
+        };
+
+        const loadMoreYtmResults = (options = {}) => {
+            if (ytmViewMode.value === 'detail') {
+                if (!ytmDetailCanLoadMore.value || ytmDetailLoading.value || ytmDetailLoadingMore.value || !ytmActiveDetailRequest.value) return;
+                fetchYtmDetail(ytmActiveDetailRequest.value, { append: true, ...options });
+                return;
+            }
+            if (!ytmSearchCanLoadMore.value || ytmLoading.value || ytmSearchLoadingMore.value) return;
+            submitYtmSearch(null, { append: true, ...options });
+        };
+
+        const onYtmResultsScroll = (event) => {
+            const target = event?.target;
+            if (!target || typeof target.scrollTop !== 'number') return;
+            if (ytmErrorState.value || !ytmCanLoadMoreCurrent.value || ytmLoadingMoreCurrent.value || ytmLoading.value || ytmDetailLoading.value) return;
+            const remain = target.scrollHeight - target.scrollTop - target.clientHeight;
+            if (remain > 160) return;
+            const now = Date.now();
+            if (now - ytmLastAutoLoadAt < 800) return;
+            ytmLastAutoLoadAt = now;
+            loadMoreYtmResults({ fromScroll: true });
         };
 
         const manageQueue = (action, item) => socket.emit('manage_queue', { action, id: item.id });
@@ -400,6 +1047,10 @@ createApp({
         });
         socket.on('error_msg', (msg) => {
             isAdding.value = false;
+            if (showYtmSearch.value && YTM_KNOWN_ERROR_CODES.has(String(msg?.code || ''))) {
+                console.warn('[Controller][YTM]', msg?.message || 'YouTube Music request failed', msg || '');
+                return;
+            }
             logAndNotify(typeof msg === 'string' ? msg : (msg?.message || 'Operation failed'), msg, 'error');
         });
         socket.on('song_error', (payload) => {
@@ -413,15 +1064,128 @@ createApp({
             closeAdvancedSettings();
         });
 
+        socket.on('ytmusic_search_result', (payload) => {
+            if (!payload || payload.requestId !== ytmSearchRequestId) return;
+            ytmLoading.value = false;
+            ytmSearchLoadingMore.value = false;
+            const requestMeta = ytmSearchRequestMeta || {
+                append: false,
+                requestedQuery: String(payload?.query || ytmQuery.value || '').trim(),
+                requestedLimit: YTM_SEARCH_PAGE_SIZE,
+                previousCount: 0,
+                requestedFilter: ytmFilter.value,
+                previousSnapshot: null,
+                pushedNavigation: false,
+                restoreOnFailure: false,
+                retry: null,
+            };
+            if (payload.ok !== true) {
+                if (requestMeta.restoreOnFailure && requestMeta.previousSnapshot) {
+                    restoreYtmViewState(requestMeta.previousSnapshot);
+                } else {
+                    ytmSearchCanLoadMore.value = false;
+                }
+                setYtmErrorState({
+                    code: String(payload?.error?.code || 'ytmusic_failed').trim(),
+                    scope: 'search',
+                    append: !!requestMeta.append,
+                    retry: requestMeta.retry || {
+                        type: 'search',
+                        query: requestMeta.requestedQuery,
+                        filter: requestMeta.requestedFilter,
+                        append: !!requestMeta.append,
+                        limitOverride: requestMeta.requestedLimit,
+                        pushCurrentView: !!requestMeta.pushedNavigation,
+                        restoreOnFailure: !!requestMeta.restoreOnFailure,
+                    },
+                });
+                ytmSearchRequestMeta = null;
+                return;
+            }
+            clearYtmErrorState();
+            ytmSections.value = Array.isArray(payload.sections) ? payload.sections : [];
+            const totalCount = countYtmSearchItems(ytmSections.value);
+            const canInferSearchEnd = requestMeta.requestedFilter && requestMeta.requestedFilter !== 'all';
+            ytmSearchLimit.value = requestMeta.requestedLimit;
+            if (totalCount <= 0) {
+                ytmSearchCanLoadMore.value = false;
+                ytmSearchReachedEnd.value = false;
+                ytmSearchRequestMeta = null;
+                return;
+            }
+            if (requestMeta.append) {
+                const hasGrowth = totalCount > requestMeta.previousCount;
+                ytmSearchReachedEnd.value = !hasGrowth || requestMeta.requestedLimit >= YTM_SEARCH_MAX_LIMIT || (canInferSearchEnd && totalCount < requestMeta.requestedLimit);
+                ytmSearchCanLoadMore.value = hasGrowth && requestMeta.requestedLimit < YTM_SEARCH_MAX_LIMIT && !(canInferSearchEnd && totalCount < requestMeta.requestedLimit);
+            } else {
+                ytmSearchReachedEnd.value = canInferSearchEnd && totalCount < requestMeta.requestedLimit;
+                ytmSearchCanLoadMore.value = !ytmSearchReachedEnd.value && requestMeta.requestedLimit < YTM_SEARCH_MAX_LIMIT;
+            }
+            ytmSearchRequestMeta = null;
+        });
+
+        socket.on('ytmusic_detail_result', (payload) => {
+            if (!payload || payload.requestId !== ytmDetailRequestId) return;
+            ytmDetailLoading.value = false;
+            ytmDetailLoadingMore.value = false;
+            const requestMeta = ytmDetailRequestMeta || {
+                append: false,
+                requestedLimit: 0,
+                previousCount: 0,
+                detailRequest: ytmActiveDetailRequest.value,
+                retry: null,
+            };
+            if (payload.ok !== true) {
+                if (requestMeta.append) {
+                    ytmDetailCanLoadMore.value = false;
+                } else {
+                    const previousView = ytmNavigationStack.value.pop();
+                    if (previousView) restoreYtmViewState(previousView);
+                }
+                setYtmErrorState({
+                    code: String(payload?.error?.code || 'ytmusic_failed').trim(),
+                    scope: 'detail',
+                    append: !!requestMeta.append,
+                    retry: requestMeta.retry || {
+                        type: 'detail',
+                        detailRequest: requestMeta.detailRequest,
+                        append: !!requestMeta.append,
+                        limitOverride: requestMeta.requestedLimit,
+                    },
+                });
+                ytmDetailRequestMeta = null;
+                return;
+            }
+            clearYtmErrorState();
+            ytmDetail.value = payload.detail && typeof payload.detail === 'object' ? payload.detail : null;
+            ytmViewMode.value = 'detail';
+            ytmDetailLimit.value = requestMeta.requestedLimit;
+            ytmActiveDetailRequest.value = requestMeta.detailRequest || ytmActiveDetailRequest.value;
+            const totalCount = countYtmDetailItems(ytmDetail.value);
+            const paginatable = canPaginateYtmDetail(ytmDetail.value, ytmActiveDetailRequest.value);
+            if (!paginatable || totalCount <= 0) {
+                ytmDetailCanLoadMore.value = false;
+                ytmDetailReachedEnd.value = false;
+                ytmDetailRequestMeta = null;
+                return;
+            }
+            if (requestMeta.append) {
+                const hasGrowth = totalCount > requestMeta.previousCount;
+                ytmDetailReachedEnd.value = !hasGrowth || requestMeta.requestedLimit >= YTM_DETAIL_MAX_LIMIT || totalCount < requestMeta.requestedLimit;
+                ytmDetailCanLoadMore.value = hasGrowth && requestMeta.requestedLimit < YTM_DETAIL_MAX_LIMIT && totalCount >= requestMeta.requestedLimit;
+            } else {
+                ytmDetailReachedEnd.value = totalCount < requestMeta.requestedLimit;
+                ytmDetailCanLoadMore.value = !ytmDetailReachedEnd.value && requestMeta.requestedLimit < YTM_DETAIL_MAX_LIMIT;
+            }
+            ytmDetailRequestMeta = null;
+        });
+
         socket.on('parse_result', (result) => {
             if (result && result.list) {
                 if (result.list.length === 1) {
-                    socket.emit('add_batch_songs', { songs: result.list, requester: nickname.value });
+                    queueSongs(result.list, { keepBusyState: true });
                 } else {
-                    playlistItems.value = result.list;
-                    selectedItems.value = new Set(result.list.map((_, i) => i));
-                    showPlaylistModal.value = true;
-                    isAdding.value = false;
+                    openSongSelection(result.list);
                 }
             } else {
                 isAdding.value = false;
@@ -477,6 +1241,15 @@ createApp({
             autoProcessKaraoke, toggleAutoProcess, karaokeAvailable,
             showPlaylistModal, playlistItems, selectedItems, isAllSelected,
             closePlaylistModal, toggleItem, toggleSelectAll, confirmAddBatch,
+            showYtmSearch, openYtmSearch, closeYtmSearch,
+            ytmQuery, ytmFilter, ytmFilterOptions, ytmSections, ytmDetail,
+            ytmViewMode, ytmLoading, ytmDetailLoading, ytmHasSearched, ytmCanGoBack,
+            ytmHasVisibleResults, ytmCanLoadMoreCurrent, ytmReachedEndCurrent, ytmLoadingMoreCurrent, ytmErrorState,
+            onYtmQueryInput, submitYtmSearch, changeYtmFilter, goBackYtmView,
+            getYtmSectionTitle, getYtmItemTypeLabel, openYtmItem, openYtmSection,
+            getYtmTrackArtistLinks, getYtmTrackAlbumLink, hasYtmTrackMetaLinks, openYtmArtistRef, openYtmAlbumRef,
+            getYtmErrorTitle, getYtmErrorHint, getYtmLoadedAllText, retryYtmRequest,
+            queueSingleYtmTrack, openYtmBatchSelection, queueYtmDetailTracks, loadMoreYtmResults, onYtmResultsScroll,
             showAdvancedSettings, advancedConfig, openAdvancedSettings, closeAdvancedSettings, saveAdvancedSettings, restoreAdvancedDefaults,
             getQueueProgressStyle,
             showTutorialOverlay, tutorialStep, startTutorial, endTutorial, nextStep, prevStep,

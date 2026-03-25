@@ -15,6 +15,11 @@ const { queueKaraokeProcessing, queueAllReadySongsForKaraoke, processNextKaraoke
 const { fetchUrlInfo } = require('./src/services/fetcher');
 const { getLyricsBySongId, invalidateLyricsSession } = require('./src/services/lyrics');
 const { cleanupRuntimeArtifacts } = require('./src/services/maintenance');
+const {
+    searchYouTubeMusic,
+    getYouTubeMusicDetail,
+    serializeYtMusicError,
+} = require('./src/services/ytmusicSearch');
 
 const ALLOWED_LYRICS_SOURCES = new Set(['auto', 'ytmusic', 'apple_music', 'qq_music', 'musixmatch', 'lrclib']);
 const ALLOWED_QUEUE_ACTIONS = new Set(['delete', 'top']);
@@ -51,7 +56,15 @@ const io = new Server(server, { cors: { origin: '*' } });
 
 state.setIO(io);
 
-app.use(express.static(path.join(ROOT_DIR, 'public')));
+app.use(express.static(path.join(ROOT_DIR, 'public'), {
+    setHeaders: (res, filePath) => {
+        if (/\.(html|js|css)$/i.test(filePath)) {
+            res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+            res.setHeader('Pragma', 'no-cache');
+            res.setHeader('Expires', '0');
+        }
+    },
+}));
 app.use(express.json({ limit: '256kb' }));
 app.use('/downloads', express.static(DOWNLOAD_DIR));
 
@@ -345,6 +358,85 @@ io.on('connection', async (socket) => {
         state.emitSync();
         processDownloadQueue();
     }, 'Failed to add song');
+
+    wrapSocketHandler(socket, 'ytmusic_search', async (payload) => {
+        const requestId = payload && payload.requestId ? payload.requestId : null;
+        const query = payload && typeof payload.query === 'string' ? payload.query.trim() : '';
+
+        if (!query) {
+            socket.emit('ytmusic_search_result', {
+                requestId,
+                ok: true,
+                query: '',
+                filter: 'all',
+                sections: [],
+                suggestions: [],
+            });
+            return;
+        }
+
+        try {
+            const result = await searchYouTubeMusic(query, {
+                filter: payload && payload.filter,
+                limit: payload && payload.limit,
+                language: payload && payload.language,
+            });
+            socket.emit('ytmusic_search_result', {
+                requestId,
+                ok: true,
+                ...result,
+            });
+        } catch (error) {
+            const normalizedError = serializeYtMusicError(error);
+            logger.warn('YTMusic', 'Search request failed', {
+                socketId: socket.id,
+                requestId,
+                query,
+                error: normalizedError,
+            });
+            socket.emit('ytmusic_search_result', {
+                requestId,
+                ok: false,
+                error: normalizedError,
+                query,
+                filter: payload && typeof payload.filter === 'string' ? payload.filter : 'all',
+                sections: [],
+                suggestions: [],
+            });
+            emitSocketError(socket, normalizedError.message, normalizedError.details, normalizedError.code);
+        }
+    }, 'Failed to search YouTube Music');
+
+    wrapSocketHandler(socket, 'ytmusic_get_detail', async (payload) => {
+        const requestId = payload && payload.requestId ? payload.requestId : null;
+        const detailRequest = payload && payload.detail && typeof payload.detail === 'object' ? payload.detail : {};
+
+        try {
+            const detail = await getYouTubeMusicDetail({
+                ...detailRequest,
+                language: detailRequest.language || (payload && payload.language),
+            });
+            socket.emit('ytmusic_detail_result', {
+                requestId,
+                ok: true,
+                detail,
+            });
+        } catch (error) {
+            const normalizedError = serializeYtMusicError(error);
+            logger.warn('YTMusic', 'Detail request failed', {
+                socketId: socket.id,
+                requestId,
+                detailRequest: summarizePayload(detailRequest),
+                error: normalizedError,
+            });
+            socket.emit('ytmusic_detail_result', {
+                requestId,
+                ok: false,
+                error: normalizedError,
+            });
+            emitSocketError(socket, normalizedError.message, normalizedError.details, normalizedError.code);
+        }
+    }, 'Failed to load YouTube Music detail');
 
     wrapSocketHandler(socket, 'readd_history', async (historyItem) => {
         if (!historyItem || typeof historyItem !== 'object') {
