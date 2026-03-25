@@ -518,6 +518,9 @@ createApp({
                     // Just update the offset for when play resumes
                     audioManager.startOffset = art.currentTime;
                 }
+                if (isAMLLMode.value) {
+                    amllManager.seek(art.currentTime);
+                }
                 syncLyricsToPlayback();
             });
 

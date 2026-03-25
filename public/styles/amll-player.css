@@ -186,20 +186,21 @@
 .amll-agent-indicator {
     display: inline-flex;
     align-items: center;
-    min-height: 2rem;
-    padding: 0.35rem 0.8rem;
+    min-height: 1.8rem;
+    padding: 0.25rem 0.75rem;
     border-radius: 999px;
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    backdrop-filter: blur(18px);
-    color: rgba(255, 255, 255, 0.72);
-    font-size: 0.78rem;
-    font-weight: 700;
-    letter-spacing: 0.12em;
+    background: rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(25px) saturate(1.8);
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.15em;
     text-transform: uppercase;
     opacity: 0;
-    transform: translateY(-6px);
-    transition: opacity 0.25s ease, transform 0.25s ease;
+    transform: translateY(-8px);
+    transition: opacity 0.4s cubic-bezier(0.23, 1, 0.32, 1), transform 0.4s cubic-bezier(0.23, 1, 0.32, 1);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
 }
 
 .amll-section-indicator.is-visible,
@@ -266,6 +267,40 @@
     letter-spacing: -0.01em;
 }
 
+.amll-lyrics-line.amll-instrumental {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    padding: 1.5em 0;
+}
+
+.amll-instrumental-dots {
+    display: flex;
+    gap: 1.2rem;
+    padding-left: 0.5rem;
+}
+
+.amll-instrumental-dot {
+    width: 0.8rem;
+    height: 0.8rem;
+    background-color: rgba(255, 255, 255, 0.15);
+    border-radius: 50%;
+    transition: background-color 0.4s ease, transform 0.4s ease;
+}
+
+.amll-active.amll-instrumental .amll-instrumental-dot {
+    background-color: rgba(255, 255, 255, 0.5);
+    animation: amll-dot-pulse 1.5s infinite ease-in-out;
+}
+
+.amll-active.amll-instrumental .amll-instrumental-dot:nth-child(2) { animation-delay: 0.2s; }
+.amll-active.amll-instrumental .amll-instrumental-dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes amll-dot-pulse {
+    0%, 100% { transform: scale(1); opacity: 0.5; }
+    50% { transform: scale(1.3); opacity: 1; }
+}
+
 .amll-lyrics-line.amll-opposite-turn {
     margin-left: auto;
     text-align: right;
@@ -292,7 +327,9 @@
 }
 
 .amll-line-main,
-.amll-line-bg {
+.amll-line-bg,
+.amll-line-romanization,
+.amll-line-translation {
     display: block;
     white-space: pre-wrap;
     word-break: keep-all;
@@ -307,11 +344,38 @@
     letter-spacing: 0.02em;
 }
 
+.amll-line-romanization {
+    font-size: 0.35em;
+    line-height: 1.1;
+    font-weight: 600;
+    margin-bottom: 0.2em;
+    color: rgba(255, 255, 255, 0.2);
+    letter-spacing: 0.01em;
+}
+
+.amll-line-translation {
+    font-size: 0.45em;
+    line-height: 1.2;
+    font-weight: 500;
+    margin-top: 0.1em;
+    color: rgba(255, 255, 255, 0.24);
+}
+
 .amll-lyrics-line.amll-active .amll-line-bg {
     color: rgba(255, 255, 255, 0.42);
 }
 
-.amll-lyrics-line.amll-opposite-turn .amll-line-bg {
+.amll-lyrics-line.amll-active .amll-line-romanization {
+    color: rgba(255, 255, 255, 0.45);
+}
+
+.amll-lyrics-line.amll-active .amll-line-translation {
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.amll-lyrics-line.amll-opposite-turn .amll-line-bg,
+.amll-lyrics-line.amll-opposite-turn .amll-line-romanization,
+.amll-lyrics-line.amll-opposite-turn .amll-line-translation {
     text-align: right;
 }
 
@@ -323,7 +387,9 @@
 }
 
 .amll-word,
-.amll-bg-word {
+.amll-bg-word,
+.amll-rom-word,
+.amll-trans-word {
     display: inline-grid;
     grid-template-areas: "word";
     position: relative;
@@ -340,14 +406,22 @@
 .amll-word-fill,
 .amll-bg-word-base,
 .amll-bg-word-fill-wrap,
-.amll-bg-word-fill {
+.amll-bg-word-fill,
+.amll-rom-word-base,
+.amll-rom-word-fill-wrap,
+.amll-rom-word-fill,
+.amll-trans-word-base,
+.amll-trans-word-fill-wrap,
+.amll-trans-word-fill {
     grid-area: word;
     display: block;
     white-space: pre;
 }
 
 .amll-word-base,
-.amll-bg-word-base {
+.amll-bg-word-base,
+.amll-rom-word-base,
+.amll-trans-word-base {
     transition: color 0.2s ease-out, opacity 0.2s ease-out;
 }
 
@@ -359,8 +433,18 @@
     color: rgba(255, 255, 255, 0.22);
 }
 
+.amll-rom-word-base {
+    color: rgba(255, 255, 255, 0.18);
+}
+
+.amll-trans-word-base {
+    color: rgba(255, 255, 255, 0.22);
+}
+
 .amll-word-fill-wrap,
-.amll-bg-word-fill-wrap {
+.amll-bg-word-fill-wrap,
+.amll-rom-word-fill-wrap,
+.amll-trans-word-fill-wrap {
     width: calc(var(--word-progress, 0) * 100%);
     max-width: 100%;
     overflow: hidden;
@@ -376,7 +460,9 @@
 }
 
 .amll-lyrics-line.amll-active .amll-word.amll-word-singing .amll-word-fill-wrap,
-.amll-lyrics-line.amll-active .amll-bg-word.amll-word-singing .amll-bg-word-fill-wrap {
+.amll-lyrics-line.amll-active .amll-bg-word.amll-word-singing .amll-bg-word-fill-wrap,
+.amll-lyrics-line.amll-active .amll-rom-word.amll-word-singing .amll-rom-word-fill-wrap,
+.amll-lyrics-line.amll-active .amll-trans-word.amll-word-singing .amll-trans-word-fill-wrap {
     -webkit-mask-image: linear-gradient(
         to right,
         rgba(0, 0, 0, 1) 0%,
@@ -392,7 +478,9 @@
 }
 
 .amll-word-fill,
-.amll-bg-word-fill {
+.amll-bg-word-fill,
+.amll-rom-word-fill,
+.amll-trans-word-fill {
     color: rgba(255, 255, 255, 0.99);
     text-shadow:
         0 0 0.32em rgba(255, 255, 255, 0.26),
@@ -406,6 +494,14 @@
         0 0 0.8em rgba(255, 255, 255, 0.08);
 }
 
+.amll-rom-word-fill {
+    color: rgba(255, 255, 255, 0.72);
+}
+
+.amll-trans-word-fill {
+    color: rgba(255, 255, 255, 0.85);
+}
+
 /* Active line words base state */
 .amll-lyrics-line.amll-active .amll-word-base {
     color: rgba(255, 255, 255, 0.24);
@@ -415,61 +511,98 @@
     color: rgba(255, 255, 255, 0.26);
 }
 
-.amll-lyrics-line.amll-active .amll-word-fill-wrap,
-.amll-lyrics-line.amll-active .amll-bg-word-fill-wrap {
-    opacity: 1;
+.amll-lyrics-line.amll-active .amll-rom-word-base {
+    color: rgba(255, 255, 255, 0.2);
 }
 
-/* Word being sung (current) — fills progressively with brightness */
-.amll-lyrics-line.amll-active .amll-word.amll-word-singing {
-    transform: translateY(-0.02em) scale(1.012);
-    filter: brightness(1.06);
+.amll-lyrics-line.amll-active .amll-trans-word-base {
+    color: rgba(255, 255, 255, 0.22);
 }
 
-.amll-lyrics-line.amll-active .amll-bg-word.amll-word-singing {
-    filter: brightness(1.04);
+.amll-word-fill-wrap,
+.amll-bg-word-fill-wrap,
+.amll-rom-word-fill-wrap,
+.amll-trans-word-fill-wrap {
+    opacity: 1; /* Always allow fill-wrap to be visible if width > 0 */
 }
 
-/* Word fully sung */
+/* Word being sung (current) or already sung within the active line — maintain height and scale */
+.amll-lyrics-line.amll-active .amll-word.amll-word-singing,
+.amll-lyrics-line.amll-active .amll-word.amll-word-sung {
+    transform: translateY(-0.05em) scale(1.03);
+    filter: brightness(1.1);
+}
+
+.amll-lyrics-line.amll-active .amll-bg-word.amll-word-singing,
+.amll-lyrics-line.amll-active .amll-bg-word.amll-word-sung,
+.amll-lyrics-line.amll-active .amll-rom-word.amll-word-singing,
+.amll-lyrics-line.amll-active .amll-rom-word.amll-word-sung,
+.amll-lyrics-line.amll-active .amll-trans-word.amll-word-singing,
+.amll-lyrics-line.amll-active .amll-trans-word.amll-word-sung {
+    filter: brightness(1.08);
+}
+
 .amll-lyrics-line.amll-active .amll-word.amll-word-sung .amll-word-base {
     color: rgba(255, 255, 255, 0.08);
 }
 
-.amll-lyrics-line.amll-active .amll-bg-word.amll-word-sung .amll-bg-word-base {
+.amll-lyrics-line.amll-active .amll-bg-word.amll-word-sung .amll-bg-word-base,
+.amll-lyrics-line.amll-active .amll-rom-word.amll-word-sung .amll-rom-word-base,
+.amll-lyrics-line.amll-active .amll-trans-word.amll-word-sung .amll-trans-word-base {
     color: rgba(255, 255, 255, 0.06);
 }
 
 /* Word upcoming */
-.amll-lyrics-line.amll-active .amll-word.amll-word-upcoming .amll-word-fill-wrap,
-.amll-lyrics-line.amll-active .amll-bg-word.amll-word-upcoming .amll-bg-word-fill-wrap {
+.amll-word.amll-word-upcoming .amll-word-fill-wrap,
+.amll-bg-word.amll-word-upcoming .amll-bg-word-fill-wrap,
+.amll-rom-word.amll-word-upcoming .amll-rom-word-fill-wrap,
+.amll-trans-word.amll-word-upcoming .amll-trans-word-fill-wrap {
     opacity: 0;
 }
 
-.amll-lyrics-line.amll-active .amll-word.amll-word-sung .amll-word-fill-wrap,
-.amll-lyrics-line.amll-active .amll-bg-word.amll-word-sung .amll-bg-word-fill-wrap {
-    width: 100%;
+.amll-word.amll-word-sung .amll-word-fill-wrap,
+.amll-bg-word.amll-word-sung .amll-bg-word-fill-wrap,
+.amll-rom-word.amll-word-sung .amll-rom-word-fill-wrap,
+.amll-trans-word.amll-word-sung .amll-trans-word-fill-wrap {
+    width: 100% !important;
     opacity: 1;
     -webkit-mask-image: none;
     mask-image: none;
 }
 
-/* Non-active line words — all same dim color */
+/* Non-active line words — all same dim color, NO animation of width back to 0 */
 .amll-lyrics-line:not(.amll-active) .amll-word,
-.amll-lyrics-line:not(.amll-active) .amll-bg-word {
+.amll-lyrics-line:not(.amll-active) .amll-bg-word,
+.amll-lyrics-line:not(.amll-active) .amll-rom-word,
+.amll-lyrics-line:not(.amll-active) .amll-trans-word {
     filter: none;
     transform: none;
 }
 
 .amll-lyrics-line:not(.amll-active) .amll-word-base,
-.amll-lyrics-line:not(.amll-active) .amll-bg-word-base {
+.amll-lyrics-line:not(.amll-active) .amll-bg-word-base,
+.amll-lyrics-line:not(.amll-active) .amll-rom-word-base,
+.amll-lyrics-line:not(.amll-active) .amll-trans-word-base {
     color: inherit;
     opacity: 1;
 }
 
 .amll-lyrics-line:not(.amll-active) .amll-word-fill-wrap,
-.amll-lyrics-line:not(.amll-active) .amll-bg-word-fill-wrap {
-    width: 0;
+.amll-lyrics-line:not(.amll-active) .amll-bg-word-fill-wrap,
+.amll-lyrics-line:not(.amll-active) .amll-rom-word-fill-wrap,
+.amll-lyrics-line:not(.amll-active) .amll-trans-word-fill-wrap {
+    /* We don't force width: 0 here to prevent the "swipe back" animation.
+       Instead, we just hide them or rely on the parent line's dimming.
+       If it was already sung, it stays width: 100%. */
     opacity: 0;
+}
+
+/* If the line is passed, the words that were sung should remain visually "full" but dimmed by the line's opacity */
+.amll-lyrics-line.amll-passed .amll-word-fill-wrap,
+.amll-lyrics-line.amll-passed .amll-bg-word-fill-wrap,
+.amll-lyrics-line.amll-passed .amll-rom-word-fill-wrap,
+.amll-lyrics-line.amll-passed .amll-trans-word-fill-wrap {
+    opacity: 1;
 }
 
 /* ── Artplayer Integration ──────────────────────────────── */

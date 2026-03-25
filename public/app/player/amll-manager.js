@@ -8,6 +8,8 @@
  * - Play/pause animation states for background
  */
 
+import { AMLLLyricPlayer } from './amll-lyric-player.js';
+
 // ── Color Extraction ───────────────────────────────────────
 
 const extractDominantColors = (imageSource, numColors = 5) => {
@@ -25,35 +27,54 @@ const extractDominantColors = (imageSource, numColors = 5) => {
                 const buckets = new Map();
 
                 for (let i = 0; i < data.length; i += 16) { // sample every 4th pixel
-                    const r = Math.round(data[i] / 32) * 32;
-                    const g = Math.round(data[i + 1] / 32) * 32;
-                    const b = Math.round(data[i + 2] / 32) * 32;
+                    const r = data[i];
+                    const g = data[i + 1];
+                    const b = data[i + 2];
                     const a = data[i + 3];
                     if (a < 128) continue;
 
-                    const key = `${r},${g},${b}`;
+                    // Skip greyish colors if possible
+                    const max = Math.max(r, g, b);
+                    const min = Math.min(r, g, b);
+                    if (max - min < 30) continue; 
+
+                    const key = `${Math.round(r/16)*16},${Math.round(g/16)*16},${Math.round(b/16)*16}`;
                     buckets.set(key, (buckets.get(key) || 0) + 1);
                 }
 
-                const sorted = [...buckets.entries()]
+                let sorted = [...buckets.entries()]
                     .sort((a, b) => b[1] - a[1])
-                    .slice(0, numColors * 3)
                     .map(([key]) => {
                         const [r, g, b] = key.split(',').map(Number);
                         return { r, g, b };
                     });
 
+                // If we didn't get enough vibrant colors, include the ones we skipped
+                if (sorted.length < numColors) {
+                    for (let i = 0; i < data.length; i += 32) {
+                        const r = data[i];
+                        const g = data[i+1];
+                        const b = data[i+2];
+                        const key = `${Math.round(r/16)*16},${Math.round(g/16)*16},${Math.round(b/16)*16}`;
+                        if (!buckets.has(key)) {
+                            sorted.push({r, g, b});
+                            buckets.set(key, 1);
+                        }
+                        if (sorted.length >= numColors * 2) break;
+                    }
+                }
+
                 // Filter out colors too close to each other and too dark/bright
                 const filtered = [];
                 for (const color of sorted) {
                     const brightness = (color.r * 299 + color.g * 587 + color.b * 114) / 1000;
-                    if (brightness < 15 || brightness > 245) continue;
+                    if (brightness < 20 || brightness > 230) continue;
 
                     const tooClose = filtered.some((existing) => {
                         const dr = existing.r - color.r;
                         const dg = existing.g - color.g;
                         const db = existing.b - color.b;
-                        return Math.sqrt(dr * dr + dg * dg + db * db) < 60;
+                        return Math.sqrt(dr * dr + dg * dg + db * db) < 50;
                     });
 
                     if (!tooClose) {
@@ -160,16 +181,24 @@ class MeshGradientBackground {
 
     setColors(colors) {
         this.colors = colors;
-        this.blobs = colors.map((color, i) => ({
-            x: 0.2 + Math.random() * 0.6,
-            y: 0.2 + Math.random() * 0.6,
-            radius: 0.25 + Math.random() * 0.2,
-            color: saturateColor(color, 1.2),
-            vx: (Math.random() - 0.5) * 0.0003,
-            vy: (Math.random() - 0.5) * 0.0003,
-            phase: i * (Math.PI * 2 / colors.length),
-            speed: 0.0002 + Math.random() * 0.0003,
-        }));
+        this.blobs = [];
+        
+        // Add more blobs for a richer fluid effect
+        const numBlobs = Math.max(8, colors.length * 2);
+        for (let i = 0; i < numBlobs; i++) {
+            const color = colors[i % colors.length];
+            this.blobs.push({
+                x: Math.random(),
+                y: Math.random(),
+                radius: 0.3 + Math.random() * 0.4,
+                color: saturateColor(color, 1.4),
+                vx: (Math.random() - 0.5) * 0.0004,
+                vy: (Math.random() - 0.5) * 0.0004,
+                phase: Math.random() * Math.PI * 2,
+                speed: 0.0001 + Math.random() * 0.0002,
+                baseRadius: 0.3 + Math.random() * 0.4
+            });
+        }
         this._draw();
     }
 
@@ -178,30 +207,34 @@ class MeshGradientBackground {
         const { ctx, width, height } = this;
 
         // Dark base
-        ctx.fillStyle = '#0a0a0a';
+        ctx.fillStyle = '#050505';
         ctx.fillRect(0, 0, width, height);
 
-        // Draw blobs
+        // Use lighter blend mode for more vibrant fluid effect
+        ctx.globalCompositeOperation = 'screen';
+
         for (const blob of this.blobs) {
             const x = blob.x * width;
             const y = blob.y * height;
             const r = blob.radius * Math.min(width, height);
 
             const gradient = ctx.createRadialGradient(x, y, 0, x, y, r);
-            gradient.addColorStop(0, rgbToString(blob.color, 0.7));
-            gradient.addColorStop(0.5, rgbToString(blob.color, 0.3));
+            gradient.addColorStop(0, rgbToString(blob.color, 0.6));
+            gradient.addColorStop(0.4, rgbToString(blob.color, 0.25));
             gradient.addColorStop(1, rgbToString(blob.color, 0));
 
             ctx.fillStyle = gradient;
             ctx.fillRect(0, 0, width, height);
         }
+
+        ctx.globalCompositeOperation = 'source-over';
     }
 
     _animate(timestamp) {
         if (!this.isPlaying) return;
 
         const delta = timestamp - this.lastTime;
-        if (delta < 33) { // cap at ~30fps for background
+        if (delta < 16) { // target 60fps for background if possible
             this.animationId = requestAnimationFrame(this._animate);
             return;
         }
@@ -209,14 +242,19 @@ class MeshGradientBackground {
 
         for (const blob of this.blobs) {
             blob.phase += blob.speed * delta;
-            blob.x += blob.vx * delta + Math.sin(blob.phase) * 0.0001 * delta;
-            blob.y += blob.vy * delta + Math.cos(blob.phase * 0.7) * 0.0001 * delta;
+            
+            // Smoother movement
+            blob.x += blob.vx * delta + Math.sin(blob.phase) * 0.00015 * delta;
+            blob.y += blob.vy * delta + Math.cos(blob.phase * 0.8) * 0.00015 * delta;
+            
+            // Subtle radius pulse
+            blob.radius = blob.baseRadius + Math.sin(blob.phase * 0.5) * 0.05;
 
-            // Bounce instead of wrap to prevent visual twitching
-            if (blob.x < -0.2) { blob.x = -0.2; blob.vx = Math.abs(blob.vx); }
-            if (blob.x > 1.2) { blob.x = 1.2; blob.vx = -Math.abs(blob.vx); }
-            if (blob.y < -0.2) { blob.y = -0.2; blob.vy = Math.abs(blob.vy); }
-            if (blob.y > 1.2) { blob.y = 1.2; blob.vy = -Math.abs(blob.vy); }
+            // Bounce with soft edges
+            if (blob.x < -0.3) { blob.x = -0.3; blob.vx = Math.abs(blob.vx); }
+            if (blob.x > 1.3) { blob.x = 1.3; blob.vx = -Math.abs(blob.vx); }
+            if (blob.y < -0.3) { blob.y = -0.3; blob.vy = Math.abs(blob.vy); }
+            if (blob.y > 1.3) { blob.y = 1.3; blob.vy = -Math.abs(blob.vy); }
         }
 
         this._draw();
@@ -304,7 +342,35 @@ class AppleMusicLyrics {
         topSpacer.className = 'amll-lyrics-spacer';
         this.innerContainer.appendChild(topSpacer);
 
-        for (const line of lyricsData.lines) {
+        let lastEndTime = 0;
+        for (let i = 0; i < lyricsData.lines.length; i++) {
+            const line = lyricsData.lines[i];
+            
+            // Insert instrumental indicator if there's a large gap (> 5 seconds)
+            if (line.start - lastEndTime > 5) {
+                const instEl = document.createElement('div');
+                instEl.className = 'amll-lyrics-line amll-instrumental';
+                instEl.dataset.start = lastEndTime;
+                instEl.dataset.end = line.start;
+                
+                const dotContainer = document.createElement('div');
+                dotContainer.className = 'amll-instrumental-dots';
+                for (let j = 0; j < 3; j++) {
+                    const dot = document.createElement('span');
+                    dot.className = 'amll-instrumental-dot';
+                    dotContainer.appendChild(dot);
+                }
+                instEl.appendChild(dotContainer);
+                
+                this.innerContainer.appendChild(instEl);
+                this.lineElements.push(instEl);
+                this.lines.push({
+                    start: lastEndTime,
+                    end: line.start,
+                    isInstrumental: true
+                });
+            }
+
             const lineData = {
                 id: line.id,
                 start: line.start,
@@ -313,6 +379,8 @@ class AppleMusicLyrics {
                 words: Array.isArray(line.words) ? line.words : null,
                 backgroundText: line.backgroundText || '',
                 backgroundWords: Array.isArray(line.backgroundWords) ? line.backgroundWords : null,
+                translations: Array.isArray(line.translations) ? line.translations : [],
+                romanizations: Array.isArray(line.romanizations) ? line.romanizations : [],
                 section: line.section || '',
                 agent: line.agent || '',
                 agentName: line.agentName || '',
@@ -327,6 +395,8 @@ class AppleMusicLyrics {
                 el.classList.add('amll-opposite-turn');
                 this.container.classList.add('amll-has-duet-lines');
             }
+
+            // 1. Background lyrics (Interlaced)
             if (lineData.backgroundText || (lineData.backgroundWords && lineData.backgroundWords.length > 0)) {
                 el.classList.add('amll-has-background');
                 const bgEl = document.createElement('div');
@@ -335,13 +405,37 @@ class AppleMusicLyrics {
                 el.appendChild(bgEl);
             }
 
+            // 2. Main lyrics
             const mainEl = document.createElement('div');
             mainEl.className = 'amll-line-main';
             this._renderWordTrack(mainEl, lineData.words, lineData.text, 'amll-word');
             el.appendChild(mainEl);
 
+            // 3. Romanizations
+            if (lineData.romanizations.length > 0) {
+                el.classList.add('amll-has-romanization');
+                for (const rom of lineData.romanizations) {
+                    const romEl = document.createElement('div');
+                    romEl.className = 'amll-line-romanization';
+                    this._renderWordTrack(romEl, rom.words, rom.text, 'amll-rom-word');
+                    el.appendChild(romEl);
+                }
+            }
+
+            // 4. Translations
+            if (lineData.translations.length > 0) {
+                el.classList.add('amll-has-translation');
+                for (const trans of lineData.translations) {
+                    const transEl = document.createElement('div');
+                    transEl.className = 'amll-line-translation';
+                    this._renderWordTrack(transEl, trans.words, trans.text, 'amll-trans-word');
+                    el.appendChild(transEl);
+                }
+            }
+
             this.innerContainer.appendChild(el);
             this.lineElements.push(el);
+            lastEndTime = line.end;
         }
 
         // Add bottom spacer
@@ -444,41 +538,48 @@ class AppleMusicLyrics {
 
     _updateActiveState() {
         const t = this.currentTime;
-        let activeIndex = -1;
+        const activeIndices = [];
 
-        // Find the active line
+        // Find all active lines (supporting overlaps)
         for (let i = 0; i < this.lines.length; i++) {
             if (t >= this.lines[i].start && t < this.lines[i].end) {
-                activeIndex = i;
-                break;
+                activeIndices.push(i);
             }
         }
 
-        // If between lines, show the previous line as passed
-        if (activeIndex === -1) {
+        // If no active line, find the last passed one for reference
+        let referenceIndex = activeIndices.length > 0 ? activeIndices[0] : -1;
+        if (referenceIndex === -1) {
             for (let i = this.lines.length - 1; i >= 0; i--) {
                 if (t >= this.lines[i].end) {
-                    activeIndex = i;
+                    referenceIndex = i;
                     break;
                 }
             }
-        }
-
-        // If before all lines, peek at first
-        if (activeIndex === -1 && this.lines.length > 0 && t < this.lines[0].start) {
-            activeIndex = -1; // no active line yet
         }
 
         // Update class states for each line
         for (let i = 0; i < this.lineElements.length; i++) {
             const el = this.lineElements[i];
             const line = this.lines[i];
-            const isActive = i === activeIndex;
-            const isPassed = i < activeIndex;
-            const isUpcoming = i > activeIndex;
-            const distance = Math.abs(i - activeIndex);
+            const isActive = activeIndices.includes(i);
+            const isPassed = i < (activeIndices.length > 0 ? activeIndices[0] : (referenceIndex + 1)) && !isActive;
+            const isUpcoming = i > (activeIndices.length > 0 ? activeIndices[activeIndices.length - 1] : referenceIndex) && !isActive;
+            
+            // Calculate distance for blur effect
+            let distance = 0;
+            if (!isActive) {
+                if (activeIndices.length > 0) {
+                    distance = Math.min(...activeIndices.map(idx => Math.abs(i - idx)));
+                } else {
+                    distance = Math.abs(i - referenceIndex);
+                }
+            }
+
             const mainWords = el.querySelectorAll('.amll-word');
             const bgWords = el.querySelectorAll('.amll-bg-word');
+            const romWords = el.querySelectorAll('.amll-rom-word');
+            const transWords = el.querySelectorAll('.amll-trans-word');
 
             el.classList.toggle('amll-active', isActive);
             el.classList.toggle('amll-passed', isPassed);
@@ -488,11 +589,11 @@ class AppleMusicLyrics {
             if (isActive) {
                 el.style.filter = 'blur(0px)';
                 el.style.opacity = '1';
-                el.style.transform = 'scale(1)';
+                el.style.transform = 'scale(1.02)'; // Slightly larger active line
             } else if (distance <= 1) {
                 el.style.filter = 'blur(0px)';
                 el.style.opacity = isPassed ? '0.3' : '0.45';
-                el.style.transform = 'scale(0.95)';
+                el.style.transform = 'scale(0.96)';
             } else if (distance <= 2) {
                 el.style.filter = 'blur(1.5px)';
                 el.style.opacity = '0.25';
@@ -507,20 +608,45 @@ class AppleMusicLyrics {
                 el.style.transform = 'scale(0.85)';
             }
 
-            if (isActive && line.words && line.words.length > 0) {
+            // Sync words for all lines to ensure correct state (sung/upcoming)
+            // even when lines are not active.
+            if (line.words && line.words.length > 0) {
                 this._syncWordState(mainWords, line.words, t);
             }
-            if (isActive && line.backgroundWords && line.backgroundWords.length > 0) {
+            if (line.backgroundWords && line.backgroundWords.length > 0) {
                 this._syncWordState(bgWords, line.backgroundWords, t);
+            }
+
+            // Sync auxiliary word states if they have word timings
+            if (line.romanizations && line.romanizations.length > 0) {
+                let romWordIndex = 0;
+                for (const rom of line.romanizations) {
+                    if (rom.words && rom.words.length > 0) {
+                        const wordsToSync = Array.from(romWords).slice(romWordIndex, romWordIndex + rom.words.length);
+                        this._syncWordState(wordsToSync, rom.words, t);
+                        romWordIndex += rom.words.length;
+                    }
+                }
+            }
+            if (line.translations && line.translations.length > 0) {
+                let transWordIndex = 0;
+                for (const trans of line.translations) {
+                    if (trans.words && trans.words.length > 0) {
+                        const wordsToSync = Array.from(transWords).slice(transWordIndex, transWordIndex + trans.words.length);
+                        this._syncWordState(wordsToSync, trans.words, t);
+                        transWordIndex += trans.words.length;
+                    }
+                }
             }
         }
 
-        this._updateIndicators(activeIndex >= 0 ? this.lines[activeIndex] : null);
+        const primaryActiveIndex = activeIndices.length > 0 ? activeIndices[0] : -1;
+        this._updateIndicators(primaryActiveIndex >= 0 ? this.lines[primaryActiveIndex] : null);
 
         // Scroll active line into center
-        if (activeIndex !== this.currentLineIndex && activeIndex >= 0 && activeIndex < this.lineElements.length) {
-            this.currentLineIndex = activeIndex;
-            this._scrollToLine(activeIndex);
+        if (primaryActiveIndex !== this.currentLineIndex && primaryActiveIndex >= 0) {
+            this.currentLineIndex = primaryActiveIndex;
+            this._scrollToLine(primaryActiveIndex);
         }
         this._stepScrollSpring();
     }
@@ -627,7 +753,7 @@ export class AMLLManager {
 
         // Initialize sub-components now that elements are in the DOM and have bounds
         this.background = new MeshGradientBackground(this.bgContainer);
-        this.lyrics = new AppleMusicLyrics(this.lyricsContainer);
+        this.lyrics = new AMLLLyricPlayer(this.lyricsContainer);
     }
 
     async setAlbumArt(videoElement, picUrl) {
@@ -698,6 +824,11 @@ export class AMLLManager {
         this.lyrics.setCurrentTime(seconds);
     }
 
+    seek(seconds) {
+        if (!this.lyrics) return;
+        this.lyrics.seek(seconds);
+    }
+
     setPlaying(playing) {
         this.isPlaying = playing;
         if (this.lyrics) this.lyrics.setPlaying(playing);
@@ -724,6 +855,7 @@ export class AMLLManager {
         if (this.overlay) {
             this.overlay.classList.remove('amll-visible');
         }
+        if (this.lyrics) this.lyrics.setPlaying(false);
         if (this.background) this.background.pause();
     }
 

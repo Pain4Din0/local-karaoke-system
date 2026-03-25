@@ -1,0 +1,225 @@
+.amll-lyric-player {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    max-width: 100%;
+    color: var(--amll-lp-color, white);
+    contain: strict;
+    mix-blend-mode: plus-lighter;
+    font-size: var(--amll-lp-font-size, max(max(5vh, 2.5vw), 12px));
+}
+
+.amll-lyric-player.dom {
+    --amll-lp-line-width-aspect: 0.8;
+    --amll-lp-line-padding-x: 1em;
+    --amll-lp-bg-line-scale: 0.7;
+    position: relative;
+    user-select: none;
+    box-sizing: content-box;
+    z-index: 1;
+    line-height: 1.2em;
+}
+
+.amll-lp-line {
+    --bright-mask-alpha: 1;
+    --dark-mask-alpha: 0.2;
+    position: absolute;
+    left: 0;
+    top: 0;
+    backface-visibility: hidden;
+    transform-origin: left;
+    width: 100%;
+    min-width: 100%;
+    max-width: 100%;
+    height: fit-content;
+    padding: 0.5em 1em;
+    padding-left: 1em;
+    padding-right: 1em;
+    contain: content;
+    will-change: transform;
+    transition: opacity 0.25s, filter 0.2s, background-color 0.25s, box-shadow 0.25s;
+    box-sizing: border-box;
+    border-radius: 0.25em;
+}
+
+.amll-lp-line.amll-lp-dirty {
+    opacity: 0;
+    visibility: hidden;
+}
+
+.amll-lp-line:has(> *):hover {
+    background-color: var(--amll-lp-hover-bg-color, #fff1);
+}
+
+.amll-lp-line:has(> *):active {
+    background-color: var(--amll-lp-hover-bg-color, #ffffff05);
+}
+
+.amll-lp-bg-line {
+    opacity: 0.0001;
+    font-size: max(calc(1em * var(--amll-lp-bg-line-scale, 0.7)), 10px);
+    transition: opacity 0.25s, scale 0.5s, filter 0.2s, background-color 0.25s, box-shadow 0.25s;
+    padding: 1vh calc(var(--amll-lp-line-padding-x, 1em) / var(--amll-lp-bg-line-scale, 0.7));
+}
+
+.amll-lp-bg-line.amll-lp-active {
+    transition: opacity 0.5s 0.25s, scale 1.5s cubic-bezier(0, 1, 0, 1) 0.25s, filter 0.2s, background-color 0.25s, box-shadow 0.25s;
+    opacity: 0.4;
+}
+
+.amll-lyric-player:hover .amll-lp-line {
+    filter: unset !important;
+}
+
+.amll-lyric-player.amll-lp-has-duet-line .amll-lp-line:not(.amll-lp-duet-line) {
+    padding-right: 15%;
+}
+
+.amll-lyric-player.amll-lp-has-duet-line .amll-lp-duet-line {
+    padding-left: 15%;
+}
+
+.amll-lyric-player:not(.playing) > .amll-lp-bg-line {
+    opacity: 0.4;
+}
+
+.amll-lp-duet-line {
+    text-align: right;
+    transform-origin: right;
+}
+
+.amll-lp-main-line {
+    transition: opacity 0.3s 0.1s;
+    margin: -1em;
+    padding: 1em;
+    text-wrap: balance;
+    word-break: keep-all;
+    overflow-wrap: break-word;
+}
+
+.amll-lp-main-line span {
+    display: inline-block;
+    text-align: start;
+    vertical-align: bottom;
+}
+
+.amll-lp-main-line .amll-lp-roman-word {
+    font-size: 0.5em;
+    line-height: 1em;
+    display: flex;
+    padding-inline-end: 0.3em;
+}
+
+.amll-lp-main-line .amll-lp-ruby-word {
+    font-size: 0.5em;
+    line-height: 1em;
+    display: flex;
+    justify-content: center;
+    min-height: 1em;
+}
+
+.amll-lp-main-line .amll-lp-word-with-ruby {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    vertical-align: bottom;
+}
+
+.amll-lp-main-line .amll-lp-word-body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.amll-lp-main-line > span,
+.amll-lp-main-line span.amll-lp-emphasize-wrapper {
+    white-space: pre-wrap;
+    display: inline-block;
+    padding: 1em;
+    margin: -1em;
+    will-change: transform;
+    vertical-align: bottom;
+}
+
+.amll-lp-main-line > span.amll-lp-emphasize,
+.amll-lp-main-line span.amll-lp-emphasize-wrapper span.amll-lp-emphasize {
+    padding: 1em;
+    margin: -1em;
+    backface-visibility: hidden;
+}
+
+.amll-lp-main-line > span.amll-lp-emphasize > span,
+.amll-lp-main-line span.amll-lp-emphasize-wrapper span.amll-lp-emphasize > span {
+    padding: 1em;
+    margin: -1em;
+    will-change: transform;
+    backface-visibility: hidden;
+}
+
+.amll-lp-sub-line {
+    font-size: max(0.5em, 10px);
+    line-height: 1.5em;
+    transition: opacity 0.2s 0.25s;
+    opacity: 0.3;
+}
+
+.amll-lp-disable-spring > * {
+    transition: filter 0.25s, transform 0.5s, background-color 0.25s, box-shadow 0.25s;
+}
+
+.amll-lp-interlude-dots {
+    height: clamp(0.5em, 1vh, 3em);
+    transition: opacity 0.25s;
+    transform-origin: center;
+    width: fit-content;
+    padding: 2.5% 0.75em;
+    position: absolute;
+    display: flex;
+    gap: 0.25em;
+    left: 0;
+    opacity: 0;
+}
+
+.amll-lp-interlude-dots.amll-lp-enabled {
+    opacity: 1;
+}
+
+.amll-lp-interlude-dots > * {
+    width: clamp(0.5em, 1vh, 3em);
+    height: clamp(0.5em, 1vh, 3em);
+    display: inline-block;
+    border-radius: 50%;
+    aspect-ratio: 1 / 1;
+    background-color: var(--amll-lp-color, white);
+    margin-right: 4px;
+}
+
+.amll-lp-interlude-dots.amll-lp-duet {
+    right: 0;
+    transform-origin: center;
+}
+
+.amll-lp-tmp-disable-transition {
+    transition: none !important;
+}
+
+@supports (mix-blend-mode: plus-lighter) {
+    .amll-lp-sub-line {
+        opacity: 0.3;
+    }
+}
+
+@media screen and (max-width: 768px) {
+    .amll-lyric-player {
+        --amll-lp-line-width-aspect: 1;
+        --amll-lp-line-padding-x: 0;
+        font-size: var(--amll-lp-font-size, max(8vw, 12px));
+    }
+}
+
+@media screen and (max-width: 500px) {
+    .amll-lp-line {
+        padding-left: 20px;
+        padding-right: 20px;
+    }
+}
