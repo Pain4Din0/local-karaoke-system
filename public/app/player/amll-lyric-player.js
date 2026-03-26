@@ -16,6 +16,7 @@ const STYLE = {
     emphasizeWrapper: 'amll-lp-emphasize-wrapper',
     emphasize: 'amll-lp-emphasize',
     interludeDots: 'amll-lp-interlude-dots',
+    bottomLine: 'amll-lp-bottom-line',
     enabled: 'amll-lp-enabled',
     duet: 'amll-lp-duet',
     active: 'amll-lp-active',
@@ -32,8 +33,6 @@ const DEFAULT_MAIN_LINE_HEIGHT_RATIO = 5;
 const ANIMATION_FRAME_QUANTITY = 32;
 
 const isCJK = (char) => /^[\p{Unified_Ideograph}\u0800-\u9FFC]+$/u.test(char || '');
-
-const eqSet = (xs, ys) => xs.size === ys.size && [...xs].every((x) => ys.has(x));
 
 const derivative = (fn) => {
     const h = 0.001;
@@ -569,6 +568,10 @@ function clamp(min, cur, max) {
     return Math.max(min, Math.min(cur, max));
 }
 
+function createLineEventName(type = 'click') {
+    return type === 'contextmenu' ? 'amll-line-contextmenu' : 'amll-line-click';
+}
+
 class InterludeDots {
     constructor() {
         this.element = document.createElement('div');
@@ -691,15 +694,20 @@ class BottomLineEl {
     constructor(lyricPlayer) {
         this.lyricPlayer = lyricPlayer;
         this.element = document.createElement('div');
+        this.left = 0;
         this.top = 0;
         this.delay = 0;
         this.lineSize = [0, 0];
         this.lastStyle = '';
+        this.isFocused = false;
+        this.blur = 0;
         this.lineTransforms = {
+            posX: new Spring(0),
             posY: new Spring(0),
         };
 
-        this.element.className = STYLE.line;
+        this.element.className = `${STYLE.line} ${STYLE.bottomLine}`;
+        this.element.dataset.bottomLine = 'true';
         this.rebuildStyle();
     }
 
@@ -707,13 +715,35 @@ class BottomLineEl {
         return this.element;
     }
 
-    setTransform(top = this.top, force = false, delay = 0) {
+    show() {
+        this.rebuildStyle();
+    }
+
+    hide() {
+        this.rebuildStyle();
+    }
+
+    setFocused(focused = false) {
+        if (this.isFocused === !!focused) return;
+        this.isFocused = !!focused;
+        if (this.isFocused) {
+            this.element.dataset.focused = 'true';
+        } else {
+            delete this.element.dataset.focused;
+        }
+    }
+
+    setTransform(left = this.left, top = this.top, blur = 0, force = false, delay = 0) {
+        this.left = left;
         this.top = top;
         this.delay = (delay * 1000) | 0;
         if (force || !this.lyricPlayer.getEnableSpring()) {
+            this.blur = Math.min(32, blur);
             if (force) this.element.classList.add(STYLE.tmpDisableTransition);
+            this.lineTransforms.posX.setPosition(left);
             this.lineTransforms.posY.setPosition(top);
-            this.rebuildStyle();
+            if (!this.lyricPlayer.getEnableSpring()) this.show();
+            else this.rebuildStyle();
             if (force) {
                 requestAnimationFrame(() => {
                     this.element.classList.remove(STYLE.tmpDisableTransition);
@@ -721,24 +751,37 @@ class BottomLineEl {
             }
             return;
         }
+        this.blur = Math.min(5, blur);
+        this.lineTransforms.posX.setTargetPosition(left, delay);
         this.lineTransforms.posY.setTargetPosition(top, delay);
     }
 
     update(delta = 0) {
         if (!this.lyricPlayer.getEnableSpring()) return;
+        this.lineTransforms.posX.update(delta);
         this.lineTransforms.posY.update(delta);
-        this.rebuildStyle();
+        if (this.isInSight) this.show();
+        else this.hide();
     }
 
     rebuildStyle() {
-        let style = `transform:translateY(${this.lineTransforms.posY.getCurrentPosition().toFixed(2)}px);`;
-        if (!this.lyricPlayer.getEnableSpring()) {
+        let style = `transform:translate(${this.lineTransforms.posX.getCurrentPosition().toFixed(2)}px,${this.lineTransforms.posY.getCurrentPosition().toFixed(2)}px);`;
+        if (!this.lyricPlayer.getEnableSpring() && this.isInSight) {
             style += `transition-delay:${this.delay}ms;`;
         }
+        style += `filter:blur(${Math.min(5, this.blur)}px);`;
         if (style !== this.lastStyle) {
             this.lastStyle = style;
             this.element.setAttribute('style', style);
         }
+    }
+
+    get isInSight() {
+        const left = this.lineTransforms.posX.getCurrentPosition();
+        const top = this.lineTransforms.posY.getCurrentPosition();
+        const right = left + this.lineSize[0];
+        const bottom = top + this.lineSize[1];
+        return !(left > this.lyricPlayer.size[0] || top > this.lyricPlayer.size[1] || right < 0 || bottom < 0);
     }
 
     dispose() {
@@ -1575,6 +1618,11 @@ class AMLLDomLyricPlayer {
         this.hasDuetLine = false;
         this.isSeeking = false;
         this.isPlaying = true;
+        this.isScrolled = false;
+        this.isUserScrolling = false;
+        this.allowScroll = true;
+        this.scrolledHandler = 0;
+        this.wheelTimeout = undefined;
         this.alignAnchor = 'center';
         this.alignPosition = 0.35;
         this.overscanPx = 300;
@@ -1646,6 +1694,115 @@ class AMLLDomLyricPlayer {
         this.interludeDots.setTransform(0, 200);
         window.addEventListener('pageshow', this.onPageShow);
         window.addEventListener('pagehide', this.onPageHide);
+
+        let startScrollY = 0;
+        let startTouchPosY = 0;
+        let startTouchStartX = 0;
+        let startTouchStartY = 0;
+        let lastMoveY = 0;
+        let startScrollTime = 0;
+        let scrollSpeed = 0;
+        let currentScrollId = 0;
+
+        this.element.addEventListener('touchstart', (event) => {
+            if (!this.beginScrollHandler()) return;
+
+            this.isUserScrolling = true;
+            event.preventDefault();
+            startScrollY = this.scrollOffset;
+            startTouchPosY = event.touches[0].screenY;
+            lastMoveY = startTouchPosY;
+            startTouchStartX = event.touches[0].screenX;
+            startTouchStartY = event.touches[0].screenY;
+            startScrollTime = Date.now();
+            scrollSpeed = 0;
+            this.calcLayout(true, true);
+        }, { passive: false });
+
+        this.element.addEventListener('touchmove', (event) => {
+            if (!this.beginScrollHandler()) return;
+
+            event.preventDefault();
+            const currentY = event.touches[0].screenY;
+            const deltaY = currentY - startTouchPosY;
+            this.scrollOffset = startScrollY - deltaY;
+            this.limitScrollOffset();
+
+            const now = Date.now();
+            const deltaTime = now - startScrollTime;
+            if (deltaTime > 0) {
+                scrollSpeed = (currentY - lastMoveY) / deltaTime;
+            }
+            lastMoveY = currentY;
+            startScrollTime = now;
+            this.calcLayout(true, true);
+        }, { passive: false });
+
+        this.element.addEventListener('touchend', (event) => {
+            if (!this.beginScrollHandler()) {
+                this.isUserScrolling = false;
+                return;
+            }
+
+            event.preventDefault();
+            const touch = event.changedTouches[0];
+            const moveX = Math.abs(touch.screenX - startTouchStartX);
+            const moveY = Math.abs(touch.screenY - startTouchStartY);
+
+            if (moveX < 10 && moveY < 10) {
+                const target = document.elementFromPoint(touch.clientX, touch.clientY);
+                if (target && this.element.contains(target)) {
+                    target.click();
+                }
+                this.isUserScrolling = false;
+                this.endScrollHandler();
+                return;
+            }
+
+            startTouchPosY = 0;
+            const scrollId = ++currentScrollId;
+            if (Math.abs(scrollSpeed) < 0.1) scrollSpeed = 0;
+            let lastFrameTime = performance.now();
+
+            const onScrollFrame = (time) => {
+                if (scrollId !== currentScrollId) return;
+
+                const deltaTime = time - lastFrameTime;
+                lastFrameTime = time;
+                if (deltaTime <= 0 || deltaTime > 100) {
+                    requestAnimationFrame(onScrollFrame);
+                    return;
+                }
+
+                if (Math.abs(scrollSpeed) > 0.05) {
+                    this.scrollOffset -= scrollSpeed * deltaTime;
+                    this.limitScrollOffset();
+                    scrollSpeed *= 0.95 ** (deltaTime / 16);
+                    this.calcLayout(true, true);
+                    requestAnimationFrame(onScrollFrame);
+                } else {
+                    this.isUserScrolling = false;
+                    this.endScrollHandler();
+                }
+            };
+
+            requestAnimationFrame(onScrollFrame);
+        }, { passive: false });
+
+        this.element.addEventListener('wheel', (event) => {
+            if (!this.beginScrollHandler()) return;
+
+            event.preventDefault();
+            if (event.deltaMode === event.DOM_DELTA_PIXEL) {
+                this.scrollOffset += event.deltaY;
+                this.limitScrollOffset();
+                this.calcLayout(true, false);
+            } else {
+                this.scrollOffset += event.deltaY * 50;
+                this.limitScrollOffset();
+                this.calcLayout(false, false);
+            }
+        }, { passive: false });
     }
 
     getElement() {
@@ -1667,8 +1824,34 @@ class AMLLDomLyricPlayer {
         }
     }
 
+    beginScrollHandler() {
+        const allowed = this.allowScroll;
+        if (allowed) {
+            this.isScrolled = true;
+            clearTimeout(this.scrolledHandler);
+            this.scrolledHandler = setTimeout(() => {
+                this.isScrolled = false;
+                this.scrollOffset = 0;
+            }, 5000);
+        }
+        return allowed;
+    }
+
+    endScrollHandler() {}
+
+    limitScrollOffset() {
+        this.scrollOffset = Math.max(
+            Math.min(this.scrollBoundary[1], this.scrollOffset),
+            this.scrollBoundary[0],
+        );
+    }
+
     getEnableSpring() {
         return !this.disableSpring;
+    }
+
+    getEnableScale() {
+        return this.enableScale;
     }
 
     getIsNonDynamic() {
@@ -1683,6 +1866,34 @@ class AMLLDomLyricPlayer {
         this.disableSpring = !enable;
         this.element.classList.toggle(STYLE.disableSpring, !enable);
         this.calcLayout(true);
+    }
+
+    setEnableScale(enable = true) {
+        this.enableScale = !!enable;
+        this.calcLayout();
+    }
+
+    setEnableBlur(enable = true) {
+        if (this.enableBlur === !!enable) return;
+        this.enableBlur = !!enable;
+        this.calcLayout();
+    }
+
+    setHidePassedLines(hide = false) {
+        this.hidePassedLines = !!hide;
+        this.calcLayout();
+    }
+
+    setIsSeeking(isSeeking = false) {
+        this.isSeeking = !!isSeeking;
+    }
+
+    setAlignAnchor(alignAnchor = 'center') {
+        this.alignAnchor = alignAnchor;
+    }
+
+    setAlignPosition(alignPosition = 0.35) {
+        this.alignPosition = alignPosition;
     }
 
     getOverscanPx() {
@@ -1757,6 +1968,26 @@ class AMLLDomLyricPlayer {
             const lineEl = new LyricLineEl(this, line);
             this.lyricLinesIndexes.set(lineEl, index);
             this.lyricLineElementMap.set(lineEl.getElement(), lineEl);
+            const dispatchLineEvent = (event) => {
+                if (this.isUserScrolling) return;
+                const customEvent = new CustomEvent(createLineEventName(event.type), {
+                    bubbles: true,
+                    cancelable: true,
+                    detail: {
+                        lineIndex: index,
+                        line: lineEl.getLine(),
+                        nativeEvent: event,
+                    },
+                });
+                const allowed = this.element.dispatchEvent(customEvent);
+                if (!allowed || customEvent.defaultPrevented) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    event.stopImmediatePropagation();
+                }
+            };
+            lineEl.getElement().addEventListener('click', dispatchLineEvent);
+            lineEl.getElement().addEventListener('contextmenu', dispatchLineEvent);
             return lineEl;
         });
 
@@ -1854,15 +2085,21 @@ class AMLLDomLyricPlayer {
                 this.scrollToIndex = Math.min(...this.bufferedLines);
                 this.calcLayout();
             } else if (addedIds.size === 0 && removedIds.size > 0) {
-                if (eqSet(removedIds, this.bufferedLines)) {
-                    for (const buffered of this.bufferedLines) {
-                        if (!this.hotLines.has(buffered)) {
-                            this.bufferedLines.delete(buffered);
-                            this.currentLyricLineObjects[buffered]?.disable();
+                let removedCurrentAnchor = false;
+                for (const buffered of Array.from(this.bufferedLines)) {
+                    if (!this.hotLines.has(buffered)) {
+                        if (buffered === this.scrollToIndex) {
+                            removedCurrentAnchor = true;
                         }
+                        this.bufferedLines.delete(buffered);
+                        this.currentLyricLineObjects[buffered]?.disable();
                     }
-                    this.calcLayout();
                 }
+
+                if (this.bufferedLines.size > 0 && removedCurrentAnchor) {
+                    this.scrollToIndex = Math.min(...this.bufferedLines);
+                }
+                this.calcLayout();
             } else {
                 for (const added of addedIds) {
                     this.bufferedLines.add(added);
@@ -1879,12 +2116,27 @@ class AMLLDomLyricPlayer {
             }
         }
 
+        if (this.bufferedLines.size === 0 && this.processedLines.length > 0) {
+            const lastLine = this.processedLines[this.processedLines.length - 1];
+            const bottomEl = this.bottomLine.getElement();
+            const hasBottomContent = bottomEl.innerHTML.trim().length > 0;
+            if (time >= lastLine.endTime) {
+                const targetIndex = hasBottomContent
+                    ? this.processedLines.length
+                    : this.processedLines.length - 1;
+                if (this.scrollToIndex !== targetIndex) {
+                    this.scrollToIndex = targetIndex;
+                    this.calcLayout();
+                }
+            }
+        }
+
         this.lastCurrentTime = time;
     }
 
     calcLayout(sync = false, force = false) {
         const interlude = this.getCurrentInterlude();
-        let curPos = 0;
+        let curPos = -this.scrollOffset;
         const targetAlignIndex = this.scrollToIndex;
         let isNextDuet = false;
 
@@ -1916,10 +2168,19 @@ class AMLLDomLyricPlayer {
 
         const currentLine = this.currentLyricLineObjects[targetAlignIndex];
         this.targetAlignIndex = targetAlignIndex;
+        const isBottomFocused = targetAlignIndex === this.currentLyricLineObjects.length;
+        this.bottomLine.setFocused(isBottomFocused);
+
+        let targetLineHeight = 0;
         if (currentLine) {
-            const lineHeight = this.lyricLinesSize.get(currentLine)?.[1] ?? fallbackLineHeight;
-            if (this.alignAnchor === 'bottom') curPos -= lineHeight;
-            else if (this.alignAnchor === 'center') curPos -= lineHeight / 2;
+            targetLineHeight = this.lyricLinesSize.get(currentLine)?.[1] ?? fallbackLineHeight;
+        } else if (isBottomFocused) {
+            targetLineHeight = this.bottomLine.lineSize[1];
+        }
+
+        if (targetLineHeight > 0) {
+            if (this.alignAnchor === 'bottom') curPos -= targetLineHeight;
+            else if (this.alignAnchor === 'center') curPos -= targetLineHeight / 2;
         }
 
         const latestIndex = this.bufferedLines.size > 0 ? Math.max(...this.bufferedLines) : this.scrollToIndex;
@@ -1965,6 +2226,9 @@ class AMLLDomLyricPlayer {
                     }
                 }
             }
+            if (this.isUserScrolling) {
+                blurLevel = 0;
+            }
 
             const targetScale = !isActive && this.isPlaying
                 ? (line.isBG ? 75 : (this.enableScale ? 97 : 100))
@@ -1993,8 +2257,15 @@ class AMLLDomLyricPlayer {
             }
         });
 
-        this.scrollBoundary[1] = curPos - this.size[1] / 2;
-        this.bottomLine.setTransform(curPos, force, delay);
+        this.scrollBoundary[1] = curPos + this.scrollOffset - this.size[1] / 2;
+        let finalBottomBlur = 0;
+        if (this.enableBlur && !this.isUserScrolling && !isBottomFocused) {
+            finalBottomBlur = 1 + Math.abs(this.currentLyricLineObjects.length - Math.max(this.scrollToIndex, latestIndex));
+            if (window.innerWidth <= 1024) {
+                finalBottomBlur *= 0.8;
+            }
+        }
+        this.bottomLine.setTransform(0, curPos, finalBottomBlur, force, delay);
     }
 
     pause() {
@@ -2033,7 +2304,10 @@ class AMLLDomLyricPlayer {
     }
 
     resetScroll() {
+        this.isScrolled = false;
         this.scrollOffset = 0;
+        clearTimeout(this.scrolledHandler);
+        this.scrolledHandler = 0;
     }
 
     dispose() {
@@ -2312,6 +2586,42 @@ export class AMLLLyricPlayer {
         this.currentTime = secondsToMilliseconds(seconds, this.currentTime);
         this.player.setCurrentTime(this.currentTime, true);
         this.player.update(0);
+    }
+
+    setWordFadeWidth(value = 0.5) {
+        this.player.setWordFadeWidth(value);
+    }
+
+    setEnableSpring(enable = true) {
+        this.player.setEnableSpring(enable);
+    }
+
+    setEnableScale(enable = true) {
+        this.player.setEnableScale(enable);
+    }
+
+    setEnableBlur(enable = true) {
+        this.player.setEnableBlur(enable);
+    }
+
+    setHidePassedLines(hide = false) {
+        this.player.setHidePassedLines(hide);
+    }
+
+    setAlignAnchor(anchor = 'center') {
+        this.player.setAlignAnchor(anchor);
+    }
+
+    setAlignPosition(position = 0.35) {
+        this.player.setAlignPosition(position);
+    }
+
+    setIsSeeking(isSeeking = false) {
+        this.player.setIsSeeking(isSeeking);
+    }
+
+    getBottomLineElement() {
+        return this.player.bottomLine.getElement();
     }
 
     setPlaying(playing) {

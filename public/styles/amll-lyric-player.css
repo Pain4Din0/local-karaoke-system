@@ -6,7 +6,10 @@
     color: var(--amll-lp-color, white);
     contain: strict;
     mix-blend-mode: plus-lighter;
-    font-size: var(--amll-lp-font-size, max(max(5vh, 2.5vw), 12px));
+    font-family: var(--amll-font-family);
+    font-size: var(--amll-lp-font-size, max(max(5vh, 2.5vw), 14px));
+    font-weight: var(--amll-lp-font-weight, 600);
+    letter-spacing: var(--amll-lp-letter-spacing, normal);
 }
 
 .amll-lyric-player.dom {
@@ -197,6 +200,44 @@
 .amll-lp-interlude-dots.amll-lp-duet {
     right: 0;
     transform-origin: center;
+}
+
+.amll-lp-bottom-line {
+    padding-top: 0;
+    padding-bottom: 0;
+    cursor: default;
+    line-height: 1.8em;
+}
+
+.amll-lp-bottom-line:empty {
+    display: none;
+    padding: 0;
+    margin: 0;
+    height: 0;
+}
+
+.amll-bottom-info {
+    opacity: 0.3;
+    transition:
+        font-size 0.3s ease,
+        opacity 0.3s ease;
+    font-size: max(max(3vh, 1.5vw), 10px);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.amll-bottom-info strong {
+    font-weight: 600;
+    opacity: 0.85;
+}
+
+[data-focused="true"] .amll-bottom-info {
+    opacity: 1;
+}
+
+[data-bottom-line] {
+    pointer-events: none;
 }
 
 .amll-lp-tmp-disable-transition {

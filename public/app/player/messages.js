@@ -24,7 +24,8 @@ export const messages = {
         connection_lost: "Connection Lost",
         connection_restored: "Connected",
         lyrics_unavailable: "Lyrics Unavailable",
-        song_failed: "Song Failed"
+        song_failed: "Song Failed",
+        songwriter_label: "Songwriter:"
     },
     zh: {
         init_system: "点击初始化系统",
@@ -51,7 +52,8 @@ export const messages = {
         connection_lost: "连接已断开",
         connection_restored: "连接已恢复",
         lyrics_unavailable: "歌词不可用",
-        song_failed: "歌曲处理失败"
+        song_failed: "歌曲处理失败",
+        songwriter_label: "创作者："
     },
     ja: {
         init_system: "クリックしてシステムを初期化",
@@ -78,6 +80,7 @@ export const messages = {
         connection_lost: "接続切断",
         connection_restored: "接続完了",
         lyrics_unavailable: "歌詞なし",
-        song_failed: "曲の処理に失敗"
+        song_failed: "曲の処理に失敗",
+        songwriter_label: "作者："
     }
 };

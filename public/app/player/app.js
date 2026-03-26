@@ -147,12 +147,22 @@ createApp({
             const appEl = document.getElementById('app');
             if (!appEl) return;
             amllManager.init(appEl);
+            amllManager.setLocaleStrings({
+                songwriterLabel: t('songwriter_label'),
+            });
+            amllManager.setSeekHandler((seconds) => {
+                if (!art) return;
+                art.currentTime = seconds;
+            });
             amllInitialized = true;
         };
 
         const startAMLL = (song) => {
             if (!isYouTubeMusic(song)) return;
             initAMLL();
+            amllManager.setLocaleStrings({
+                songwriterLabel: t('songwriter_label'),
+            });
 
             // Set metadata
             amllManager.setMeta(
