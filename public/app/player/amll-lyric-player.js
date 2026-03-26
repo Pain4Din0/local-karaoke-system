@@ -2457,6 +2457,11 @@ function createLyricLine(words, text, translatedLyric, romanLyric, startTime, en
 function convertLocalLine(line) {
     const lineStartTime = secondsToMilliseconds(line?.start, 0);
     const lineEndTime = Math.max(lineStartTime, secondsToMilliseconds(line?.end, lineStartTime));
+    const backgroundStartTime = secondsToMilliseconds(line?.backgroundStart, lineStartTime);
+    const backgroundEndTime = Math.max(
+        backgroundStartTime,
+        secondsToMilliseconds(line?.backgroundEnd, lineEndTime),
+    );
     const romanTrack = pickTrack(line?.romanizations, 'main');
     const translationTrack = pickTrack(line?.translations, 'main');
     const mainWords = mapWordTrack(
@@ -2495,8 +2500,8 @@ function convertLocalLine(line) {
     const bgTranslationTrack = pickTrack(line?.translations, 'background');
     const bgWords = mapWordTrack(
         line?.backgroundWords,
-        lineStartTime,
-        lineEndTime,
+        backgroundStartTime,
+        backgroundEndTime,
         getTrackWords(bgRomanTrack, 'background'),
     );
     const bgRomanWords = getTrackWords(bgRomanTrack, 'background');
@@ -2506,8 +2511,8 @@ function convertLocalLine(line) {
         typeof line?.backgroundText === 'string' ? line.backgroundText : '',
         getTrackText(bgTranslationTrack, 'background'),
         hasWordLevelBgRoman ? '' : getTrackText(bgRomanTrack, 'background'),
-        lineStartTime,
-        lineEndTime,
+        backgroundStartTime,
+        backgroundEndTime,
         true,
         !!line?.oppositeTurn,
     );

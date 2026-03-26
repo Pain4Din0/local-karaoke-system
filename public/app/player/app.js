@@ -182,7 +182,7 @@ createApp({
                         if (art && art.video && !amllCoverRefreshed) {
                             amllCoverRefreshed = true;
                             amllManager.refreshCover(art.video);
-                            amllManager.setAlbumArt(art.video, song.pic); // re-extract colors
+                            amllManager.setAlbumArt(art.video, song.pic); // refresh album texture
                         }
                     }, 2000);
                 } else {
@@ -219,6 +219,7 @@ createApp({
             const tick = () => {
                 if (art && art.video && amllInitialized) {
                     amllManager.setCurrentTime(getPlaybackTime());
+                    amllManager.setLowFreqVolume(audioManager.getLowFrequencyEnergy());
                 }
                 amllAnimFrame = requestAnimationFrame(tick);
             };
@@ -234,6 +235,7 @@ createApp({
 
         const hideAMLL = () => {
             amllManager.hide();
+            amllManager.setLowFreqVolume(0);
             stopAMLLSync();
         };
 

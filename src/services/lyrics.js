@@ -41,7 +41,7 @@ const buildWordSegments = (words, lineEnd) => {
             }
             return nextWord;
         })
-        .filter((word) => Number.isFinite(word.start) && word.text.trim() !== '')
+        .filter((word) => Number.isFinite(word.start) && word.text !== '')
         .sort((a, b) => a.start - b.start);
     if (filtered.length === 0) return null;
 
@@ -139,7 +139,15 @@ const finalizeTimedLines = (lines, fallbackDuration) => {
             copyExtraFields(line, normalizedLine, blockedLineKeys);
             return normalizedLine;
         })
-        .filter((line) => Number.isFinite(line.start) && line.text)
+        .filter((line) => (
+            Number.isFinite(line.start)
+            && (
+                line.text
+                || line.backgroundText
+                || (Array.isArray(line.words) && line.words.length > 0)
+                || (Array.isArray(line.backgroundWords) && line.backgroundWords.length > 0)
+            )
+        ))
         .sort((a, b) => a.start - b.start);
 
     for (let i = 0; i < normalized.length; i++) {
@@ -152,6 +160,12 @@ const finalizeTimedLines = (lines, fallbackDuration) => {
             : Math.max(current.start + 0.4, candidateEnd);
         current.words = buildWordSegments(current.words, current.end);
         current.backgroundWords = buildWordSegments(current.backgroundWords, current.end);
+        if (!current.text && current.words) {
+            current.text = current.words.map((word) => word.text).join('').trim();
+        }
+        if (!current.backgroundText && current.backgroundWords) {
+            current.backgroundText = current.backgroundWords.map((word) => word.text).join('').trim();
+        }
         current.translations = normalizeAuxiliaryTracks(current.translations, current.start, current.end);
         current.romanizations = normalizeAuxiliaryTracks(current.romanizations, current.start, current.end);
     }

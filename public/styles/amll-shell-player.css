@@ -1,7 +1,16 @@
 :root {
     --amll-font-family:
         "SF Pro Display",
+        "SF Pro Text",
         "PingFang SC",
+        "PingFang TC",
+        "Hiragino Sans GB",
+        "Noto Sans SC",
+        "Noto Sans CJK SC",
+        "Source Han Sans SC",
+        "Noto Sans JP",
+        "Segoe UI Variable Display",
+        "Segoe UI Variable Text",
         system-ui,
         -apple-system,
         BlinkMacSystemFont,
@@ -13,6 +22,7 @@
         "Open Sans",
         "Helvetica Neue",
         sans-serif;
+    --amll-lyric-font-family: var(--amll-font-family);
 }
 
 .amll-overlay.amll-shell,
@@ -75,6 +85,7 @@ body[data-amll-lyrics-open] #artplayer {
 .amll-overlay.amll-shell .amll-bg {
     position: absolute;
     inset: 0;
+    overflow: hidden;
 }
 
 .amll-overlay.amll-shell .amll-bg::after {
@@ -85,11 +96,11 @@ body[data-amll-lyrics-open] #artplayer {
 }
 
 .amll-overlay.amll-shell .amll-bg-canvas {
-    inset: -8px;
-    width: calc(100% + 16px) !important;
-    height: calc(100% + 16px) !important;
-    filter: blur(70px) saturate(1.35) brightness(0.58);
-    transform: scale(1.08);
+    position: absolute;
+    inset: 0;
+    width: 100% !important;
+    height: 100% !important;
+    display: block;
 }
 
 .amll-overlay.amll-shell .amll-content {
@@ -99,7 +110,7 @@ body[data-amll-lyrics-open] #artplayer {
     height: 100%;
     display: grid;
     grid-template-rows:
-        [drag-area] minmax(30px, 0.45fr)
+        [drag-area] 30px
         [cover] auto
         [meta] auto
         [lyric-area] 1fr;
@@ -109,7 +120,6 @@ body[data-amll-lyrics-open] #artplayer {
     box-sizing: border-box;
 }
 
-.amll-overlay.amll-shell .amll-left-panel,
 .amll-overlay.amll-shell .amll-right-panel,
 .amll-overlay.amll-shell .amll-meta {
     min-width: 0;
@@ -119,17 +129,24 @@ body[data-amll-lyrics-open] #artplayer {
 
 .amll-overlay.amll-shell .amll-left-panel {
     grid-column: info-side;
-    grid-row: cover / lyric-area;
-    display: grid;
-    grid-template-rows: auto auto 1fr;
-    justify-items: center;
-    align-content: start;
-    padding-top: calc(2vh + 30px);
-    padding-bottom: 3vh;
-    position: static;
+    grid-row: cover / -1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding-top: 0;
+    padding-bottom: 0;
+    position: relative;
+}
+
+.amll-overlay.amll-shell .amll-left-panel,
+.amll-overlay.amll-shell .amll-cover-wrapper,
+.amll-overlay.amll-shell .amll-cover-img {
+    mix-blend-mode: normal;
 }
 
 .amll-overlay.amll-shell .amll-cover-wrapper {
+    --amll-cover-radius: max(2%, 0.7vh);
     --base-box-shadow-v-0: rgba(0, 0, 0, 0.19);
     --base-box-shadow-y-0: 1em;
     --base-box-shadow-r-0: 1.2em;
@@ -137,7 +154,7 @@ body[data-amll-lyrics-open] #artplayer {
     height: var(--amll-horizontal-cover-size);
     aspect-ratio: 1 / 1;
     background: #000;
-    border-radius: 0;
+    border-radius: var(--amll-cover-radius);
     box-shadow: none;
     overflow: hidden;
     filter: drop-shadow(
@@ -168,13 +185,13 @@ body[data-amll-lyrics-open] #artplayer {
     height: 100%;
     object-fit: cover;
     display: block;
-    border-radius: 0;
+    border-radius: inherit;
     background: #000;
 }
 
 .amll-overlay.amll-shell .amll-meta {
     width: var(--amll-horizontal-cover-size);
-    margin-top: calc(-8px + 1.75em);
+    margin-top: 1.35em;
     display: flex;
     flex-direction: column;
     gap: 0.15em;
@@ -193,6 +210,7 @@ body[data-amll-lyrics-open] #artplayer {
     letter-spacing: 0.4px;
     opacity: 0.9;
     text-shadow: none;
+    mix-blend-mode: normal !important;
 }
 
 .amll-overlay.amll-shell .amll-meta-artist {
@@ -209,11 +227,11 @@ body[data-amll-lyrics-open] #artplayer {
 
 .amll-overlay.amll-shell .amll-right-panel {
     grid-column: player-side;
-    grid-row: cover / lyric-area;
+    grid-row: cover / -1;
     box-sizing: border-box;
     width: 100%;
     height: 100%;
-    padding-right: 15%;
+    padding-right: 6%;
     overflow: hidden;
     contain: paint;
     mask-image: linear-gradient(transparent, black 10%, black 90%, transparent);
@@ -228,9 +246,11 @@ body[data-amll-lyrics-open] #artplayer {
 }
 
 .amll-overlay.amll-shell .amll-lyrics-container > .amll-lyric-player {
+    --amll-lp-font-family: var(--amll-lyric-font-family);
     --amll-lp-font-size: max(max(5vh, 2.5vw), 14px);
     --amll-lp-font-weight: 600;
     --amll-lp-letter-spacing: normal;
+    --amll-lp-line-padding-x: 0.75em;
 }
 
 .amll-overlay.amll-shell .amll-qr-corner {
@@ -252,6 +272,10 @@ body[data-amll-lyrics-open] #artplayer {
 .amll-overlay.amll-shell .amll-qr-corner:hover {
     opacity: 1;
     transform: scale(1.02);
+}
+
+.amll-overlay.amll-shell .amll-qr-corner:empty {
+    display: none !important;
 }
 
 .amll-overlay.amll-shell .amll-qr-corner img,
@@ -315,7 +339,7 @@ body[data-amll-lyrics-open] #artplayer {
     }
 
     .amll-overlay.amll-shell .amll-right-panel {
-        padding-right: 8%;
+        padding-right: 4%;
     }
 
     .amll-overlay.amll-shell .amll-qr-corner {

@@ -15,6 +15,11 @@ export class PrecisionAudioManager {
         this.karaokeGain = null;
         this.volumeGain = null;
         this.loudnessGain = null;
+        this.analyser = null;
+        this.frequencyData = null;
+        this.lowFreqGradient = [];
+        this.lowFreqCurrentValue = 1;
+        this.lowFreqLastTime = 0;
         this.volume = 0.8;
         this.loudnessAdjustment = 0;
         this.isLoudnessNormEnabled = true;
@@ -35,16 +40,21 @@ export class PrecisionAudioManager {
             this.karaokeGain = this.ctx.createGain();
             this.volumeGain = this.ctx.createGain();
             this.loudnessGain = this.ctx.createGain();
+            this.analyser = this.ctx.createAnalyser();
 
             this.originalGain.gain.value = 1.0;
             this.karaokeGain.gain.value = 0.0;
             this.volumeGain.gain.value = this.volume;
             this.loudnessGain.gain.value = 1.0;
+            this.analyser.fftSize = 256;
+            this.analyser.smoothingTimeConstant = 0.82;
+            this.frequencyData = new Uint8Array(this.analyser.frequencyBinCount);
 
             this.originalGain.connect(this.volumeGain);
             this.karaokeGain.connect(this.volumeGain);
             this.volumeGain.connect(this.loudnessGain);
-            this.loudnessGain.connect(this.pitchNode);
+            this.loudnessGain.connect(this.analyser);
+            this.analyser.connect(this.pitchNode);
             this.pitchNode.connect(this.ctx.destination);
 
             window.audioCtx = this.ctx;
@@ -85,6 +95,9 @@ export class PrecisionAudioManager {
         this.cleanup(false);
         this.currentSongId = songId;
         this.isLoadingKaraoke = false;
+        this.lowFreqGradient.length = 0;
+        this.lowFreqCurrentValue = 1;
+        this.lowFreqLastTime = 0;
         this.loudnessAdjustment = loudnessGain || 0;
         this.isKaraokeMode = false;
 
@@ -286,10 +299,53 @@ export class PrecisionAudioManager {
         this.karaokeBuffer = null;
         this.isKaraokeMode = false;
         this.startOffset = 0;
+        this.lowFreqGradient.length = 0;
+        this.lowFreqCurrentValue = 1;
+        this.lowFreqLastTime = 0;
     }
 
     getCurrentTime() {
         if (!this.isPlaying || !this.ctx) return this.startOffset;
         return this.startOffset + (this.ctx.currentTime - this.startContextTime);
+    }
+
+    getLowFrequencyEnergy() {
+        if (!this.analyser || !this.frequencyData) return 0;
+        this.analyser.getByteFrequencyData(this.frequencyData);
+        const now = performance.now();
+        const delta = this.lowFreqLastTime > 0 ? now - this.lowFreqLastTime : 16;
+        this.lowFreqLastTime = now;
+
+        const amplitudeToLevel = (amplitude) => {
+            const normalizedAmplitude = amplitude / 255;
+            return 0.5 * Math.log10(normalizedAmplitude + 1);
+        };
+
+        const volume = (
+            amplitudeToLevel(this.frequencyData[0] || 0) +
+            amplitudeToLevel(this.frequencyData[1] || 0)
+        ) * 0.5;
+
+        if (this.lowFreqGradient.length < 10 && !this.lowFreqGradient.includes(volume)) {
+            this.lowFreqGradient.push(volume);
+            return 0;
+        }
+
+        this.lowFreqGradient.shift();
+        this.lowFreqGradient.push(volume);
+
+        const maxInInterval = Math.max(...this.lowFreqGradient) ** 2;
+        const minInInterval = Math.min(...this.lowFreqGradient);
+        const targetValue = (maxInInterval - minInInterval) > 0.35
+            ? maxInInterval
+            : minInInterval * (0.5 ** 2);
+
+        this.lowFreqCurrentValue += (targetValue - this.lowFreqCurrentValue) * 0.003 * delta;
+
+        if (Number.isNaN(this.lowFreqCurrentValue)) {
+            this.lowFreqCurrentValue = 1;
+        }
+
+        return this.lowFreqCurrentValue;
     }
 }
