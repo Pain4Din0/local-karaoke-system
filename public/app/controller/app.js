@@ -7,6 +7,9 @@ const YTM_SEARCH_MAX_LIMIT = 120;
 const YTM_DETAIL_PAGE_SIZE = 100;
 const YTM_PLAYLIST_PAGE_SIZE = 200;
 const YTM_DETAIL_MAX_LIMIT = 500;
+const YTM_SEARCH_FILTERS = ['songs', 'albums', 'singles', 'artists'];
+const YTM_DEFAULT_FILTER = 'songs';
+const YTM_TRACK_FEEDBACK_MS = 1400;
 const YTM_KNOWN_ERROR_CODES = new Set([
     'helper_missing',
     'helper_timeout',
@@ -86,7 +89,7 @@ createApp({
         const showAdvancedSettings = ref(false);
         const showYtmSearch = ref(false);
         const ytmQuery = ref('');
-        const ytmFilter = ref('all');
+        const ytmFilter = ref(YTM_DEFAULT_FILTER);
         const ytmSections = ref([]);
         const ytmDetail = ref(null);
         const ytmViewMode = ref('search');
@@ -108,6 +111,8 @@ createApp({
         const ytmCounterpartChoiceTrack = ref(null);
         const ytmCounterpartChoiceVideo = ref(null);
         const ytmResolvingTrackId = ref('');
+        const ytmAddingTrackIds = ref({});
+        const ytmAddedTrackIds = ref({});
         const advancedConfig = ref({
             ytdlp: { videoFormat: 'bestvideo[ext=mp4]/bestvideo', audioFormat: 'bestaudio[ext=m4a]/bestaudio', concurrentFragments: 16, httpChunkSize: '10M', noPlaylist: true, proxy: '', socketTimeout: 0, retries: 10, fragmentRetries: 10, userAgent: '', extractorArgs: '', postprocessorArgs: '', noCheckCertificates: false, limitRate: '', geoBypass: true, addHeader: [], mergeOutputFormat: '', flatPlaylist: true, dumpJson: true, noWarnings: false, ignoreErrors: false, abortOnError: false, noPart: false, restrictFilenames: false, windowsFilenames: false, noOverwrites: false, forceIPv4: false, forceIPv6: false },
             demucs: { model: 'htdemucs', twoStems: 'vocals', outputFormat: 'mp3', overlap: 0.25, segment: 7.8, shifts: 1, overlapOutput: false, float32: false, clipMode: 'rescale', noSegment: false, jobs: 0, device: '', repo: '' },
@@ -126,7 +131,6 @@ createApp({
         const currentNetwork = computed(() => networks.value[currentNetIndex.value] || networks.value[0]);
         const isAllSelected = computed(() => playlistItems.value.length > 0 && selectedItems.value.size === playlistItems.value.length);
         const ytmFilterOptions = computed(() => ([
-            { value: 'all', label: t('ytm_filter_all') },
             { value: 'songs', label: t('ytm_filter_songs') },
             { value: 'albums', label: t('ytm_filter_albums') },
             { value: 'singles', label: t('ytm_filter_singles') },
@@ -166,6 +170,8 @@ createApp({
         let ytmLastAutoLoadAt = 0;
         let ytmCounterpartRequestSeq = 0;
         const ytmCounterpartRequests = new Map();
+        const ytmPendingAddRequests = new Map();
+        const ytmTrackSuccessTimers = new Map();
         const clearBrowserState = () => {
             ['ktv_lang', 'ktv_nickname', 'ktv_tutorial_completed'].forEach((key) => localStorage.removeItem(key));
         };
@@ -212,6 +218,98 @@ createApp({
         const isYtmTrackResolving = (item) => {
             const key = String(item?.id || item?.videoId || '').trim();
             return !!key && key === ytmResolvingTrackId.value;
+        };
+
+        const getYtmTrackActionKey = (item) => String(item?.id || item?.videoId || '').trim();
+
+        const clearYtmTrackSuccessState = (trackKey) => {
+            const key = String(trackKey || '').trim();
+            if (!key) return;
+            if (ytmTrackSuccessTimers.has(key)) {
+                clearTimeout(ytmTrackSuccessTimers.get(key));
+                ytmTrackSuccessTimers.delete(key);
+            }
+            if (!ytmAddedTrackIds.value[key]) return;
+            const next = { ...ytmAddedTrackIds.value };
+            delete next[key];
+            ytmAddedTrackIds.value = next;
+        };
+
+        const setYtmTrackAddingState = (trackKey, isAdding) => {
+            const key = String(trackKey || '').trim();
+            if (!key) return;
+            if (isAdding) {
+                ytmAddingTrackIds.value = { ...ytmAddingTrackIds.value, [key]: true };
+                return;
+            }
+            if (!ytmAddingTrackIds.value[key]) return;
+            const next = { ...ytmAddingTrackIds.value };
+            delete next[key];
+            ytmAddingTrackIds.value = next;
+        };
+
+        const flashYtmTrackAddedState = (trackKey) => {
+            const key = String(trackKey || '').trim();
+            if (!key) return;
+            setYtmTrackAddingState(key, false);
+            clearYtmTrackSuccessState(key);
+            ytmAddedTrackIds.value = { ...ytmAddedTrackIds.value, [key]: true };
+            const timer = setTimeout(() => clearYtmTrackSuccessState(key), YTM_TRACK_FEEDBACK_MS);
+            ytmTrackSuccessTimers.set(key, timer);
+        };
+
+        const beginYtmTrackAddRequest = (trackKey, requestId) => {
+            const key = String(trackKey || '').trim();
+            const nextRequestId = String(requestId || '').trim();
+            if (!key || !nextRequestId) return;
+            clearYtmTrackSuccessState(key);
+            setYtmTrackAddingState(key, true);
+            ytmPendingAddRequests.set(nextRequestId, key);
+        };
+
+        const finishYtmTrackAddRequest = (requestId, { success = false } = {}) => {
+            const key = String(requestId || '').trim();
+            if (!key || !ytmPendingAddRequests.has(key)) return false;
+            const trackKey = ytmPendingAddRequests.get(key);
+            ytmPendingAddRequests.delete(key);
+            if (success) {
+                flashYtmTrackAddedState(trackKey);
+            } else {
+                setYtmTrackAddingState(trackKey, false);
+            }
+            return true;
+        };
+
+        const resetYtmTrackFeedbackState = () => {
+            for (const timer of ytmTrackSuccessTimers.values()) {
+                clearTimeout(timer);
+            }
+            ytmTrackSuccessTimers.clear();
+            ytmPendingAddRequests.clear();
+            ytmAddingTrackIds.value = {};
+            ytmAddedTrackIds.value = {};
+        };
+
+        const isYtmTrackAdding = (item) => {
+            const key = getYtmTrackActionKey(item);
+            return !!key && !!ytmAddingTrackIds.value[key];
+        };
+
+        const isYtmTrackAdded = (item) => {
+            const key = getYtmTrackActionKey(item);
+            return !!key && !!ytmAddedTrackIds.value[key];
+        };
+
+        const isYtmTrackBusy = (item) => isYtmTrackResolving(item) || isYtmTrackAdding(item);
+
+        const getYtmTrackAddButtonClass = (item) => {
+            if (isYtmTrackAdded(item)) {
+                return 'bg-emerald-500 text-white border-emerald-300/70 shadow-[0_10px_24px_rgba(16,185,129,0.35)] scale-105 pointer-events-none';
+            }
+            if (isYtmTrackBusy(item)) {
+                return 'bg-zinc-100 text-black border-white/20 shadow-[0_10px_24px_rgba(255,255,255,0.12)]';
+            }
+            return 'bg-white text-black border-white/10';
         };
 
         const buildYtmQueueItem = (item, variant = 'song', counterpartOverride = null) => {
@@ -335,7 +433,11 @@ createApp({
                 ? songs.filter((item) => item && typeof item.originalUrl === 'string' && item.originalUrl)
                 : [];
             if (nextSongs.length === 0) return false;
-            socket.emit('add_batch_songs', { songs: nextSongs, requester: nickname.value });
+            socket.emit('add_batch_songs', {
+                songs: nextSongs,
+                requester: nickname.value,
+                requestId: String(options.requestId || '').trim() || undefined,
+            });
             if (options.keepBusyState) {
                 isAdding.value = true;
             }
@@ -412,7 +514,7 @@ createApp({
             if (!snapshot || typeof snapshot !== 'object') return;
             ytmViewMode.value = snapshot.viewMode || 'search';
             ytmQuery.value = snapshot.query || '';
-            ytmFilter.value = snapshot.filter || 'all';
+            ytmFilter.value = YTM_SEARCH_FILTERS.includes(snapshot.filter) ? snapshot.filter : YTM_DEFAULT_FILTER;
             ytmSections.value = Array.isArray(snapshot.sections) ? snapshot.sections : [];
             ytmDetail.value = snapshot.detail || null;
             ytmHasSearched.value = !!snapshot.hasSearched;
@@ -459,8 +561,9 @@ createApp({
 
         const resetYtmSearchState = () => {
             clearYtmCounterpartRequestState();
+            resetYtmTrackFeedbackState();
             ytmQuery.value = '';
-            ytmFilter.value = 'all';
+            ytmFilter.value = YTM_DEFAULT_FILTER;
             ytmSections.value = [];
             ytmDetail.value = null;
             ytmViewMode.value = 'search';
@@ -604,9 +707,9 @@ createApp({
             getYtmTrackArtistLinks(item).length > 0 || !!getYtmTrackAlbumLink(item)
         );
 
-        const openYtmSearchFallback = (query, filter = 'all') => {
+        const openYtmSearchFallback = (query, filter = YTM_DEFAULT_FILTER) => {
             const nextQuery = String(query || '').trim();
-            const nextFilter = ['all', 'songs', 'albums', 'artists', 'singles'].includes(filter) ? filter : 'all';
+            const nextFilter = YTM_SEARCH_FILTERS.includes(filter) ? filter : YTM_DEFAULT_FILTER;
             if (!nextQuery) return;
             submitYtmSearch(nextQuery, {
                 filterOverride: nextFilter,
@@ -635,7 +738,7 @@ createApp({
             const browseId = String(album?.id || '').trim();
             if (!title) return;
             if (!browseId) {
-                openYtmSearchFallback(title, album?.searchFilter || 'all');
+                openYtmSearchFallback(title, album?.searchFilter || 'albums');
                 return;
             }
             fetchYtmDetail({
@@ -689,8 +792,22 @@ createApp({
         };
 
         const queuePreparedYtmTrack = (item, variant = 'song', counterpartOverride = null) => {
+            const trackKey = getYtmTrackActionKey(item);
             const queuedItem = buildYtmQueueItem(item, variant, counterpartOverride);
-            if (!queuedItem || !queueSongs([queuedItem])) {
+            if (!queuedItem) {
+                pushNotification(t('ytm_no_results'));
+                return false;
+            }
+            const requestId = trackKey
+                ? `ytm_add_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+                : '';
+            if (requestId) {
+                beginYtmTrackAddRequest(trackKey, requestId);
+            }
+            if (!queueSongs([queuedItem], { requestId })) {
+                if (requestId) {
+                    finishYtmTrackAddRequest(requestId);
+                }
                 pushNotification(t('ytm_no_results'));
                 return false;
             }
@@ -705,7 +822,7 @@ createApp({
         };
 
         const queueSingleYtmTrack = async (item) => {
-            if (!item || item.itemType !== 'track') return;
+            if (!item || item.itemType !== 'track' || isYtmTrackBusy(item) || isYtmTrackAdded(item)) return;
             const resolvingKey = String(item.id || item.videoId || '').trim();
             if (!resolvingKey) {
                 queuePreparedYtmTrack(item, 'song');
@@ -874,7 +991,7 @@ createApp({
                 return;
             }
             const append = !!options.append;
-            const filter = ['all', 'songs', 'albums', 'artists', 'singles'].includes(options.filterOverride)
+            const filter = YTM_SEARCH_FILTERS.includes(options.filterOverride)
                 ? options.filterOverride
                 : ytmFilter.value;
             const shouldPushCurrentView = !append && (
@@ -944,7 +1061,7 @@ createApp({
         };
 
         const changeYtmFilter = (filter) => {
-            if (!filter || ytmFilter.value === filter) return;
+            if (!YTM_SEARCH_FILTERS.includes(filter) || ytmFilter.value === filter) return;
             ytmFilter.value = filter;
             if (String(ytmQuery.value || '').trim()) {
                 submitYtmSearch();
@@ -1187,6 +1304,7 @@ createApp({
             if (item) item.karaokeProgress = progress;
         });
         socket.on('add_success', (payload) => {
+            finishYtmTrackAddRequest(payload?.requestId, { success: true });
             isAdding.value = false;
             addUrl.value = "";
             const count = Number(payload?.count || 0);
@@ -1195,6 +1313,7 @@ createApp({
             }
         });
         socket.on('error_msg', (msg) => {
+            finishYtmTrackAddRequest(msg?.requestId);
             isAdding.value = false;
             if (showYtmSearch.value && YTM_KNOWN_ERROR_CODES.has(String(msg?.code || ''))) {
                 console.warn('[Controller][YTM]', msg?.message || 'YouTube Music request failed', msg || '');
@@ -1254,7 +1373,7 @@ createApp({
             clearYtmErrorState();
             ytmSections.value = Array.isArray(payload.sections) ? payload.sections : [];
             const totalCount = countYtmSearchItems(ytmSections.value);
-            const canInferSearchEnd = requestMeta.requestedFilter && requestMeta.requestedFilter !== 'all';
+            const canInferSearchEnd = YTM_SEARCH_FILTERS.includes(requestMeta.requestedFilter);
             ytmSearchLimit.value = requestMeta.requestedLimit;
             if (totalCount <= 0) {
                 ytmSearchCanLoadMore.value = false;
@@ -1419,7 +1538,9 @@ createApp({
             ytmHasVisibleResults, ytmCanLoadMoreCurrent, ytmReachedEndCurrent, ytmLoadingMoreCurrent, ytmErrorState,
             onYtmQueryInput, submitYtmSearch, changeYtmFilter, goBackYtmView,
             getYtmSectionTitle, getYtmItemTypeLabel, openYtmItem, openYtmSection,
-            getYtmTrackArtistLinks, getYtmTrackAlbumLink, hasYtmTrackMetaLinks, isYtmTrackResolving, openYtmArtistRef, openYtmAlbumRef,
+            getYtmTrackArtistLinks, getYtmTrackAlbumLink, hasYtmTrackMetaLinks,
+            isYtmTrackResolving, isYtmTrackAdded, isYtmTrackBusy, getYtmTrackAddButtonClass,
+            openYtmArtistRef, openYtmAlbumRef,
             getYtmErrorTitle, getYtmErrorHint, getYtmLoadedAllText, retryYtmRequest,
             queueSingleYtmTrack, openYtmBatchSelection, queueYtmDetailTracks, loadMoreYtmResults, onYtmResultsScroll,
             showAdvancedSettings, advancedConfig, openAdvancedSettings, closeAdvancedSettings, saveAdvancedSettings, restoreAdvancedDefaults,

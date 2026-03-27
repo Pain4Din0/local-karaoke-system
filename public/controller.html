@@ -898,10 +898,12 @@
                                 </div>
                                 <div v-else-if="item.subtitle" class="text-xs text-zinc-500 truncate">{{ item.subtitle }}</div>
                             </div>
-                            <button @click="queueSingleYtmTrack(item)" :disabled="isYtmTrackResolving(item)"
-                                class="w-10 h-10 rounded-xl bg-white text-black flex items-center justify-center shrink-0 btn-press disabled:opacity-60"
+                            <button @click="queueSingleYtmTrack(item)" :disabled="isYtmTrackBusy(item)"
+                                class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 btn-press border transition-all duration-200 ease-out transform-gpu disabled:opacity-60"
+                                :class="getYtmTrackAddButtonClass(item)"
                                 :title="t('ytm_add')">
-                                <i v-if="isYtmTrackResolving(item)" class="ri-loader-4-line animate-spin text-lg"></i>
+                                <i v-if="isYtmTrackBusy(item)" class="ri-loader-4-line animate-spin text-lg"></i>
+                                <i v-else-if="isYtmTrackAdded(item)" class="ri-check-line text-lg"></i>
                                 <i v-else class="ri-add-line text-lg"></i>
                             </button>
                         </div>
@@ -946,10 +948,12 @@
                                 </div>
                                 <div v-else-if="item.subtitle" class="text-xs text-zinc-500 truncate">{{ item.subtitle }}</div>
                             </div>
-                            <button v-if="item.itemType === 'track'" @click="queueSingleYtmTrack(item)" :disabled="isYtmTrackResolving(item)"
-                                class="w-10 h-10 rounded-xl bg-white text-black flex items-center justify-center shrink-0 btn-press disabled:opacity-60"
+                            <button v-if="item.itemType === 'track'" @click="queueSingleYtmTrack(item)" :disabled="isYtmTrackBusy(item)"
+                                class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 btn-press border transition-all duration-200 ease-out transform-gpu disabled:opacity-60"
+                                :class="getYtmTrackAddButtonClass(item)"
                                 :title="t('ytm_add')">
-                                <i v-if="isYtmTrackResolving(item)" class="ri-loader-4-line animate-spin text-lg"></i>
+                                <i v-if="isYtmTrackBusy(item)" class="ri-loader-4-line animate-spin text-lg"></i>
+                                <i v-else-if="isYtmTrackAdded(item)" class="ri-check-line text-lg"></i>
                                 <i v-else class="ri-add-line text-lg"></i>
                             </button>
                             <button v-else @click="openYtmItem(item)"
@@ -996,10 +1000,12 @@
                                     </div>
                                     <div v-else-if="item.subtitle" class="text-xs text-zinc-500 truncate">{{ item.subtitle }}</div>
                                 </div>
-                                <button v-if="item.itemType === 'track'" @click="queueSingleYtmTrack(item)" :disabled="isYtmTrackResolving(item)"
-                                    class="w-10 h-10 rounded-xl bg-white text-black flex items-center justify-center shrink-0 btn-press disabled:opacity-60"
+                                <button v-if="item.itemType === 'track'" @click="queueSingleYtmTrack(item)" :disabled="isYtmTrackBusy(item)"
+                                    class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 btn-press border transition-all duration-200 ease-out transform-gpu disabled:opacity-60"
+                                    :class="getYtmTrackAddButtonClass(item)"
                                     :title="t('ytm_add')">
-                                    <i v-if="isYtmTrackResolving(item)" class="ri-loader-4-line animate-spin text-lg"></i>
+                                    <i v-if="isYtmTrackBusy(item)" class="ri-loader-4-line animate-spin text-lg"></i>
+                                    <i v-else-if="isYtmTrackAdded(item)" class="ri-check-line text-lg"></i>
                                     <i v-else class="ri-add-line text-lg"></i>
                                 </button>
                                 <button v-else @click="openYtmItem(item)"

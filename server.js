@@ -69,8 +69,13 @@ app.use(express.static(path.join(ROOT_DIR, 'public'), {
 app.use(express.json({ limit: '256kb' }));
 app.use('/downloads', express.static(DOWNLOAD_DIR));
 
-const emitSocketError = (socket, message, details = {}, code = 'bad_request') => {
-    socket.emit('error_msg', { message, details, code });
+const emitSocketError = (socket, message, details = {}, code = 'bad_request', extra = {}) => {
+    socket.emit('error_msg', { message, details, code, ...extra });
+};
+
+const getRequestIdFromPayload = (payload) => {
+    if (!payload || typeof payload !== 'object') return '';
+    return typeof payload.requestId === 'string' ? payload.requestId.trim() : '';
 };
 
 const clampNumber = (value, fallback, min, max) => {
@@ -234,12 +239,19 @@ const wrapSocketHandler = (socket, eventName, handler, fallbackMessage) => {
         try {
             await handler(payload);
         } catch (error) {
+            const requestId = getRequestIdFromPayload(payload);
             logger.error('Socket', `Unhandled error in ${eventName}`, {
                 socketId: socket.id,
                 payload: summarizePayload(payload),
                 error,
             });
-            emitSocketError(socket, fallbackMessage || `${eventName} failed`, { event: eventName }, 'internal_error');
+            emitSocketError(
+                socket,
+                fallbackMessage || `${eventName} failed`,
+                { event: eventName },
+                'internal_error',
+                requestId ? { requestId } : {},
+            );
         }
     });
 };
@@ -328,14 +340,21 @@ io.on('connection', async (socket) => {
     wrapSocketHandler(socket, 'add_batch_songs', async (data) => {
         const songs = data && Array.isArray(data.songs) ? data.songs : [];
         const requester = data && data.requester;
+        const requestId = getRequestIdFromPayload(data);
         if (songs.length === 0) {
-            emitSocketError(socket, 'No songs were provided to add', { event: 'add_batch_songs' });
+            emitSocketError(
+                socket,
+                'No songs were provided to add',
+                { event: 'add_batch_songs' },
+                'bad_request',
+                requestId ? { requestId } : {},
+            );
             return;
         }
 
         const addedCount = enqueueSongs(songs, requester);
         if (addedCount > 0) {
-            io.emit('add_success', { count: addedCount });
+            io.emit('add_success', requestId ? { count: addedCount, requestId } : { count: addedCount });
             state.emitSync();
             processDownloadQueue();
         }
@@ -343,19 +362,32 @@ io.on('connection', async (socket) => {
 
     wrapSocketHandler(socket, 'add_song', async (data) => {
         const url = data && typeof data.url === 'string' ? data.url.trim() : '';
+        const requestId = getRequestIdFromPayload(data);
         if (!url) {
-            emitSocketError(socket, 'Please provide a valid URL', { event: 'add_song' });
+            emitSocketError(
+                socket,
+                'Please provide a valid URL',
+                { event: 'add_song' },
+                'bad_request',
+                requestId ? { requestId } : {},
+            );
             return;
         }
 
         const result = await fetchUrlInfo(url);
         if (!result || !Array.isArray(result.list) || result.list.length === 0) {
-            emitSocketError(socket, 'Unable to parse the provided URL', { url }, 'parse_failed');
+            emitSocketError(
+                socket,
+                'Unable to parse the provided URL',
+                { url },
+                'parse_failed',
+                requestId ? { requestId } : {},
+            );
             return;
         }
 
         enqueueSongs([result.list[0]], data.requester);
-        io.emit('add_success', { count: 1 });
+        io.emit('add_success', requestId ? { count: 1, requestId } : { count: 1 });
         state.emitSync();
         processDownloadQueue();
     }, 'Failed to add song');
@@ -369,7 +401,7 @@ io.on('connection', async (socket) => {
                 requestId,
                 ok: true,
                 query: '',
-                filter: 'all',
+                filter: 'songs',
                 sections: [],
                 suggestions: [],
             });
@@ -378,7 +410,7 @@ io.on('connection', async (socket) => {
 
         try {
             const result = await searchYouTubeMusic(query, {
-                filter: payload && payload.filter,
+                filter: payload && typeof payload.filter === 'string' ? payload.filter : 'songs',
                 limit: payload && payload.limit,
                 language: payload && payload.language,
             });
@@ -400,7 +432,7 @@ io.on('connection', async (socket) => {
                 ok: false,
                 error: normalizedError,
                 query,
-                filter: payload && typeof payload.filter === 'string' ? payload.filter : 'all',
+                filter: payload && typeof payload.filter === 'string' ? payload.filter : 'songs',
                 sections: [],
                 suggestions: [],
             });
@@ -470,14 +502,21 @@ io.on('connection', async (socket) => {
     }, 'Failed to resolve YouTube Music counterparts');
 
     wrapSocketHandler(socket, 'readd_history', async (historyItem) => {
+        const requestId = getRequestIdFromPayload(historyItem);
         if (!historyItem || typeof historyItem !== 'object') {
-            emitSocketError(socket, 'Invalid history entry', { event: 'readd_history' });
+            emitSocketError(
+                socket,
+                'Invalid history entry',
+                { event: 'readd_history' },
+                'bad_request',
+                requestId ? { requestId } : {},
+            );
             return;
         }
 
         const replaySong = createSongFromHistoryItem(historyItem);
         pushSongIntoQueue(replaySong);
-        io.emit('add_success', { count: 1 });
+        io.emit('add_success', requestId ? { count: 1, requestId } : { count: 1 });
         state.emitSync();
         processDownloadQueue();
     }, 'Failed to re-add song from history');

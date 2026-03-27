@@ -211,8 +211,8 @@ const runPythonJson = (payload, timeoutMs = 30000) => new Promise((resolve, reje
 });
 
 const sanitizeFilter = (value) => {
-    const filter = normalizeText(value, 'all', 30).toLowerCase();
-    return ALLOWED_FILTERS.has(filter) ? filter : 'all';
+    const filter = normalizeText(value, 'songs', 30).toLowerCase();
+    return ALLOWED_FILTERS.has(filter) ? filter : 'songs';
 };
 
 const sanitizeDetailLimit = (kind, value) => {
