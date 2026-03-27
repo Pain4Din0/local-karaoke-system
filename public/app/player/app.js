@@ -7,7 +7,6 @@ const socket = window.io();
 const Artplayer = window.Artplayer;
 let art = null;
 let tickInterval = null;
-let lyricsTickInterval = null;
 let amllAnimFrame = null;
 
 const audioManager = new PrecisionAudioManager();
@@ -43,14 +42,7 @@ createApp({
 
         const hud = ref({ show: false, icon: '', text: '' });
         const createLyricsState = (overrides = {}) => ({
-            visible: false,
             status: 'idle',
-            titleKey: '',
-            hintKey: '',
-            currentText: '',
-            nextText: '',
-            currentLine: null,
-            currentWords: [],
             data: null,
             ...overrides,
         });
@@ -74,7 +66,7 @@ createApp({
         let currentVolume = 0.8;
         let isVocalRemovalActive = false;
         let isLoudnessNormEnabled = true;
-        let lyricsSongId = null;
+        let lyricsRequestId = 0;
         let lyricsEnabled = true;
         let lyricsSource = 'auto';
         let amllInitialized = false;
@@ -103,71 +95,25 @@ createApp({
         };
 
         const resetLyricsState = () => {
+            lyricsRequestId += 1;
             commitLyricsState(createLyricsState());
         };
 
-        const setLyricsStatusState = (status, titleKey, hintKey) => {
+        const setLyricsStatusState = (status) => {
             commitLyricsState(createLyricsState({
-                visible: true,
                 status,
-                titleKey,
-                hintKey,
             }));
         };
 
         const applyLyricsData = (data) => {
             if (!data || !data.found || !Array.isArray(data.lines) || data.lines.length === 0) {
-                setLyricsStatusState('empty', 'lyrics_not_found', 'lyrics_not_found_hint');
+                setLyricsStatusState('empty');
                 return;
             }
             commitLyricsState(createLyricsState({
-                visible: true,
                 status: 'ready',
-                currentText: '',
-                nextText: '',
-                currentLine: null,
-                currentWords: [],
                 data,
             }));
-        };
-
-        const updateLyrics = (currentTime) => {
-            const data = lyricsState.value.data;
-            if (!data || !Array.isArray(data.lines) || data.lines.length === 0) {
-                lyricsState.value.visible = lyricsState.value.status !== 'idle';
-                return;
-            }
-
-            let activeIndex = data.lines.findIndex((line) => currentTime >= line.start && currentTime < line.end);
-            if (activeIndex === -1) {
-                const nearestIndex = data.lines.findIndex((line) => currentTime < line.start);
-                if (nearestIndex <= 0) {
-                    lyricsState.value.currentText = '';
-                    lyricsState.value.nextText = data.lines[0] ? data.lines[0].text : '';
-                    lyricsState.value.currentLine = null;
-                    lyricsState.value.currentWords = [];
-                    lyricsState.value.visible = true;
-                    return;
-                }
-                activeIndex = nearestIndex - 1;
-            }
-
-            const currentLine = data.lines[activeIndex];
-            const nextLine = data.lines[activeIndex + 1] || null;
-
-            lyricsState.value.visible = true;
-            lyricsState.value.currentLine = currentLine;
-            lyricsState.value.currentText = currentLine ? currentLine.text : '';
-            lyricsState.value.nextText = nextLine ? nextLine.text : '';
-
-            if (currentLine && Array.isArray(currentLine.words) && currentLine.words.length > 0) {
-                lyricsState.value.currentWords = currentLine.words.map((word) => ({
-                    ...word,
-                    state: currentTime >= word.end ? 'completed' : (currentTime >= word.start ? 'active' : 'upcoming')
-                }));
-            } else {
-                lyricsState.value.currentWords = [];
-            }
         };
 
         // ── AMLL synced lyrics overlay ────────────────
@@ -236,12 +182,6 @@ createApp({
             });
         };
 
-        const feedLyricsToAMLL = (lyricsData) => {
-            if (!amllInitialized) return;
-            amllManager.setLyrics(lyricsData);
-            amllManager.setStatus(lyricsState.value.status);
-        };
-
         const startAMLLSync = () => {
             stopAMLLSync();
             const tick = () => {
@@ -275,57 +215,32 @@ createApp({
             return Number.isFinite(artTime) ? artTime : 0;
         };
 
-        const syncLyricsToPlayback = (force = false) => {
-            if (!lyricsEnabled) {
-                if (force) resetLyricsState();
-                return;
-            }
-            if (!lyricsState.value.data) return;
-            updateLyrics(getPlaybackTime());
-        };
-
-        const stopLyricsTicker = () => {
-            if (lyricsTickInterval) {
-                clearInterval(lyricsTickInterval);
-                lyricsTickInterval = null;
-            }
-        };
-
-        const startLyricsTicker = () => {
-            stopLyricsTicker();
-            lyricsTickInterval = setInterval(() => {
-                if (!art || !art.video || !lyricsState.value.data) return;
-                syncLyricsToPlayback();
-            }, 100);
-        };
-
         const fetchLyrics = async (song) => {
             if (!song || !song.id || !lyricsEnabled) {
                 resetLyricsState();
                 return;
             }
-            lyricsSongId = song.id;
-            setLyricsStatusState('loading', 'lyrics_searching', 'lyrics_searching_hint');
+            if (!isYouTubeMusic(song)) {
+                resetLyricsState();
+                return;
+            }
+            const requestId = ++lyricsRequestId;
+            setLyricsStatusState('loading');
             try {
                 const response = await fetch(`/api/lyrics/${song.id}?source=${encodeURIComponent(lyricsSource || 'auto')}`);
                 if (!response.ok && response.status !== 404) {
                     throw new Error(`lyrics_http_${response.status}`);
                 }
                 const data = await response.json();
-                if (lyricsSongId !== song.id || !lyricsEnabled) return;
+                if (requestId !== lyricsRequestId || !lyricsEnabled) return;
                 applyLyricsData(data);
                 if (!data?.found) {
                     console.warn('[Player] Lyrics not found for song:', song.title, data);
                 }
-                syncLyricsToPlayback();
-
-                // Feed to AMLL if in YouTube Music mode
-                if (isYouTubeMusic(song)) {
-                    feedLyricsToAMLL(data);
-                }
             } catch (error) {
+                if (requestId !== lyricsRequestId || !lyricsEnabled) return;
                 console.warn('[Player] Failed to fetch lyrics for song:', song.title, error);
-                setLyricsStatusState('error', 'lyrics_unavailable', 'lyrics_unavailable_hint');
+                setLyricsStatusState('error');
                 showHud('ri-file-warning-line', t('lyrics_unavailable'));
             }
         };
@@ -344,9 +259,11 @@ createApp({
             }
 
             if (changed && currentSong.value && currentSong.value.status === 'ready') {
-                fetchLyrics(currentSong.value);
-            } else if (lyricsEnabled) {
-                syncLyricsToPlayback();
+                if (isYouTubeMusic(currentSong.value)) {
+                    fetchLyrics(currentSong.value);
+                } else {
+                    resetLyricsState();
+                }
             }
         };
 
@@ -396,7 +313,6 @@ createApp({
             if (tickInterval) clearInterval(tickInterval);
             tickInterval = setInterval(() => {
                 if (art && art.video) {
-                    syncLyricsToPlayback();
                     const currentPitch = window.pitchNode?.parameters?.get('pitch')?.value || 0;
                     socket.emit('player_tick', {
                         playing: !art.video.paused,
@@ -440,8 +356,6 @@ createApp({
 
                 // Ensure heartbeat is running
                 startHeartbeat();
-                startLyricsTicker();
-                syncLyricsToPlayback();
 
                 // Start AMLL sync if YouTube Music
                 if (currentSong.value && isYouTubeMusic(currentSong.value)) {
@@ -505,8 +419,6 @@ createApp({
                 isVocalRemovalActive = false;
 
                 startHeartbeat();
-                startLyricsTicker();
-                syncLyricsToPlayback();
 
                 // Start AMLL sync if YouTube Music
                 if (currentSong.value && isYouTubeMusic(currentSong.value)) {
@@ -540,14 +452,12 @@ createApp({
             art.on('video:play', () => {
                 console.log('[Video] Play at', art.currentTime.toFixed(2));
                 audioManager.startPlayback(art.currentTime);
-                syncLyricsToPlayback();
                 if (isAMLLMode.value) amllManager.setPlaying(true);
             });
 
             art.on('video:pause', () => {
                 console.log('[Video] Pause');
                 audioManager.pause();
-                syncLyricsToPlayback();
                 if (isAMLLMode.value) amllManager.setPlaying(false);
             });
 
@@ -563,25 +473,18 @@ createApp({
                 if (isAMLLMode.value) {
                     amllManager.seek(art.currentTime);
                 }
-                syncLyricsToPlayback();
             });
 
             // Handle video stalling/buffering (rare, but handle gracefully)
             art.on('video:waiting', () => {
                 console.log('[Video] Buffering...');
                 audioManager.pause();
-                syncLyricsToPlayback();
             });
 
             art.on('video:playing', () => {
                 console.log('[Video] Resumed from buffer');
                 audioManager.startPlayback(art.currentTime);
-                syncLyricsToPlayback();
             });
-
-            if (art.video) {
-                art.video.addEventListener('timeupdate', () => syncLyricsToPlayback());
-            }
         };
 
         // Socket handlers
@@ -616,19 +519,23 @@ createApp({
                         newSong.loudnessGain,
                         newSong.id
                     );
-                    fetchLyrics(newSong);
 
                     // Start AMLL for YouTube Music sources
                     if (isYouTubeMusic(newSong)) {
+                        fetchLyrics(newSong);
                         startAMLL(newSong);
+                    } else {
+                        resetLyricsState();
                     }
 
-                    showInfo.value = true;
-                    setTimeout(() => showInfo.value = false, 8000);
+                    if (!isYouTubeMusic(newSong)) {
+                        showInfo.value = true;
+                        setTimeout(() => showInfo.value = false, 8000);
+                    }
                 } else if (isSameSong && newSong.karaokeReady && !audioManager.karaokeBuffer && newSong.karaokeSrc) {
                     // Karaoke just became ready - load it
                     audioManager.addKaraokeBuffer(newSong.karaokeSrc, newSong.id);
-                    if (newSong.lyricsStatus === 'ready' && !lyricsState.value.data) {
+                    if (isYouTubeMusic(newSong) && newSong.lyricsStatus === 'ready' && !lyricsState.value.data) {
                         fetchLyrics(newSong);
                     }
                 }
@@ -648,7 +555,6 @@ createApp({
                     art = null;
                 }
                 if (tickInterval) clearInterval(tickInterval);
-                stopLyricsTicker();
                 audioManager.cleanup();
                 resetLyricsState();
                 hideAMLL();
@@ -696,10 +602,10 @@ createApp({
             } else if (action.type === 'lyrics_toggle') {
                 lyricsEnabled = !!action.value;
                 if (!lyricsEnabled) resetLyricsState();
-                else if (currentSong.value && currentSong.value.status === 'ready') fetchLyrics(currentSong.value);
+                else if (currentSong.value && currentSong.value.status === 'ready' && isYouTubeMusic(currentSong.value)) fetchLyrics(currentSong.value);
             } else if (action.type === 'lyrics_source') {
                 lyricsSource = action.value || 'auto';
-                if (lyricsEnabled && currentSong.value && currentSong.value.status === 'ready') fetchLyrics(currentSong.value);
+                if (lyricsEnabled && currentSong.value && currentSong.value.status === 'ready' && isYouTubeMusic(currentSong.value)) fetchLyrics(currentSong.value);
             } else if (action.type === 'cut') {
                 showHud('ri-skip-forward-fill', t('skip'));
             } else if (action.type === 'clear_client_storage') {
@@ -799,7 +705,7 @@ createApp({
         return {
             currentSong, isPlayingVideo, isAMLLMode, showInfo, hasInteracted, startInteraction,
             networks, currentNetwork, currentNetIndex, nextNetwork, systemSSID, systemPort,
-            t, hud, lyricsState
+            t, hud
         };
     }
 }).mount('#app');

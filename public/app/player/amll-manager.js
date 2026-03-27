@@ -104,7 +104,6 @@ export class AMLLManager {
         this.statusHint.className = 'amll-lyrics-status-hint';
         this.statusCard.append(this.statusTitle, this.statusHint);
         this.statusOverlay.appendChild(this.statusCard);
-        this.lyricsContainer.appendChild(this.statusOverlay);
 
         appEl.appendChild(this.overlay);
 
@@ -116,10 +115,10 @@ export class AMLLManager {
         this.lyrics.setEnableBlur(true);
         this.lyrics.setEnableScale(true);
         this.lyrics.setHidePassedLines(false);
+        this.lyricsContainer.appendChild(this.statusOverlay);
         this.bottomInfo = document.createElement('div');
         this.bottomInfo.className = 'amll-bottom-info';
         this.lyrics.getBottomLineElement().appendChild(this.bottomInfo);
-        this.lyricsContainer.appendChild(this.statusOverlay);
         this.lyricsContainer.addEventListener('amll-line-click', (event) => {
             const line = event.detail?.line;
             if (!line || !this.seekHandler) return;
