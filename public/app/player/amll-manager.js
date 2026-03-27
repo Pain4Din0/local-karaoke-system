@@ -27,9 +27,20 @@ export class AMLLManager {
         this.seekHandler = null;
         this.lineContextMenuHandler = null;
         this.bottomInfo = null;
+        this.statusOverlay = null;
+        this.statusCard = null;
+        this.statusTitle = null;
+        this.statusHint = null;
         this.currentLyricsData = null;
+        this.lyricsStatus = 'idle';
         this.localeStrings = {
             songwriterLabel: 'Songwriter:',
+            lyricsSearching: 'Searching Lyrics',
+            lyricsSearchingHint: 'Looking up synced lyrics for this song...',
+            lyricsNotFound: 'Lyrics Not Found',
+            lyricsNotFoundHint: 'Try another source or play without lyrics.',
+            lyricsUnavailable: 'Lyrics Unavailable',
+            lyricsUnavailableHint: 'Lyrics lookup is temporarily unavailable.',
         };
         this.resizeObserver = null;
         this.layoutFrame = 0;
@@ -84,6 +95,18 @@ export class AMLLManager {
         this.lyricsContainer.className = 'amll-lyrics-container';
         this.rightPanel.appendChild(this.lyricsContainer);
 
+        this.statusOverlay = document.createElement('div');
+        this.statusOverlay.className = 'amll-lyrics-status';
+        this.statusCard = document.createElement('div');
+        this.statusCard.className = 'amll-lyrics-status-card';
+        this.statusTitle = document.createElement('div');
+        this.statusTitle.className = 'amll-lyrics-status-title';
+        this.statusHint = document.createElement('div');
+        this.statusHint.className = 'amll-lyrics-status-hint';
+        this.statusCard.append(this.statusTitle, this.statusHint);
+        this.statusOverlay.appendChild(this.statusCard);
+        this.lyricsContainer.appendChild(this.statusOverlay);
+
         appEl.appendChild(this.overlay);
 
         // Initialize sub-components now that elements are in the DOM and have bounds
@@ -97,6 +120,7 @@ export class AMLLManager {
         this.bottomInfo = document.createElement('div');
         this.bottomInfo.className = 'amll-bottom-info';
         this.lyrics.getBottomLineElement().appendChild(this.bottomInfo);
+        this.lyricsContainer.appendChild(this.statusOverlay);
         this.lyricsContainer.addEventListener('amll-line-click', (event) => {
             const line = event.detail?.line;
             if (!line || !this.seekHandler) return;
@@ -132,6 +156,7 @@ export class AMLLManager {
         if (this.currentLyricsData) {
             this.setBottomInfo(this.buildBottomInfo(this.currentLyricsData));
         }
+        this.renderStatus();
     }
 
     scheduleLayoutUpdate() {
@@ -232,6 +257,11 @@ export class AMLLManager {
         if (!this.bottomInfo) return;
         this.bottomInfo.innerHTML = content || '';
         this.scheduleLayoutUpdate();
+    }
+
+    setStatus(status = 'idle') {
+        this.lyricsStatus = status || 'idle';
+        this.renderStatus();
     }
 
     setLyrics(lyricsData) {
@@ -381,5 +411,33 @@ export class AMLLManager {
         if (names.length === 0) return '';
         const label = this._escapeHtml(this.localeStrings.songwriterLabel || 'Songwriter:');
         return `<strong>${label}</strong>${names.join(', ')}`;
+    }
+
+    renderStatus() {
+        if (!this.statusOverlay || !this.statusTitle || !this.statusHint) return;
+
+        let title = '';
+        let hint = '';
+        if (this.lyricsStatus === 'loading') {
+            title = this.localeStrings.lyricsSearching || 'Searching Lyrics';
+            hint = this.localeStrings.lyricsSearchingHint || '';
+        } else if (this.lyricsStatus === 'empty') {
+            title = this.localeStrings.lyricsNotFound || 'Lyrics Not Found';
+            hint = this.localeStrings.lyricsNotFoundHint || '';
+        } else if (this.lyricsStatus === 'error') {
+            title = this.localeStrings.lyricsUnavailable || 'Lyrics Unavailable';
+            hint = this.localeStrings.lyricsUnavailableHint || '';
+        }
+
+        const visible = title.length > 0;
+        this.statusOverlay.classList.toggle('is-visible', visible);
+        this.statusOverlay.setAttribute('aria-hidden', visible ? 'false' : 'true');
+        if (this.lyricsContainer) {
+            this.lyricsContainer.dataset.statusOverlay = visible ? 'true' : 'false';
+            this.lyricsContainer.dataset.lyricsStatus = visible ? this.lyricsStatus : 'idle';
+        }
+        this.statusTitle.textContent = title;
+        this.statusHint.textContent = hint;
+        this.scheduleLayoutUpdate();
     }
 }

@@ -107,6 +107,11 @@ body {
     text-align: center;
 }
 
+.lyrics-panel-status {
+    padding-top: 1.4rem;
+    padding-bottom: 1.4rem;
+}
+
 .lyrics-current {
     font-size: clamp(2rem, 3.5vw, 3.8rem);
     line-height: 1.2;
@@ -150,6 +155,30 @@ body {
     color: rgba(255, 255, 255, 0.52);
 }
 
+.lyrics-status {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    min-height: 5.25rem;
+}
+
+.lyrics-status-title {
+    font-size: clamp(1.35rem, 2.3vw, 2.1rem);
+    line-height: 1.2;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.96);
+    letter-spacing: 0.01em;
+}
+
+.lyrics-status-hint {
+    max-width: 42rem;
+    font-size: clamp(0.95rem, 1.5vw, 1.15rem);
+    line-height: 1.5;
+    color: rgba(255, 255, 255, 0.6);
+}
+
 @media (max-width: 768px) {
     .lyrics-overlay {
         bottom: 3vh;
@@ -159,6 +188,10 @@ body {
     .lyrics-panel {
         padding: 1rem 1.1rem;
         border-radius: 22px;
+    }
+
+    .lyrics-status {
+        min-height: 4.5rem;
     }
 
 }

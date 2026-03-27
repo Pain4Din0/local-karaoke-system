@@ -42,14 +42,19 @@ createApp({
         const currentNetwork = computed(() => networks.value[currentNetIndex.value] || networks.value[0]);
 
         const hud = ref({ show: false, icon: '', text: '' });
-        const lyricsState = ref({
+        const createLyricsState = (overrides = {}) => ({
             visible: false,
+            status: 'idle',
+            titleKey: '',
+            hintKey: '',
             currentText: '',
             nextText: '',
             currentLine: null,
             currentWords: [],
             data: null,
+            ...overrides,
         });
+        const lyricsState = ref(createLyricsState());
         let hudTimeout = null;
 
         const showHud = (icon, text) => {
@@ -75,36 +80,61 @@ createApp({
         let amllInitialized = false;
         let amllCoverRefreshed = false;
 
+        const buildAMLLLocaleStrings = () => ({
+            songwriterLabel: t('songwriter_label'),
+            lyricsSearching: t('lyrics_searching'),
+            lyricsSearchingHint: t('lyrics_searching_hint'),
+            lyricsNotFound: t('lyrics_not_found'),
+            lyricsNotFoundHint: t('lyrics_not_found_hint'),
+            lyricsUnavailable: t('lyrics_unavailable'),
+            lyricsUnavailableHint: t('lyrics_unavailable_hint'),
+        });
+
+        const syncAMLLLyricsState = (state = lyricsState.value) => {
+            if (!amllInitialized) return;
+            amllManager.setLocaleStrings(buildAMLLLocaleStrings());
+            amllManager.setLyrics(state.status === 'ready' ? state.data : null);
+            amllManager.setStatus(state.status);
+        };
+
+        const commitLyricsState = (nextState) => {
+            lyricsState.value = nextState;
+            syncAMLLLyricsState(nextState);
+        };
+
         const resetLyricsState = () => {
-            lyricsState.value = {
-                visible: false,
-                currentText: '',
-                nextText: '',
-                currentLine: null,
-                currentWords: [],
-                data: null,
-            };
+            commitLyricsState(createLyricsState());
+        };
+
+        const setLyricsStatusState = (status, titleKey, hintKey) => {
+            commitLyricsState(createLyricsState({
+                visible: true,
+                status,
+                titleKey,
+                hintKey,
+            }));
         };
 
         const applyLyricsData = (data) => {
             if (!data || !data.found || !Array.isArray(data.lines) || data.lines.length === 0) {
-                resetLyricsState();
+                setLyricsStatusState('empty', 'lyrics_not_found', 'lyrics_not_found_hint');
                 return;
             }
-            lyricsState.value = {
+            commitLyricsState(createLyricsState({
                 visible: true,
+                status: 'ready',
                 currentText: '',
                 nextText: '',
                 currentLine: null,
                 currentWords: [],
                 data,
-            };
+            }));
         };
 
         const updateLyrics = (currentTime) => {
             const data = lyricsState.value.data;
             if (!data || !Array.isArray(data.lines) || data.lines.length === 0) {
-                lyricsState.value.visible = false;
+                lyricsState.value.visible = lyricsState.value.status !== 'idle';
                 return;
             }
 
@@ -147,22 +177,20 @@ createApp({
             const appEl = document.getElementById('app');
             if (!appEl) return;
             amllManager.init(appEl);
-            amllManager.setLocaleStrings({
-                songwriterLabel: t('songwriter_label'),
-            });
+            amllManager.setLocaleStrings(buildAMLLLocaleStrings());
             amllManager.setSeekHandler((seconds) => {
                 if (!art) return;
                 art.currentTime = seconds;
             });
             amllInitialized = true;
+            syncAMLLLyricsState();
         };
 
         const startAMLL = (song) => {
             if (!isYouTubeMusic(song)) return;
             initAMLL();
-            amllManager.setLocaleStrings({
-                songwriterLabel: t('songwriter_label'),
-            });
+            amllManager.setLocaleStrings(buildAMLLLocaleStrings());
+            syncAMLLLyricsState();
 
             // Set metadata
             amllManager.setMeta(
@@ -212,6 +240,7 @@ createApp({
         const feedLyricsToAMLL = (lyricsData) => {
             if (!amllInitialized) return;
             amllManager.setLyrics(lyricsData);
+            amllManager.setStatus(lyricsState.value.status);
         };
 
         const startAMLLSync = () => {
@@ -248,10 +277,11 @@ createApp({
         };
 
         const syncLyricsToPlayback = (force = false) => {
-            if (!lyricsEnabled || !lyricsState.value.data) {
+            if (!lyricsEnabled) {
                 if (force) resetLyricsState();
                 return;
             }
+            if (!lyricsState.value.data) return;
             updateLyrics(getPlaybackTime());
         };
 
@@ -276,6 +306,7 @@ createApp({
                 return;
             }
             lyricsSongId = song.id;
+            setLyricsStatusState('loading', 'lyrics_searching', 'lyrics_searching_hint');
             try {
                 const response = await fetch(`/api/lyrics/${song.id}?source=${encodeURIComponent(lyricsSource || 'auto')}`);
                 if (!response.ok && response.status !== 404) {
@@ -295,7 +326,7 @@ createApp({
                 }
             } catch (error) {
                 console.warn('[Player] Failed to fetch lyrics for song:', song.title, error);
-                resetLyricsState();
+                setLyricsStatusState('error', 'lyrics_unavailable', 'lyrics_unavailable_hint');
                 showHud('ri-file-warning-line', t('lyrics_unavailable'));
             }
         };

@@ -154,21 +154,27 @@
         </Transition>
 
         <div v-if="isPlayingVideo && lyricsState.visible && !isAMLLMode" class="lyrics-overlay z-30 pointer-events-none">
-            <div class="lyrics-panel">
-                <div class="lyrics-current" :class="{ 'lyrics-current-word': lyricsState.currentWords.length > 0 }">
-                    <template v-if="lyricsState.currentWords.length > 0">
-                        <span
-                            v-for="word in lyricsState.currentWords"
-                            :key="`${lyricsState.currentLine?.id || 0}-${word.id}`"
-                            class="lyrics-word"
-                            :class="word.state"
-                        >{{ word.text }}</span>
-                    </template>
-                    <template v-else>
-                        {{ lyricsState.currentText }}
-                    </template>
+            <div class="lyrics-panel" :class="{ 'lyrics-panel-status': lyricsState.status !== 'ready' }">
+                <template v-if="lyricsState.status === 'ready'">
+                    <div class="lyrics-current" :class="{ 'lyrics-current-word': lyricsState.currentWords.length > 0 }">
+                        <template v-if="lyricsState.currentWords.length > 0">
+                            <span
+                                v-for="word in lyricsState.currentWords"
+                                :key="`${lyricsState.currentLine?.id || 0}-${word.id}`"
+                                class="lyrics-word"
+                                :class="word.state"
+                            >{{ word.text }}</span>
+                        </template>
+                        <template v-else>
+                            {{ lyricsState.currentText }}
+                        </template>
+                    </div>
+                    <div class="lyrics-next" v-if="lyricsState.nextText">{{ lyricsState.nextText }}</div>
+                </template>
+                <div v-else class="lyrics-status">
+                    <div class="lyrics-status-title">{{ t(lyricsState.titleKey) }}</div>
+                    <div class="lyrics-status-hint" v-if="lyricsState.hintKey">{{ t(lyricsState.hintKey) }}</div>
                 </div>
-                <div class="lyrics-next" v-if="lyricsState.nextText">{{ lyricsState.nextText }}</div>
             </div>
         </div>
     </div>

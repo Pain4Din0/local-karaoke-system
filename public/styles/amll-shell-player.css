@@ -388,6 +388,61 @@ body[data-amll-lyrics-open] #artplayer {
     --amll-lp-font-weight: 600;
     --amll-lp-letter-spacing: normal;
     --amll-lp-line-padding-x: 0.75em;
+    transition: opacity 0.25s ease, filter 0.25s ease, transform 0.25s ease;
+}
+
+.amll-overlay.amll-shell .amll-lyrics-container[data-status-overlay="true"] > .amll-lyric-player {
+    opacity: 0.16;
+    filter: blur(12px) saturate(0.7);
+    transform: scale(1.015);
+}
+
+.amll-overlay.amll-shell .amll-lyrics-status {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 0.6em;
+    padding: 8vh 0.85em 8vh 0.75em;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease;
+}
+
+.amll-overlay.amll-shell .amll-lyrics-status.is-visible {
+    opacity: 1;
+}
+
+.amll-overlay.amll-shell .amll-lyrics-status-card {
+    max-width: min(38rem, 78%);
+    padding: 1.3rem 1.4rem;
+    border-radius: 1.5rem;
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.03)),
+        linear-gradient(135deg, rgba(4, 8, 14, 0.78), rgba(4, 8, 14, 0.38));
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.28);
+    backdrop-filter: blur(18px);
+}
+
+.amll-overlay.amll-shell .amll-lyrics-status-title {
+    font-size: clamp(1.4rem, 2.6vw, 2.4rem);
+    line-height: 1.1;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: rgba(255, 255, 255, 0.94);
+    text-shadow: 0 10px 40px rgba(0, 0, 0, 0.28);
+}
+
+.amll-overlay.amll-shell .amll-lyrics-status-hint {
+    max-width: min(36rem, 70%);
+    font-size: clamp(0.96rem, 1.4vw, 1.15rem);
+    line-height: 1.6;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.56);
 }
 
 .amll-overlay.amll-shell .amll-qr-corner {
@@ -468,6 +523,21 @@ body[data-amll-lyrics-open] #artplayer {
 .amll-overlay.amll-shell .amll-content.amll-vertical .amll-qr-corner {
     right: 2em;
     bottom: 2em;
+}
+
+.amll-overlay.amll-shell .amll-content.amll-vertical .amll-lyrics-status {
+    align-items: center;
+    padding-left: 1.25em;
+    padding-right: 1.25em;
+    text-align: center;
+}
+
+.amll-overlay.amll-shell .amll-content.amll-vertical .amll-lyrics-status-hint {
+    max-width: 30rem;
+}
+
+.amll-overlay.amll-shell .amll-content.amll-vertical .amll-lyrics-status-card {
+    max-width: min(32rem, 92%);
 }
 
 @media screen and (max-width: 1600px), screen and (max-height: 1000px) {

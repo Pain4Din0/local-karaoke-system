@@ -1675,6 +1675,7 @@ class AMLLDomLyricPlayer {
         this.allowScroll = true;
         this.scrolledHandler = 0;
         this.wheelTimeout = undefined;
+        this.currentScrollId = 0;
         this.alignAnchor = 'center';
         this.alignPosition = 0.35;
         this.overscanPx = 300;
@@ -1754,7 +1755,6 @@ class AMLLDomLyricPlayer {
         let lastMoveY = 0;
         let startScrollTime = 0;
         let scrollSpeed = 0;
-        let currentScrollId = 0;
 
         this.element.addEventListener('touchstart', (event) => {
             if (!this.beginScrollHandler()) return;
@@ -1812,12 +1812,12 @@ class AMLLDomLyricPlayer {
             }
 
             startTouchPosY = 0;
-            const scrollId = ++currentScrollId;
+            const scrollId = ++this.currentScrollId;
             if (Math.abs(scrollSpeed) < 0.1) scrollSpeed = 0;
             let lastFrameTime = performance.now();
 
             const onScrollFrame = (time) => {
-                if (scrollId !== currentScrollId) return;
+                if (scrollId !== this.currentScrollId) return;
 
                 const deltaTime = time - lastFrameTime;
                 lastFrameTime = time;
@@ -2056,6 +2056,18 @@ class AMLLDomLyricPlayer {
     setCurrentTime(time, isSeek = false) {
         this.currentTime = time;
         if (!this.initialLayoutFinished && !isSeek) return;
+        const previousScrollToIndex = this.scrollToIndex;
+        const relayout = (sync = false, force = false) => {
+            const shouldRestoreAutoFollow = !isSeek
+                && previousScrollToIndex !== this.scrollToIndex
+                && (this.isScrolled || this.isUserScrolling || this.scrollOffset !== 0);
+            if (shouldRestoreAutoFollow) {
+                this.resetScroll();
+                sync = true;
+                force = false;
+            }
+            this.calcLayout(sync, force);
+        };
 
         const removedIds = new Set();
         const addedIds = new Set();
@@ -2135,7 +2147,7 @@ class AMLLDomLyricPlayer {
                     this.currentLyricLineObjects[added]?.enable();
                 }
                 this.scrollToIndex = Math.min(...this.bufferedLines);
-                this.calcLayout();
+                relayout();
             } else if (addedIds.size === 0 && removedIds.size > 0) {
                 let removedCurrentAnchor = false;
                 for (const buffered of Array.from(this.bufferedLines)) {
@@ -2151,7 +2163,7 @@ class AMLLDomLyricPlayer {
                 if (this.bufferedLines.size > 0 && removedCurrentAnchor) {
                     this.scrollToIndex = Math.min(...this.bufferedLines);
                 }
-                this.calcLayout();
+                relayout();
             } else {
                 for (const added of addedIds) {
                     this.bufferedLines.add(added);
@@ -2164,7 +2176,7 @@ class AMLLDomLyricPlayer {
                 if (this.bufferedLines.size > 0) {
                     this.scrollToIndex = Math.min(...this.bufferedLines);
                 }
-                this.calcLayout();
+                relayout();
             }
         }
 
@@ -2178,7 +2190,7 @@ class AMLLDomLyricPlayer {
                     : this.processedLines.length - 1;
                 if (this.scrollToIndex !== targetIndex) {
                     this.scrollToIndex = targetIndex;
-                    this.calcLayout();
+                    relayout();
                 }
             }
         }
@@ -2357,7 +2369,9 @@ class AMLLDomLyricPlayer {
 
     resetScroll() {
         this.isScrolled = false;
+        this.isUserScrolling = false;
         this.scrollOffset = 0;
+        this.currentScrollId += 1;
         clearTimeout(this.scrolledHandler);
         this.scrolledHandler = 0;
     }
