@@ -1,5 +1,21 @@
 body {
-    font-family: 'Inter', 'Noto Sans SC', 'Noto Sans JP', sans-serif;
+    font-family:
+        "SF Pro Display",
+        "SF Pro Text",
+        "Noto Sans",
+        "Noto Sans SC",
+        "Noto Sans TC",
+        "Noto Sans JP",
+        "Noto Sans KR",
+        "PingFang SC",
+        "PingFang TC",
+        "PingFang HK",
+        "Segoe UI Variable Display",
+        "Segoe UI Variable Text",
+        "Microsoft YaHei UI",
+        "Microsoft YaHei",
+        system-ui,
+        sans-serif;
 }
 
 

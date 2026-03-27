@@ -46,6 +46,42 @@ const structuredCloneSafe = (value) => {
     return JSON.parse(JSON.stringify(value));
 };
 
+const detectLyricTextLang = (text) => {
+    if (!text) return '';
+    if (/[\uac00-\ud7af\u1100-\u11ff\u3130-\u318f]/u.test(text)) return 'ko';
+    if (/[\u3040-\u309f\u30a0-\u30ff\u31f0-\u31ff]/u.test(text)) return 'ja';
+    if (/[體國樂藝灣廣東歲劍聲學醫龍歡點燈貓戀櫻雙證讓讀變靜]/u.test(text)) return 'zh-Hant';
+    if (/[\u3400-\u4dbf\u4e00-\u9fff]/u.test(text)) return 'zh-Hans';
+    return '';
+};
+
+const detectStrongLyricTextLang = (text) => {
+    if (!text) return '';
+    if (/[\uac00-\ud7af\u1100-\u11ff\u3130-\u318f]/u.test(text)) return 'ko';
+    if (/[\u3040-\u309f\u30a0-\u30ff\u31f0-\u31ff]/u.test(text)) return 'ja';
+    if (/[體國樂藝灣廣東歲劍聲學醫龍歡點燈貓戀櫻雙證讓讀變靜]/u.test(text)) return 'zh-Hant';
+    return '';
+};
+
+const inferPreferredLyricLang = (lines) => {
+    const counts = new Map();
+    for (const line of lines) {
+        const text = line?.words?.map((word) => word.word).join('') || '';
+        const lang = detectStrongLyricTextLang(text);
+        if (!lang) continue;
+        counts.set(lang, (counts.get(lang) || 0) + 1);
+    }
+    let preferred = '';
+    let maxCount = 0;
+    for (const [lang, count] of counts.entries()) {
+        if (count > maxCount) {
+            preferred = lang;
+            maxCount = count;
+        }
+    }
+    return preferred;
+};
+
 const cubicBezier = (mX1, mY1, mX2, mY2) => {
     if (mX1 === mY1 && mX2 === mY2) return (x) => x;
 
@@ -827,6 +863,13 @@ class LyricLineEl {
         main.className = STYLE.mainLine;
         trans.className = STYLE.subLine;
         roman.className = STYLE.subLine;
+        roman.dataset.amllRomanLine = 'true';
+        const mainLang = this.lyricLine.preferredLang || detectLyricTextLang(this.lyricLine.words.map((word) => word.word).join(''));
+        const transLang = detectLyricTextLang(this.lyricLine.translatedLyric || '');
+        this.mainLang = mainLang || '';
+        this.transLang = transLang || '';
+        if (mainLang) main.lang = mainLang;
+        if (transLang) trans.lang = transLang;
         this.element.append(main, trans, roman);
         this.rebuildStyle();
     }
@@ -1026,15 +1069,21 @@ class LyricLineEl {
         const subElements = [];
         const romanWord = word.romanWord?.trim() ?? '';
         const wordContainer = hasRubyLine ? document.createElement('div') : mainWordEl;
+        if (this.mainLang) {
+            mainWordEl.lang = this.mainLang;
+            wordContainer.lang = this.mainLang;
+        }
 
         if (hasRubyLine) {
             const rubyWordEl = document.createElement('div');
             rubyWordEl.classList.add(STYLE.rubyWord);
+            if (this.mainLang) rubyWordEl.lang = this.mainLang;
             for (const ruby of this.getRubySegments(word)) {
                 const rubyPartEl = document.createElement('span');
                 rubyPartEl.innerText = ruby.word;
                 rubyPartEl.dataset.startTime = String(ruby.startTime);
                 rubyPartEl.dataset.endTime = String(ruby.endTime);
+                if (this.mainLang) rubyPartEl.lang = this.mainLang;
                 rubyWordEl.appendChild(rubyPartEl);
             }
             mainWordEl.classList.add(STYLE.wordWithRuby);
@@ -1047,12 +1096,14 @@ class LyricLineEl {
             for (const char of word.word.trim()) {
                 const charEl = document.createElement('span');
                 charEl.innerText = char;
+                if (this.mainLang) charEl.lang = this.mainLang;
                 subElements.push(charEl);
                 wordContainer.appendChild(charEl);
             }
         } else if (hasRomanLine) {
             const body = document.createElement('div');
             body.innerText = word.word.trim();
+            if (this.mainLang) body.lang = this.mainLang;
             wordContainer.appendChild(body);
         } else if (romanWord.length === 0) {
             wordContainer.innerText = word.word.trim();
@@ -1107,6 +1158,7 @@ class LyricLineEl {
 
         const wrapperWordEl = document.createElement('span');
         wrapperWordEl.classList.add(STYLE.emphasizeWrapper);
+        if (this.mainLang) wrapperWordEl.lang = this.mainLang;
         const characterElements = [];
 
         for (const word of chunk) {
@@ -2527,7 +2579,21 @@ function convertLocalLine(line) {
 function convertLyricsPayload(lyricsData) {
     if (!lyricsData || !lyricsData.found || !Array.isArray(lyricsData.lines)) return [];
 
-    return lyricsData.lines.flatMap((line) => convertLocalLine(line)).filter((line) => line && line.words.length > 0);
+    const convertedLines = lyricsData.lines
+        .flatMap((line) => convertLocalLine(line))
+        .filter((line) => line && line.words.length > 0);
+    const preferredLang = inferPreferredLyricLang(convertedLines);
+    if (!preferredLang) return convertedLines;
+
+    return convertedLines.map((line) => {
+        const text = line.words.map((word) => word.word).join('');
+        const strongLang = detectStrongLyricTextLang(text);
+        const fallbackLang = detectLyricTextLang(text);
+        return {
+            ...line,
+            preferredLang: strongLang || (fallbackLang === 'zh-Hans' ? preferredLang : fallbackLang || preferredLang),
+        };
+    });
 }
 
 export class AMLLLyricPlayer {

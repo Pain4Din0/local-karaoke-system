@@ -10,6 +10,10 @@
     font-size: var(--amll-lp-font-size, max(max(5vh, 2.5vw), 12px));
     font-weight: var(--amll-lp-font-weight, 600);
     letter-spacing: var(--amll-lp-letter-spacing, normal);
+    font-variation-settings: "wght" var(--amll-lp-font-weight, 600);
+    font-kerning: normal;
+    font-optical-sizing: auto;
+    text-rendering: optimizeLegibility;
 }
 
 .amll-lyric-player.dom {
@@ -100,10 +104,37 @@
     overflow-wrap: break-word;
 }
 
+.amll-lp-main-line[lang="ja"],
+.amll-lp-sub-line[lang="ja"] {
+    font-family: var(--amll-lp-font-family-ja, var(--amll-lp-font-family, var(--amll-font-family)));
+}
+
+.amll-lp-main-line[lang="ko"],
+.amll-lp-sub-line[lang="ko"] {
+    font-family: var(--amll-lp-font-family-ko, var(--amll-lp-font-family, var(--amll-font-family)));
+}
+
+.amll-lp-main-line[lang="zh-Hans"],
+.amll-lp-sub-line[lang="zh-Hans"] {
+    font-family: var(--amll-lp-font-family-zh-hans, var(--amll-lp-font-family, var(--amll-font-family)));
+}
+
+.amll-lp-main-line[lang="zh-Hant"],
+.amll-lp-sub-line[lang="zh-Hant"] {
+    font-family: var(--amll-lp-font-family-zh-hant, var(--amll-lp-font-family, var(--amll-font-family)));
+}
+
 .amll-lp-main-line span {
     display: inline-block;
     text-align: start;
     vertical-align: bottom;
+    font-family: inherit;
+}
+
+.amll-lp-main-line div,
+.amll-lp-sub-line span,
+.amll-lp-sub-line div {
+    font-family: inherit;
 }
 
 .amll-lp-main-line .amll-lp-roman-word {
@@ -111,6 +142,9 @@
     line-height: 1em;
     display: flex;
     padding-inline-end: 0.3em;
+    font-family: var(--amll-lp-font-family-latin, var(--amll-lp-font-family, var(--amll-font-family)));
+    font-weight: 500;
+    letter-spacing: 0.015em;
 }
 
 .amll-lp-main-line .amll-lp-ruby-word {
@@ -164,6 +198,12 @@
     line-height: 1.5em;
     transition: opacity 0.2s 0.25s;
     opacity: 0.3;
+    font-weight: 500;
+}
+
+.amll-lp-sub-line[data-amll-roman-line="true"] {
+    font-family: var(--amll-lp-font-family-latin, var(--amll-lp-font-family, var(--amll-font-family)));
+    letter-spacing: 0.015em;
 }
 
 .amll-lp-disable-spring > * {

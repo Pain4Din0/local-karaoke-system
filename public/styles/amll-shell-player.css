@@ -2,15 +2,28 @@
     --amll-font-family:
         "SF Pro Display",
         "SF Pro Text",
+        "Noto Sans",
+        "Noto Sans SC",
+        "Noto Sans TC",
+        "Noto Sans JP",
+        "Noto Sans KR",
+        "Noto Sans CJK SC",
+        "Noto Sans CJK TC",
+        "Noto Sans CJK JP",
+        "Noto Sans CJK KR",
+        "Source Han Sans SC",
+        "Source Han Sans TC",
+        "Source Han Sans",
         "PingFang SC",
         "PingFang TC",
+        "PingFang HK",
         "Hiragino Sans GB",
-        "Noto Sans SC",
-        "Noto Sans CJK SC",
-        "Source Han Sans SC",
-        "Noto Sans JP",
         "Segoe UI Variable Display",
         "Segoe UI Variable Text",
+        "Microsoft YaHei UI",
+        "Microsoft YaHei",
+        "Yu Gothic UI",
+        "Malgun Gothic",
         system-ui,
         -apple-system,
         BlinkMacSystemFont,
@@ -22,12 +35,131 @@
         "Open Sans",
         "Helvetica Neue",
         sans-serif;
-    --amll-lyric-font-family: var(--amll-font-family);
+    --amll-lyric-font-family:
+        "SF Pro Display",
+        "SF Pro Text",
+        "Noto Sans",
+        "Noto Sans SC",
+        "Noto Sans TC",
+        "Noto Sans JP",
+        "Noto Sans KR",
+        "Noto Sans CJK SC",
+        "Noto Sans CJK TC",
+        "Noto Sans CJK JP",
+        "Noto Sans CJK KR",
+        "Source Han Sans SC",
+        "Source Han Sans TC",
+        "Source Han Sans",
+        "PingFang SC",
+        "PingFang TC",
+        "PingFang HK",
+        "Hiragino Sans GB",
+        "Hiragino Sans",
+        "Segoe UI Variable Display",
+        "Segoe UI Variable Text",
+        "Microsoft YaHei UI",
+        "Microsoft YaHei",
+        "Yu Gothic UI",
+        "Malgun Gothic",
+        system-ui,
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        Roboto,
+        "Helvetica Neue",
+        sans-serif;
+    --amll-lyric-font-family-zh-hans:
+        "SF Pro Display",
+        "SF Pro Text",
+        "Noto Sans SC",
+        "Noto Sans CJK SC",
+        "Source Han Sans SC",
+        "Noto Sans",
+        "PingFang SC",
+        "Hiragino Sans GB",
+        "Microsoft YaHei UI",
+        "Microsoft YaHei",
+        "Segoe UI Variable Display",
+        "Segoe UI Variable Text",
+        system-ui,
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        Roboto,
+        "Helvetica Neue",
+        sans-serif;
+    --amll-lyric-font-family-zh-hant:
+        "SF Pro Display",
+        "SF Pro Text",
+        "Noto Sans TC",
+        "Noto Sans CJK TC",
+        "Source Han Sans TC",
+        "Noto Sans",
+        "PingFang TC",
+        "PingFang HK",
+        "Hiragino Sans",
+        "Segoe UI Variable Display",
+        "Segoe UI Variable Text",
+        system-ui,
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        Roboto,
+        "Helvetica Neue",
+        sans-serif;
+    --amll-lyric-font-family-ja:
+        "SF Pro Display",
+        "SF Pro Text",
+        "Noto Sans JP",
+        "Noto Sans CJK JP",
+        "Noto Sans",
+        "Hiragino Sans",
+        "Yu Gothic UI",
+        "PingFang SC",
+        "Segoe UI Variable Display",
+        "Segoe UI Variable Text",
+        system-ui,
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        Roboto,
+        "Helvetica Neue",
+        sans-serif;
+    --amll-lyric-font-family-ko:
+        "SF Pro Display",
+        "SF Pro Text",
+        "Noto Sans KR",
+        "Noto Sans CJK KR",
+        "Noto Sans",
+        "Malgun Gothic",
+        "Segoe UI Variable Display",
+        "Segoe UI Variable Text",
+        system-ui,
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        Roboto,
+        "Helvetica Neue",
+        sans-serif;
+    --amll-lyric-font-family-latin:
+        "SF Pro Text",
+        "SF Pro Display",
+        "Noto Sans",
+        "Segoe UI Variable Text",
+        "Segoe UI Variable Display",
+        "Segoe UI",
+        Roboto,
+        "Helvetica Neue",
+        Arial,
+        sans-serif;
+}
+
+.amll-overlay.amll-shell {
+    font-family: var(--amll-font-family);
 }
 
 .amll-overlay.amll-shell,
 .amll-overlay.amll-shell * {
-    font-family: var(--amll-font-family);
     font-synthesis: none;
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
@@ -247,6 +379,11 @@ body[data-amll-lyrics-open] #artplayer {
 
 .amll-overlay.amll-shell .amll-lyrics-container > .amll-lyric-player {
     --amll-lp-font-family: var(--amll-lyric-font-family);
+    --amll-lp-font-family-ja: var(--amll-lyric-font-family-ja);
+    --amll-lp-font-family-ko: var(--amll-lyric-font-family-ko);
+    --amll-lp-font-family-zh-hans: var(--amll-lyric-font-family-zh-hans);
+    --amll-lp-font-family-zh-hant: var(--amll-lyric-font-family-zh-hant);
+    --amll-lp-font-family-latin: var(--amll-lyric-font-family-latin);
     --amll-lp-font-size: max(max(5vh, 2.5vw), 14px);
     --amll-lp-font-weight: 600;
     --amll-lp-letter-spacing: normal;
