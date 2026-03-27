@@ -604,9 +604,7 @@ function clamp(min, cur, max) {
     return Math.max(min, Math.min(cur, max));
 }
 
-function createLineEventName(type = 'click') {
-    return type === 'contextmenu' ? 'amll-line-contextmenu' : 'amll-line-click';
-}
+const LINE_CLICK_EVENT = 'amll-line-click';
 
 class InterludeDots {
     constructor() {
@@ -2022,7 +2020,7 @@ class AMLLDomLyricPlayer {
             this.lyricLineElementMap.set(lineEl.getElement(), lineEl);
             const dispatchLineEvent = (event) => {
                 if (this.isUserScrolling) return;
-                const customEvent = new CustomEvent(createLineEventName(event.type), {
+                const customEvent = new CustomEvent(LINE_CLICK_EVENT, {
                     bubbles: true,
                     cancelable: true,
                     detail: {
@@ -2039,7 +2037,6 @@ class AMLLDomLyricPlayer {
                 }
             };
             lineEl.getElement().addEventListener('click', dispatchLineEvent);
-            lineEl.getElement().addEventListener('contextmenu', dispatchLineEvent);
             return lineEl;
         });
 

@@ -1,5 +1,5 @@
 /**
- * Apple Music-like Lyrics Manager (AMLL Manager)
+ * AMLL lyrics manager used by the YouTube Music player overlay.
  */
 
 import { AMLLLyricPlayer } from './amll-lyric-player.js';
@@ -25,7 +25,6 @@ export class AMLLManager {
         this.coverImg = null;
         this.coverSource = null;
         this.seekHandler = null;
-        this.lineContextMenuHandler = null;
         this.bottomInfo = null;
         this.statusOverlay = null;
         this.statusCard = null;
@@ -126,10 +125,6 @@ export class AMLLManager {
             if (!line || !this.seekHandler) return;
             this.seekHandler(line.startTime / 1000);
         });
-        this.lyricsContainer.addEventListener('amll-line-contextmenu', (event) => {
-            if (!this.lineContextMenuHandler) return;
-            this.lineContextMenuHandler(event.detail);
-        });
 
         this.resizeObserver = new ResizeObserver(() => {
             this.scheduleLayoutUpdate();
@@ -142,10 +137,6 @@ export class AMLLManager {
 
     setSeekHandler(handler) {
         this.seekHandler = typeof handler === 'function' ? handler : null;
-    }
-
-    setLineContextMenuHandler(handler) {
-        this.lineContextMenuHandler = typeof handler === 'function' ? handler : null;
     }
 
     setLocaleStrings(strings = {}) {
@@ -244,7 +235,7 @@ export class AMLLManager {
         }
     }
 
-    setMeta(title, artist, requester) {
+    setMeta(title, artist) {
         if (!this.metaContainer) return;
         this.metaContainer.innerHTML = `
             <div class="amll-meta-title">${this._escapeHtml(title || '')}</div>

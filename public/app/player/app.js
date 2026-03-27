@@ -170,7 +170,7 @@ createApp({
             }
         };
 
-        // ── AMLL (Apple Music-like Lyrics) ────────────────
+        // ── AMLL synced lyrics overlay ────────────────
 
         const initAMLL = () => {
             if (amllInitialized) return;
@@ -195,8 +195,7 @@ createApp({
             // Set metadata
             amllManager.setMeta(
                 song.track || song.title || '',
-                song.artist || song.uploader || '',
-                song.requester || ''
+                song.artist || song.uploader || ''
             );
 
             // Extract album art from video after it loads
