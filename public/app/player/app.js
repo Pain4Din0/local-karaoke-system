@@ -146,33 +146,9 @@ createApp({
 
             // Extract album art from video after it loads
             amllCoverRefreshed = false;
-            const trySetCover = () => {
-                if (!art || !art.video) return;
-                if (art.video.readyState >= 2) {
-                    amllManager.setAlbumArt(art.video, song.pic);
-                    // Refresh cover once more after a short delay (video may update)
-                    setTimeout(() => {
-                        if (art && art.video && !amllCoverRefreshed) {
-                            amllCoverRefreshed = true;
-                            amllManager.refreshCover(art.video);
-                            amllManager.setAlbumArt(art.video, song.pic); // refresh album texture
-                        }
-                    }, 2000);
-                } else {
-                    art.video.addEventListener('loadeddata', () => {
-                        amllManager.setAlbumArt(art.video, song.pic);
-                        setTimeout(() => {
-                            if (art && art.video && !amllCoverRefreshed) {
-                                amllCoverRefreshed = true;
-                                amllManager.refreshCover(art.video);
-                                amllManager.setAlbumArt(art.video, song.pic);
-                            }
-                        }, 2000);
-                    }, { once: true });
-                }
-            };
+            // Instantly try setting cover from picUrl explicitly
+            amllManager.setAlbumArt(null, song.pic);
 
-            trySetCover();
             amllManager.show();
 
             // Move QR code into AMLL overlay
@@ -203,6 +179,7 @@ createApp({
 
         const hideAMLL = () => {
             amllManager.hide();
+            if (typeof amllManager.clearCover === 'function') amllManager.clearCover();
             amllManager.setLowFreqVolume(0);
             stopAMLLSync();
         };
@@ -359,6 +336,14 @@ createApp({
 
                 // Start AMLL sync if YouTube Music
                 if (currentSong.value && isYouTubeMusic(currentSong.value)) {
+                    if (art.video) {
+                        const pic = currentSong.value?.pic;
+                        setTimeout(() => {
+                            if (art && art.video) {
+                                amllManager.setAlbumArt(art.video, pic);
+                            }
+                        }, 1000);
+                    }
                     startAMLLSync();
                     amllManager.setPlaying(true);
                 }
@@ -424,13 +409,13 @@ createApp({
                 if (currentSong.value && isYouTubeMusic(currentSong.value)) {
                     // Re-trigger cover extraction in case startAMLL ran before art was created
                     if (art.video) {
-                        amllManager.setAlbumArt(art.video);
+                        const pic = currentSong.value?.pic;
+                        amllManager.setAlbumArt(art.video, pic);
                         setTimeout(() => {
                             if (art && art.video) {
-                                amllManager.refreshCover(art.video);
-                                amllManager.setAlbumArt(art.video);
+                                amllManager.setAlbumArt(art.video, pic);
                             }
-                        }, 1500);
+                        }, 2000);
                     }
                     startAMLLSync();
                     amllManager.setPlaying(true);

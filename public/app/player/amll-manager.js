@@ -185,12 +185,12 @@ export class AMLLManager {
     }
 
     async setAlbumArt(videoElement, picUrl) {
-        if (!videoElement) return;
+        if (!videoElement && !picUrl) return;
 
         try {
             let source = null;
 
-            if (videoElement.readyState >= 2 && videoElement.videoWidth > 0 && videoElement.videoHeight > 0) {
+            if (videoElement && videoElement.readyState >= 2 && videoElement.videoWidth > 0 && videoElement.videoHeight > 0) {
                 source = videoElement;
             } else if (picUrl) {
                 const img = new Image();
@@ -208,7 +208,7 @@ export class AMLLManager {
                 }
             }
 
-            this.coverSource = source || videoElement;
+            this.coverSource = source || videoElement || null;
             this.redrawCover();
 
             if (this.background) {
@@ -383,6 +383,20 @@ export class AMLLManager {
             if (!ctx) return;
             ctx.fillStyle = '#000';
             ctx.fillRect(0, 0, this.coverImg.width || 400, this.coverImg.height || 400);
+        }
+    }
+
+    clearCover() {
+        this.coverSource = null;
+        if (this.coverImg) {
+            const ctx = this.coverImg.getContext('2d', { alpha: false });
+            if (ctx) {
+                ctx.fillStyle = '#000';
+                ctx.fillRect(0, 0, this.coverImg.width || 400, this.coverImg.height || 400);
+            }
+        }
+        if (this.background) {
+            this.background.setAlbum(null).catch(() => {});
         }
     }
 
