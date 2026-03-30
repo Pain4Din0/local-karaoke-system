@@ -34,6 +34,7 @@ const applyLyricsSettingsFromAdvancedConfig = (config = getAdvancedConfig()) => 
     const lyricsConfig = (config && config.lyrics && typeof config.lyrics === 'object') ? config.lyrics : {};
     state.playerStatus.lyricsEnabled = lyricsConfig.enabled !== undefined ? !!lyricsConfig.enabled : true;
     state.playerStatus.lyricsSource = ALLOWED_LYRICS_SOURCES.has(lyricsConfig.source) ? lyricsConfig.source : 'auto';
+    state.playerStatus.lyricsUtatenRomajiEnabled = !!lyricsConfig.utatenRomajiEnabled;
 };
 
 applyLyricsSettingsFromAdvancedConfig();
@@ -701,6 +702,7 @@ io.on('connection', async (socket) => {
         if (data.loudnessNorm !== undefined) nextStatus.loudnessNorm = !!data.loudnessNorm;
         if (data.lyricsEnabled !== undefined) nextStatus.lyricsEnabled = !!data.lyricsEnabled;
         if (data.lyricsSource !== undefined) nextStatus.lyricsSource = ALLOWED_LYRICS_SOURCES.has(data.lyricsSource) ? data.lyricsSource : nextStatus.lyricsSource;
+        if (data.lyricsUtatenRomajiEnabled !== undefined) nextStatus.lyricsUtatenRomajiEnabled = !!data.lyricsUtatenRomajiEnabled;
 
         state.playerStatus = nextStatus;
         io.volatile.emit('sync_tick', state.playerStatus);

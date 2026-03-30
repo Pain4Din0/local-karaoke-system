@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 
+const { getAdvancedConfig } = require('../config/configManager');
 const { DOWNLOAD_DIR, SCRIPTS_DIR, PYTHON_EXE, ensureRuntimeDirs, buildChildProcessEnv } = require('../config/runtime');
 const state = require('../utils/state');
 const logger = require('../utils/logger');
@@ -11,6 +12,7 @@ const LYRICS_HELPER = path.join(SCRIPTS_DIR, 'lyrics', 'fetch_lyrics.py');
 const MISSING_LYRICS_CACHE_TTL_MS = 5 * 60 * 1000;
 const SUPPORTED_PROVIDER_KEYS = new Set(['ytmusic', 'apple_music', 'qq_music', 'musixmatch', 'lrclib']);
 const APPLE_MUSIC_CACHE_VERSION = 5;
+const UTATEN_ROMAJI_CACHE_VERSION = 3;
 let lyricsSessionId = 0;
 
 ensureRuntimeDirs();
@@ -215,7 +217,14 @@ const runPythonJson = (scriptPath, payload, timeoutMs = 30000) => new Promise((r
 });
 
 const normalizeSourceKey = (sourceKey = 'auto') => String(sourceKey || 'auto').replace(/[^a-z0-9_-]/gi, '_');
-const getLyricsCachePath = (songId, sourceKey = 'auto') => path.join(DOWNLOAD_DIR, `${songId}_lyrics_${normalizeSourceKey(sourceKey)}.json`);
+const getLyricsVariantKey = ({ sourceKey = 'auto', utatenRomajiEnabled = false } = {}) => {
+    const sourceVariant = normalizeSourceKey(sourceKey);
+    const romajiVariant = utatenRomajiEnabled
+        ? `utaten_romaji_v${UTATEN_ROMAJI_CACHE_VERSION}_on`
+        : 'utaten_romaji_off';
+    return `${sourceVariant}_${romajiVariant}`;
+};
+const getLyricsCachePath = (songId, options = {}) => path.join(DOWNLOAD_DIR, `${songId}_lyrics_${getLyricsVariantKey(options)}.json`);
 const removeLyricsCacheFile = (cachePath, reason) => {
     if (!cachePath || !fs.existsSync(cachePath)) return;
     try {
@@ -247,8 +256,8 @@ const isOutdatedAppleMusicCache = (parsed) => parsed
     && parsed.provider === 'apple_music'
     && Number(parsed.cacheVersion || 0) < APPLE_MUSIC_CACHE_VERSION;
 
-const loadCachedLyrics = (songId, sourceKey = 'auto') => {
-    const cachePath = getLyricsCachePath(songId, sourceKey);
+const loadCachedLyrics = (songId, options = {}) => {
+    const cachePath = getLyricsCachePath(songId, options);
     if (!fs.existsSync(cachePath)) return null;
     try {
         const parsed = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
@@ -288,7 +297,7 @@ const loadCachedLyrics = (songId, sourceKey = 'auto') => {
     }
 };
 
-const saveCachedLyrics = (songId, data, sourceKey = 'auto') => {
+const saveCachedLyrics = (songId, data, options = {}) => {
     if (!data || (data.found !== true && data.found !== false)) return;
     try {
         const payload = { ...data, cachedAt: Date.now() };
@@ -298,7 +307,7 @@ const saveCachedLyrics = (songId, data, sourceKey = 'auto') => {
         if (data.found === true && data.provider === 'apple_music') {
             payload.cacheVersion = APPLE_MUSIC_CACHE_VERSION;
         }
-        fs.writeFileSync(getLyricsCachePath(songId, sourceKey), JSON.stringify(payload, null, 2), 'utf8');
+        fs.writeFileSync(getLyricsCachePath(songId, options), JSON.stringify(payload, null, 2), 'utf8');
     } catch (error) {
         logger.warn('Lyrics', `Failed to write lyrics cache for song ${songId}`, error);
     }
@@ -488,10 +497,12 @@ const isYouTubeMusicSong = (song) => {
     return /(^https?:\/\/)?music\.youtube\.com\b/i.test(String(song.originalUrl || ''));
 };
 
-const fetchLyricsFromHelper = async (song, sourceKey) => {
+const fetchLyricsFromHelper = async (song, sourceKey, utatenRomajiEnabled = false) => {
     if (!fs.existsSync(LYRICS_HELPER)) return null;
 
     const query = buildSongQuery(song);
+    let helperFailureReason = null;
+    const helperTimeoutMs = utatenRomajiEnabled ? 45000 : 30000;
     const result = await runPythonJson(LYRICS_HELPER, {
         sourceId: song.sourceId || null,
         track: query.title,
@@ -500,12 +511,49 @@ const fetchLyricsFromHelper = async (song, sourceKey) => {
         duration: query.duration,
         originalUrl: song.originalUrl || null,
         preferredSource: sourceKey,
-    }).catch((error) => {
+        utatenRomajiEnabled: !!utatenRomajiEnabled,
+    }, helperTimeoutMs).catch((error) => {
+        helperFailureReason = error && error.message ? error.message : 'helper_failed';
         logger.warn('Lyrics', `Lyrics helper failed for ${song.title}`, error);
         return null;
     });
 
-    return helperResultToPayload(song, result);
+    const payload = helperResultToPayload(song, result);
+    if (utatenRomajiEnabled) {
+        if (!payload) {
+            logger.info('Lyrics', 'Utaten romaji augmentation result', {
+                songId: song.id,
+                track: song.track || song.title || '',
+                artist: song.artist || song.uploader || '',
+                applied: false,
+                reason: helperFailureReason || 'helper_failed',
+                pageUrl: null,
+                searchMode: null,
+                coverage: null,
+                matchedLineCount: null,
+                globalRatio: null,
+                candidateCount: null,
+            });
+            return null;
+        }
+        const utatenMeta = payload && payload.metadata && payload.metadata.utatenRomaji
+            ? payload.metadata.utatenRomaji
+            : null;
+        logger.info('Lyrics', 'Utaten romaji augmentation result', {
+            songId: song.id,
+            track: song.track || song.title || '',
+            artist: song.artist || song.uploader || '',
+            applied: !!(utatenMeta && utatenMeta.applied),
+            reason: utatenMeta && utatenMeta.reason ? utatenMeta.reason : (payload && payload.found ? 'metadata_missing' : 'base_lyrics_missing'),
+            pageUrl: utatenMeta && utatenMeta.pageUrl ? utatenMeta.pageUrl : null,
+            searchMode: utatenMeta && utatenMeta.searchMode ? utatenMeta.searchMode : null,
+            coverage: utatenMeta && utatenMeta.coverage !== undefined ? utatenMeta.coverage : null,
+            matchedLineCount: utatenMeta && utatenMeta.matchedLineCount !== undefined ? utatenMeta.matchedLineCount : null,
+            globalRatio: utatenMeta && utatenMeta.globalRatio !== undefined ? utatenMeta.globalRatio : null,
+            candidateCount: utatenMeta && utatenMeta.candidateCount !== undefined ? utatenMeta.candidateCount : null,
+        });
+    }
+    return payload;
 };
 
 const findSongById = (songId) => {
@@ -521,9 +569,14 @@ const findSongById = (songId) => {
 const fetchLyricsForSong = async (song, options = {}) => {
     if (!song || !song.id) return null;
     const sourceKey = options.preferredSource || 'auto';
+    const advancedLyricsConfig = ((getAdvancedConfig() || {}).lyrics || {});
+    const utatenRomajiEnabled = options.utatenRomajiEnabled !== undefined
+        ? !!options.utatenRomajiEnabled
+        : !!advancedLyricsConfig.utatenRomajiEnabled;
+    const variantOptions = { sourceKey, utatenRomajiEnabled };
 
     if (!options.force) {
-        const cached = loadCachedLyrics(song.id, sourceKey);
+        const cached = loadCachedLyrics(song.id, variantOptions);
         if (cached) {
             if (sourceKey === 'auto') {
                 song.lyricsData = cached;
@@ -533,7 +586,7 @@ const fetchLyricsForSong = async (song, options = {}) => {
         }
     }
 
-    const inflightKey = `${song.id}:${sourceKey}`;
+    const inflightKey = `${song.id}:${getLyricsVariantKey(variantOptions)}`;
     if (inflightLyrics.has(inflightKey)) return inflightLyrics.get(inflightKey);
 
     const startedSessionId = lyricsSessionId;
@@ -545,7 +598,7 @@ const fetchLyricsForSong = async (song, options = {}) => {
         if (!isYouTubeMusicSong(song)) {
             data = buildMissingPayload(song, []);
         } else {
-            data = await fetchLyricsFromHelper(song, sourceKey);
+            data = await fetchLyricsFromHelper(song, sourceKey, utatenRomajiEnabled);
         }
 
         if (isStale()) {
@@ -563,7 +616,7 @@ const fetchLyricsForSong = async (song, options = {}) => {
             song.lyricsData = finalData;
             updateSongLyricsState(song, finalData);
         }
-        saveCachedLyrics(song.id, finalData, sourceKey);
+        saveCachedLyrics(song.id, finalData, variantOptions);
         return finalData;
     })().finally(() => {
         inflightLyrics.delete(inflightKey);
@@ -582,11 +635,16 @@ const prefetchLyrics = (song) => {
 const getLyricsBySongId = async (songId, options = {}) => {
     const song = findSongById(songId);
     const sourceKey = options.preferredSource || 'auto';
+    const advancedLyricsConfig = ((getAdvancedConfig() || {}).lyrics || {});
+    const utatenRomajiEnabled = options.utatenRomajiEnabled !== undefined
+        ? !!options.utatenRomajiEnabled
+        : !!advancedLyricsConfig.utatenRomajiEnabled;
+    const variantOptions = { sourceKey, utatenRomajiEnabled };
     if (!song) {
-        const cached = loadCachedLyrics(songId, sourceKey);
+        const cached = loadCachedLyrics(songId, variantOptions);
         return cached || null;
     }
-    return fetchLyricsForSong(song, options);
+    return fetchLyricsForSong(song, { ...options, utatenRomajiEnabled });
 };
 
 const deleteLyricsCache = (songId) => {

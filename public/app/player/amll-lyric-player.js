@@ -1052,6 +1052,8 @@ class LyricLineEl {
     setSubLinesText(trans, roman) {
         trans.innerText = this.lyricLine.translatedLyric || '';
         roman.innerText = this.lyricLine.romanLyric || '';
+        trans.style.display = trans.innerText.trim().length > 0 ? '' : 'none';
+        roman.style.display = roman.innerText.trim().length > 0 ? '' : 'none';
     }
 
     getRubySegments(word) {

@@ -1,10 +1,14 @@
 import gzip
+import html
 import json
 import os
 import re
 import sys
 import time
+import unicodedata
 import xml.etree.ElementTree as ET
+from difflib import SequenceMatcher
+from html.parser import HTMLParser
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -30,9 +34,24 @@ APPLE_LYRICS_API = "https://lyrics.paxsenix.org/apple-music/lyrics"
 QQ_LYRICS_API = "https://lyrics.paxsenix.org/qq/lyrics-metadata"
 LRCLIB_SEARCH_API = "https://lrclib.net/api/search"
 MUSIXMATCH_API = "https://api.paxsenix.org/musixmatch/tracks/match/lyrics"
+UTATEN_SEARCH_API = "https://utaten.com/lyric/search"
 
 PROVIDER_ORDER = ["ytmusic", "apple_music", "qq_music", "musixmatch", "lrclib"]
 WORDLIKE_TYPES = {"word", "syllable", "character", "verbatim"}
+UTATEN_LINE_MERGE_LIMIT = 6
+UTATEN_SOURCE_LINE_MERGE_LIMIT = 4
+UTATEN_GLOBAL_RATIO_THRESHOLD = 0.82
+UTATEN_COVERAGE_THRESHOLD = 0.85
+UTATEN_MATCHED_LINE_RATIO_THRESHOLD = 0.7
+UTATEN_MIN_MATCHED_LINES = 6
+UTATEN_MIN_LINE_SIMILARITY = 0.58
+AUTO_LINE_CANDIDATE_BUDGET_WITH_UTATEN_SECONDS = 10.0
+AUTO_LINE_CANDIDATE_BUDGET_SECONDS = 18.0
+UTATEN_STRONG_MATCH_COVERAGE = 0.995
+UTATEN_STRONG_MATCH_GLOBAL_RATIO = 0.97
+UTATEN_STRONG_MATCHED_LINE_RATIO = 0.95
+LOOKUP_DEADLINE_WITH_UTATEN_SECONDS = 40.0
+LOOKUP_DEADLINE_SECONDS = 27.0
 BAD_TITLE_TERMS = (
     "instrumental",
     "karaoke",
@@ -405,7 +424,28 @@ def read_response_body(response, body):
     return body.decode("utf-8", errors="replace")
 
 
-def request_json(url, params=None, method="GET", data=None, headers=None, timeout=10.0, retries=2):
+def get_deadline_remaining(deadline_at):
+    if deadline_at is None:
+        return None
+    return deadline_at - time.monotonic()
+
+
+def is_deadline_exceeded(deadline_at, reserve_seconds=0.0):
+    remaining = get_deadline_remaining(deadline_at)
+    return remaining is not None and remaining <= reserve_seconds
+
+
+def get_bounded_timeout(default_timeout, deadline_at, minimum_timeout=1.0, reserve_seconds=0.75):
+    remaining = get_deadline_remaining(deadline_at)
+    if remaining is None:
+        return default_timeout
+    usable = remaining - reserve_seconds
+    if usable <= minimum_timeout:
+        raise TimeoutError("lookup_deadline_exceeded")
+    return min(default_timeout, usable)
+
+
+def request_json(url, params=None, method="GET", data=None, headers=None, timeout=10.0, retries=2, deadline_at=None):
     final_url = url
     if params:
         final_url = f"{url}?{urlencode(params, doseq=True)}"
@@ -423,11 +463,55 @@ def request_json(url, params=None, method="GET", data=None, headers=None, timeou
 
     last_error = None
     for attempt in range(retries + 1):
+        bounded_timeout = get_bounded_timeout(timeout, deadline_at)
         request = Request(final_url, data=body, headers=request_headers, method=method.upper())
         try:
-            with urlopen(request, timeout=timeout) as response:
+            with urlopen(request, timeout=bounded_timeout) as response:
                 text = read_response_body(response, response.read())
                 return json.loads(text) if text else None
+        except HTTPError as error:
+            text = ""
+            try:
+                text = read_response_body(error, error.read())
+            except Exception:
+                pass
+            last_error = RuntimeError(f"http_{error.code}:{text[:400]}")
+            if error.code in (429, 500, 502, 503, 504) and attempt < retries:
+                time.sleep(0.5 * (attempt + 1))
+                continue
+            raise last_error
+        except (URLError, TimeoutError, ValueError) as error:
+            last_error = error
+            if attempt < retries:
+                time.sleep(0.5 * (attempt + 1))
+                continue
+            raise
+    raise last_error or RuntimeError("request_failed")
+
+
+def request_text(url, params=None, method="GET", data=None, headers=None, timeout=10.0, retries=2, deadline_at=None):
+    final_url = url
+    if params:
+        final_url = f"{url}?{urlencode(params, doseq=True)}"
+
+    body = None
+    request_headers = {
+        "User-Agent": "local-karaoke-system/1.0",
+        "Accept": "text/html, application/xhtml+xml, application/xml;q=0.9, text/plain;q=0.8, */*;q=0.7",
+    }
+    if headers:
+        request_headers.update(headers)
+    if method.upper() == "POST":
+        request_headers.setdefault("Content-Type", "application/json")
+        body = json.dumps(data or {}, ensure_ascii=False).encode("utf-8")
+
+    last_error = None
+    for attempt in range(retries + 1):
+        bounded_timeout = get_bounded_timeout(timeout, deadline_at)
+        request = Request(final_url, data=body, headers=request_headers, method=method.upper())
+        try:
+            with urlopen(request, timeout=bounded_timeout) as response:
+                return read_response_body(response, response.read())
         except HTTPError as error:
             text = ""
             try:
@@ -550,6 +634,869 @@ def clean_lines(lines, query, preserve_symbol_only=False):
             continue
         cleaned.append(next_line)
     return cleaned
+
+
+def is_japanese_char(char):
+    return bool(re.match(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff々〆ヵヶ]", char or ""))
+
+
+def count_japanese_chars(text):
+    return sum(1 for char in str(text or "") if is_japanese_char(char))
+
+
+def contains_japanese_text(text):
+    return count_japanese_chars(text) > 0
+
+
+def normalize_utaten_match_text(value):
+    text = html.unescape(str(value or ""))
+    text = unicodedata.normalize("NFKC", text).lower()
+    text = normalize_space(text)
+    text = re.sub(r"[`'\"“”‘’「」『』（）()［］\[\]【】〔〕〈〉《》＜＞｢｣…‥・･、。，．！？!?,.:;~〜\-—―_/\s]+", "", text)
+    return re.sub(r"[^0-9a-z\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff々〆ヵヶ]", "", text)
+
+
+def normalize_utaten_html_text(value):
+    text = str(value or "").replace("\xa0", " ")
+    if not text or text.isspace():
+        return ""
+    return normalize_space(text)
+
+
+def smart_join_romaji_segments(segments):
+    joined = ""
+    for raw_segment in segments or []:
+        segment = normalize_space(raw_segment)
+        if not segment:
+            continue
+        if not joined:
+            joined = segment
+            continue
+        if re.search(r"[a-z0-9]$", joined, flags=re.I) and re.match(r"^[a-z0-9]", segment, flags=re.I):
+            joined = f"{joined} {segment}"
+            continue
+        joined = f"{joined}{segment}"
+    return normalize_space(joined)
+
+
+class UtatenSearchResultsParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.results = []
+        self.current_href = None
+        self.current_text_parts = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag.lower() != "a":
+            return
+        attr_map = {str(key): str(value) for key, value in attrs if key}
+        href = str(attr_map.get("href") or "")
+        if not re.match(r"^/lyric/[^/]+/$", href):
+            return
+        self.current_href = href
+        self.current_text_parts = []
+
+    def handle_data(self, data):
+        if self.current_href is not None:
+            self.current_text_parts.append(str(data or ""))
+
+    def handle_endtag(self, tag):
+        if tag.lower() != "a" or self.current_href is None:
+            return
+        link_text = normalize_space("".join(self.current_text_parts))
+        self.results.append({
+            "href": self.current_href,
+            "text": link_text,
+        })
+        self.current_href = None
+        self.current_text_parts = []
+
+
+class UtatenRomajiPageParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.romaji_depth = 0
+        self.element_role_stack = []
+        self.current_token = None
+        self.current_line_base_parts = []
+        self.current_line_romaji_parts = []
+        self.current_line_tokens = []
+        self.lines = []
+
+    def handle_starttag(self, tag, attrs):
+        attr_map = {str(key): str(value) for key, value in attrs if key}
+        class_names = set(str(attr_map.get("class") or "").split())
+        role = None
+        if "romaji" in class_names:
+            self.romaji_depth += 1
+            role = "romaji"
+        if self.romaji_depth <= 0:
+            return
+        if tag.lower() == "br":
+            self.flush_line()
+            return
+        if "ruby" in class_names:
+            role = "ruby"
+            if self.current_token is None:
+                self.current_token = {"base_parts": [], "romaji_parts": []}
+        elif "rb" in class_names:
+            role = "rb"
+        elif "rt" in class_names:
+            role = "rt"
+        self.element_role_stack.append(role)
+
+    def handle_startendtag(self, tag, attrs):
+        if tag.lower() == "br" and self.romaji_depth > 0:
+            self.flush_line()
+
+    def handle_endtag(self, tag):
+        if self.romaji_depth <= 0 or not self.element_role_stack:
+            return
+        popped_role = self.element_role_stack.pop()
+        if popped_role == "ruby":
+            self.flush_token()
+        if popped_role == "romaji":
+            self.romaji_depth -= 1
+            if self.romaji_depth == 0:
+                self.flush_token()
+                self.flush_line()
+
+    def handle_data(self, data):
+        if self.romaji_depth <= 0:
+            return
+        text = normalize_utaten_html_text(data)
+        if not text:
+            return
+        if self.current_token is not None:
+            current_role = None
+            for role in reversed(self.element_role_stack):
+                if role is not None:
+                    current_role = role
+                    break
+            if current_role == "rt":
+                self.current_token["romaji_parts"].append(text)
+                return
+            if current_role in {"rb", "ruby"}:
+                self.current_token["base_parts"].append(text)
+                return
+        self.current_line_tokens.append({
+            "base": text,
+            "romaji": text,
+        })
+        self.current_line_base_parts.append(text)
+        self.current_line_romaji_parts.append(text)
+
+    def flush_token(self):
+        if self.current_token is None:
+            return
+        base = normalize_space("".join(self.current_token.get("base_parts") or []))
+        romaji = normalize_space("".join(self.current_token.get("romaji_parts") or []))
+        if base or romaji:
+            next_token = {
+                "base": base,
+                "romaji": romaji or base,
+            }
+            self.current_line_tokens.append(next_token)
+            if base:
+                self.current_line_base_parts.append(base)
+            if next_token["romaji"]:
+                self.current_line_romaji_parts.append(next_token["romaji"])
+        self.current_token = None
+
+    def flush_line(self):
+        base = normalize_space("".join(self.current_line_base_parts))
+        romaji = smart_join_romaji_segments(self.current_line_romaji_parts)
+        if base:
+            self.lines.append({
+                "base": base,
+                "romaji": romaji or base,
+                "tokens": list(self.current_line_tokens),
+                "norm": normalize_utaten_match_text(base),
+            })
+        self.current_line_base_parts = []
+        self.current_line_romaji_parts = []
+        self.current_line_tokens = []
+
+
+def is_source_lyrics_eligible_for_utaten(lines):
+    japanese_lines = 0
+    japanese_chars = 0
+    for line in lines or []:
+        text = normalize_space(line.get("text"))
+        line_count = count_japanese_chars(text)
+        if line_count > 0:
+            japanese_lines += 1
+            japanese_chars += line_count
+    return japanese_lines >= 2 and japanese_chars >= 8
+
+
+def select_utaten_body_search_line(lines, query):
+    for line in lines or []:
+        text = normalize_space(line.get("text"))
+        if count_japanese_chars(text) < 4:
+            continue
+        if is_credit_like_text(text, query, 0):
+            continue
+        if re.fullmatch(r"[♪♩♫♬♭♯・·•\s]+", text):
+            continue
+        return text
+    return ""
+
+
+def parse_utaten_search_results(page_text):
+    parser = UtatenSearchResultsParser()
+    parser.feed(page_text or "")
+    parser.close()
+    results = []
+    seen_hrefs = set()
+    for item in parser.results:
+        href = str(item.get("href") or "")
+        if not href or href in seen_hrefs:
+            continue
+        seen_hrefs.add(href)
+        lyric_match = re.search(r"/lyric/([^/]+)/$", href)
+        results.append({
+            "lyricId": lyric_match.group(1) if lyric_match else None,
+            "url": f"https://utaten.com{href}",
+            "text": normalize_space(item.get("text")),
+        })
+    return results
+
+
+def fetch_utaten_search_candidates(query, source_lines, deadline_at=None):
+    candidates = []
+    seen_lyric_ids = set()
+    body_line = select_utaten_body_search_line(source_lines, query)
+    search_steps = [
+        ("artist_title", {"artist_name": query.get("artist") or "", "title": query.get("track") or ""}),
+        ("title", {"title": query.get("track") or ""}),
+        ("body", {"body": body_line}),
+    ]
+    for search_mode, params in search_steps:
+        filtered_params = {key: value for key, value in params.items() if normalize_space(value)}
+        if not filtered_params:
+            continue
+        if is_deadline_exceeded(deadline_at, 4.0):
+            break
+        try:
+            page_text = request_text(UTATEN_SEARCH_API, params=filtered_params, timeout=10.0, retries=1, deadline_at=deadline_at)
+        except Exception:
+            continue
+        step_count = 0
+        for item in parse_utaten_search_results(page_text):
+            lyric_id = item.get("lyricId") or item.get("url")
+            if lyric_id in seen_lyric_ids:
+                continue
+            seen_lyric_ids.add(lyric_id)
+            next_candidate = dict(item)
+            next_candidate["searchMode"] = search_mode
+            candidates.append(next_candidate)
+            step_count += 1
+            if step_count >= 5:
+                break
+    return candidates
+
+
+def fetch_utaten_romaji_page(url, deadline_at=None):
+    try:
+        page_text = request_text(url, timeout=10.0, retries=1, deadline_at=deadline_at)
+    except Exception:
+        return None
+    parser = UtatenRomajiPageParser()
+    parser.feed(page_text or "")
+    parser.close()
+    lines = [line for line in parser.lines if line.get("norm")]
+    if not lines:
+        return None
+    return {
+        "url": url,
+        "lines": lines,
+        "fullNorm": "".join(line["norm"] for line in lines if line.get("norm")),
+    }
+
+
+def score_utaten_alignment_candidate(source_norm, utaten_norm):
+    if not source_norm or not utaten_norm:
+        return 0.0
+    if source_norm == utaten_norm:
+        return 1.0
+    ratio = SequenceMatcher(None, source_norm, utaten_norm).ratio()
+    if source_norm in utaten_norm or utaten_norm in source_norm:
+        containment = min(len(source_norm), len(utaten_norm)) / max(len(source_norm), len(utaten_norm))
+        return max(ratio, min(0.98, 0.82 + containment * 0.16))
+    return ratio
+
+
+def combine_utaten_line_span(lines):
+    span_lines = lines or []
+    tokens = []
+    base_parts = []
+    romaji_parts = []
+    for line in span_lines:
+        tokens.extend(line.get("tokens") or [])
+        base_parts.append(normalize_space(line.get("base")))
+        romaji_parts.append(normalize_space(line.get("romaji")))
+    base_text = "".join(part for part in base_parts if part)
+    return {
+        "base": base_text,
+        "romaji": smart_join_romaji_segments(romaji_parts),
+        "tokens": tokens,
+        "norm": normalize_utaten_match_text(base_text),
+    }
+
+
+def source_line_requires_utaten(line):
+    return count_japanese_chars(line.get("text")) > 0
+
+
+def combine_source_line_span(lines):
+    span_lines = lines or []
+    text_parts = []
+    norm_parts = []
+    required_char_count = 0
+    required_line_count = 0
+    for line in span_lines:
+        text = normalize_space(line.get("text"))
+        norm = normalize_utaten_match_text(text)
+        if text:
+            text_parts.append(text)
+        if norm:
+            norm_parts.append(norm)
+        if line.get("requiresRomaji") and norm:
+            required_char_count += len(norm)
+            required_line_count += 1
+    return {
+        "text": "".join(text_parts),
+        "norm": "".join(norm_parts),
+        "requiredCharCount": required_char_count,
+        "requiredLineCount": required_line_count,
+    }
+
+
+def split_utaten_span_for_source_lines(source_lines, utaten_span):
+    tokens = list(utaten_span.get("tokens") or [])
+    allocations = {}
+    token_index = 0
+
+    for source_line in source_lines or []:
+        source_norm = source_line.get("norm") or ""
+        collected_tokens = []
+        accumulated_norm = ""
+
+        if not source_norm:
+            allocations[source_line["index"]] = {
+                "tokens": [],
+                "base": "",
+                "romaji": "",
+                "norm": "",
+            }
+            continue
+
+        while token_index < len(tokens):
+            token = tokens[token_index]
+            collected_tokens.append(token)
+            accumulated_norm += normalize_utaten_match_text(token.get("base"))
+            token_index += 1
+            if accumulated_norm == source_norm:
+                break
+            if accumulated_norm and not source_norm.startswith(accumulated_norm):
+                return None
+
+        if accumulated_norm != source_norm:
+            return None
+
+        base_text = "".join(normalize_space(token.get("base")) for token in collected_tokens if normalize_space(token.get("base")))
+        romaji_text = smart_join_romaji_segments(token.get("romaji") for token in collected_tokens)
+        allocations[source_line["index"]] = {
+            "tokens": collected_tokens,
+            "base": base_text,
+            "romaji": romaji_text,
+            "norm": source_norm,
+        }
+
+    remaining_norm = "".join(normalize_utaten_match_text(token.get("base")) for token in tokens[token_index:])
+    if remaining_norm:
+        return None
+    return allocations
+
+
+def align_utaten_lines(source_lines, utaten_lines):
+    normalized_source_lines = []
+    for line in source_lines or []:
+        text = normalize_space(line.get("text"))
+        normalized_source_lines.append({
+            "index": line.get("index"),
+            "text": text,
+            "norm": normalize_utaten_match_text(text),
+            "requiresRomaji": source_line_requires_utaten({"text": text}),
+        })
+
+    eligible_source_lines = [line for line in normalized_source_lines if line.get("norm")]
+    required_source_lines = [line for line in eligible_source_lines if line.get("requiresRomaji")]
+    if not eligible_source_lines or not utaten_lines:
+        return {
+            "accepted": False,
+            "reason": "insufficient_alignment_input",
+            "globalRatio": 0.0,
+            "coverage": 0.0,
+            "matchedLineCount": 0,
+            "matchedLineRatio": 0.0,
+            "matches": {},
+        }
+
+    source_full_norm = "".join(line["norm"] for line in eligible_source_lines)
+    utaten_full_norm = "".join(line.get("norm") or "" for line in utaten_lines)
+    if not source_full_norm or not utaten_full_norm:
+        return None
+
+    global_ratio = SequenceMatcher(None, source_full_norm, utaten_full_norm).ratio()
+    if global_ratio < UTATEN_GLOBAL_RATIO_THRESHOLD:
+        return {
+            "accepted": False,
+            "reason": "global_ratio_below_threshold",
+            "globalRatio": global_ratio,
+            "coverage": 0.0,
+            "matchedLineCount": 0,
+            "matchedLineRatio": 0.0,
+            "matches": {},
+        }
+
+    source_count = len(eligible_source_lines)
+    utaten_count = len(utaten_lines)
+    dp = [[None for _ in range(utaten_count + 1)] for _ in range(source_count + 1)]
+    dp[0][0] = {
+        "score": 0.0,
+        "matchedChars": 0,
+        "matchedLines": 0,
+        "prev": None,
+        "action": None,
+    }
+
+    def is_better_state(candidate, current):
+        if current is None:
+            return True
+        if candidate["score"] != current["score"]:
+            return candidate["score"] > current["score"]
+        if candidate["matchedChars"] != current["matchedChars"]:
+            return candidate["matchedChars"] > current["matchedChars"]
+        if candidate["matchedLines"] != current["matchedLines"]:
+            return candidate["matchedLines"] > current["matchedLines"]
+        return False
+
+    for source_index in range(source_count + 1):
+        for utaten_index in range(utaten_count + 1):
+            state = dp[source_index][utaten_index]
+            if state is None:
+                continue
+            if source_index < source_count:
+                source_line = eligible_source_lines[source_index]
+                skip_penalty = -0.45 if source_line.get("requiresRomaji") else 0.0
+                skip_source_state = {
+                    "score": state["score"] + skip_penalty,
+                    "matchedChars": state["matchedChars"],
+                    "matchedLines": state["matchedLines"],
+                    "prev": (source_index, utaten_index),
+                    "action": {"type": "skip_source"},
+                }
+                if is_better_state(skip_source_state, dp[source_index + 1][utaten_index]):
+                    dp[source_index + 1][utaten_index] = skip_source_state
+            if utaten_index < utaten_count:
+                skip_utaten_state = {
+                    "score": state["score"] - 0.1,
+                    "matchedChars": state["matchedChars"],
+                    "matchedLines": state["matchedLines"],
+                    "prev": (source_index, utaten_index),
+                    "action": {"type": "skip_utaten"},
+                }
+                if is_better_state(skip_utaten_state, dp[source_index][utaten_index + 1]):
+                    dp[source_index][utaten_index + 1] = skip_utaten_state
+            if source_index >= source_count:
+                continue
+            for source_merge_length in range(1, UTATEN_SOURCE_LINE_MERGE_LIMIT + 1):
+                next_source_index = source_index + source_merge_length
+                if next_source_index > source_count:
+                    break
+                source_span_lines = eligible_source_lines[source_index:next_source_index]
+                source_span = combine_source_line_span(source_span_lines)
+                source_norm = source_span.get("norm")
+                if not source_norm:
+                    continue
+                for utaten_merge_length in range(1, UTATEN_LINE_MERGE_LIMIT + 1):
+                    next_utaten_index = utaten_index + utaten_merge_length
+                    if next_utaten_index > utaten_count:
+                        break
+                    utaten_span = combine_utaten_line_span(utaten_lines[utaten_index:next_utaten_index])
+                    similarity = score_utaten_alignment_candidate(source_norm, utaten_span.get("norm"))
+                    if similarity < UTATEN_MIN_LINE_SIMILARITY:
+                        continue
+                    allocations = None
+                    if source_merge_length > 1:
+                        allocations = split_utaten_span_for_source_lines(source_span_lines, utaten_span)
+                        if allocations is None:
+                            continue
+                    match_state = {
+                        "score": state["score"] + similarity,
+                        "matchedChars": state["matchedChars"] + source_span.get("requiredCharCount", 0),
+                        "matchedLines": state["matchedLines"] + source_span.get("requiredLineCount", 0),
+                        "prev": (source_index, utaten_index),
+                        "action": {
+                            "type": "match",
+                            "sourceStart": source_index,
+                            "sourceEnd": next_source_index,
+                            "utatenStart": utaten_index,
+                            "utatenEnd": next_utaten_index,
+                            "similarity": similarity,
+                            "allocations": allocations,
+                        },
+                    }
+                    if is_better_state(match_state, dp[next_source_index][next_utaten_index]):
+                        dp[next_source_index][next_utaten_index] = match_state
+
+    final_state = dp[source_count][utaten_count]
+    if not final_state:
+        return {
+            "accepted": False,
+            "reason": "alignment_dp_failed",
+            "globalRatio": global_ratio,
+            "coverage": 0.0,
+            "matchedLineCount": 0,
+            "matchedLineRatio": 0.0,
+            "matches": {},
+        }
+
+    matches = {}
+    blocks = []
+    cursor = (source_count, utaten_count)
+    while cursor:
+        state = dp[cursor[0]][cursor[1]]
+        if not state or not state.get("prev"):
+            break
+        action = state.get("action") or {}
+        if action.get("type") == "match":
+            block = {
+                "sourceStart": action["sourceStart"],
+                "sourceEnd": action["sourceEnd"],
+                "utatenStart": action["utatenStart"],
+                "utatenEnd": action["utatenEnd"],
+                "similarity": action["similarity"],
+                "allocations": action.get("allocations"),
+            }
+            blocks.append(block)
+            if action["sourceEnd"] - action["sourceStart"] == 1:
+                source_line = eligible_source_lines[action["sourceStart"]]
+                if source_line.get("requiresRomaji"):
+                    matches[source_line["index"]] = {
+                        "utatenStart": action["utatenStart"],
+                        "utatenEnd": action["utatenEnd"],
+                        "similarity": action["similarity"],
+                    }
+        cursor = state["prev"]
+    blocks.reverse()
+
+    total_source_chars = sum(len(line.get("norm") or "") for line in required_source_lines)
+    matched_line_count = final_state["matchedLines"]
+    coverage = (final_state["matchedChars"] / total_source_chars) if total_source_chars else 0.0
+    matched_line_ratio = (matched_line_count / len(required_source_lines)) if required_source_lines else 0.0
+    min_required_lines = min(UTATEN_MIN_MATCHED_LINES, len(required_source_lines))
+    if coverage < UTATEN_COVERAGE_THRESHOLD:
+        return {
+            "accepted": False,
+            "reason": "coverage_below_threshold",
+            "globalRatio": global_ratio,
+            "coverage": coverage,
+            "matchedLineCount": matched_line_count,
+            "matchedLineRatio": matched_line_ratio,
+            "matches": matches,
+        }
+    if matched_line_ratio < UTATEN_MATCHED_LINE_RATIO_THRESHOLD:
+        return {
+            "accepted": False,
+            "reason": "matched_line_ratio_below_threshold",
+            "globalRatio": global_ratio,
+            "coverage": coverage,
+            "matchedLineCount": matched_line_count,
+            "matchedLineRatio": matched_line_ratio,
+            "matches": matches,
+        }
+    if matched_line_count < min_required_lines:
+        return {
+            "accepted": False,
+            "reason": "matched_line_count_below_threshold",
+            "globalRatio": global_ratio,
+            "coverage": coverage,
+            "matchedLineCount": matched_line_count,
+            "matchedLineRatio": matched_line_ratio,
+            "matches": matches,
+        }
+
+    return {
+        "accepted": True,
+        "reason": "applied",
+        "globalRatio": global_ratio,
+        "coverage": coverage,
+        "matchedLineCount": matched_line_count,
+        "matchedLineRatio": matched_line_ratio,
+        "matches": matches,
+        "blocks": blocks,
+    }
+
+
+def project_utaten_word_romanization(source_words, utaten_tokens):
+    if not isinstance(source_words, list) or not source_words:
+        return None
+
+    normalized_tokens = []
+    for token in utaten_tokens or []:
+        base = normalize_space(token.get("base"))
+        romaji = normalize_space(token.get("romaji")) or base
+        norm = normalize_utaten_match_text(base)
+        if not norm:
+            continue
+        normalized_tokens.append({
+            "norm": norm,
+            "romaji": romaji,
+        })
+
+    if not normalized_tokens:
+        return None
+
+    projected_words = []
+    token_index = 0
+    for word in source_words:
+        word_text = str((word or {}).get("text") or "")
+        word_norm = normalize_utaten_match_text(word_text)
+        if not word_norm:
+            projected_words.append({
+                "text": "\u00A0",
+                "start": word.get("start"),
+                "end": word.get("end"),
+            })
+            continue
+
+        romaji_segments = []
+        accumulated_norm = ""
+        cursor = token_index
+        while cursor < len(normalized_tokens):
+            accumulated_norm += normalized_tokens[cursor]["norm"]
+            romaji_segments.append(normalized_tokens[cursor]["romaji"])
+            cursor += 1
+            if accumulated_norm == word_norm:
+                projected_words.append({
+                    "text": smart_join_romaji_segments(romaji_segments),
+                    "start": word.get("start"),
+                    "end": word.get("end"),
+                })
+                token_index = cursor
+                break
+            if not word_norm.startswith(accumulated_norm):
+                return None
+        else:
+            return None
+
+    return projected_words if len(projected_words) == len(source_words) else None
+
+
+def apply_utaten_romaji_to_result(result, candidate, page, alignment):
+    if not isinstance(result, dict):
+        return result
+
+    for block in (alignment.get("blocks") or []):
+        source_start = block.get("sourceStart")
+        source_end = block.get("sourceEnd")
+        utaten_start = block.get("utatenStart")
+        utaten_end = block.get("utatenEnd")
+        if source_start is None or source_end is None or utaten_start is None or utaten_end is None:
+            continue
+        source_block = []
+        for source_index in range(source_start, source_end):
+            if source_index < 0 or source_index >= len(result.get("lines") or []):
+                continue
+            target_line = result["lines"][source_index]
+            source_block.append({
+                "index": source_index,
+                "text": normalize_space(target_line.get("text")),
+                "norm": normalize_utaten_match_text(target_line.get("text")),
+                "requiresRomaji": source_line_requires_utaten({"text": target_line.get("text")}),
+            })
+        utaten_span = combine_utaten_line_span(page["lines"][utaten_start:utaten_end])
+        allocations = block.get("allocations") or split_utaten_span_for_source_lines(source_block, utaten_span)
+
+        if allocations is None and len(source_block) == 1:
+            only_source = source_block[0]
+            allocations = {
+                only_source["index"]: {
+                    "tokens": utaten_span.get("tokens") or [],
+                    "base": utaten_span.get("base") or "",
+                    "romaji": utaten_span.get("romaji") or "",
+                    "norm": utaten_span.get("norm") or "",
+                }
+            }
+        if allocations is None:
+            continue
+
+        for source_line in source_block:
+            source_index = source_line["index"]
+            if not source_line.get("requiresRomaji"):
+                continue
+            allocation = allocations.get(source_index) or {}
+            romaji_text = normalize_space(allocation.get("romaji"))
+            if not romaji_text:
+                continue
+            target_line = result["lines"][source_index]
+            word_projection = project_utaten_word_romanization(target_line.get("words"), allocation.get("tokens"))
+            utaten_track = {
+                "lang": "ja-Latn",
+                "source": "utaten",
+                "timing": "word" if word_projection else "line",
+                "text": romaji_text,
+            }
+            if word_projection:
+                utaten_track["words"] = word_projection
+            existing_tracks = [
+                track for track in (target_line.get("romanizations") or [])
+                if normalize_space(track.get("source")).lower() != "utaten"
+            ]
+            target_line["romanizations"] = [utaten_track, *existing_tracks]
+
+    metadata = result.setdefault("metadata", {})
+    auxiliary_summary = summarize_auxiliary_track_support(result.get("lines"))
+    metadata["hasRomanizations"] = auxiliary_summary.get("hasRomanizations")
+    metadata["romanizationLanguages"] = auxiliary_summary.get("romanizationLanguages")
+    metadata["romanizationSources"] = auxiliary_summary.get("romanizationSources")
+    metadata["utatenRomaji"] = {
+        "applied": True,
+        "reason": "applied",
+        "pageUrl": candidate.get("url"),
+        "searchMode": candidate.get("searchMode"),
+        "coverage": round(alignment.get("coverage") or 0.0, 3),
+        "matchedLineCount": int(alignment.get("matchedLineCount") or 0),
+        "globalRatio": round(alignment.get("globalRatio") or 0.0, 3),
+        "candidateCount": int(alignment.get("candidateCount") or 0),
+    }
+    return result
+
+
+def maybe_apply_utaten_romaji(result, query, payload, attempted_sources, deadline_at=None):
+    if not isinstance(result, dict) or result.get("found") is not True:
+        return result
+
+    metadata = result.setdefault("metadata", {})
+    utaten_metadata = {
+        "applied": False,
+        "reason": "disabled",
+        "pageUrl": None,
+        "searchMode": None,
+        "coverage": 0.0,
+        "matchedLineCount": 0,
+        "globalRatio": 0.0,
+        "candidateCount": 0,
+    }
+    metadata["utatenRomaji"] = utaten_metadata
+
+    if not payload.get("utatenRomajiEnabled"):
+        return result
+
+    source_lines = [
+        {"index": index, "text": normalize_space(line.get("text"))}
+        for index, line in enumerate(result.get("lines") or [])
+        if normalize_space(line.get("text"))
+    ]
+    if not is_source_lyrics_eligible_for_utaten(source_lines):
+        utaten_metadata["reason"] = "source_not_japanese"
+        return result
+
+    if "utaten" not in attempted_sources:
+        attempted_sources.append("utaten")
+
+    candidates = fetch_utaten_search_candidates(query, source_lines, deadline_at=deadline_at)
+    utaten_metadata["candidateCount"] = len(candidates)
+    if not candidates:
+        utaten_metadata["reason"] = "lookup_deadline_exceeded" if is_deadline_exceeded(deadline_at, 3.0) else "no_search_candidates"
+        result["attemptedSources"] = list(attempted_sources)
+        return result
+
+    best_match = None
+    best_rejection = None
+    for candidate in candidates:
+        if is_deadline_exceeded(deadline_at, 2.5):
+            utaten_metadata["reason"] = "lookup_deadline_exceeded"
+            break
+        page = fetch_utaten_romaji_page(candidate.get("url"), deadline_at=deadline_at)
+        if not page:
+            rejection = {
+                "reason": "candidate_page_fetch_failed",
+                "pageUrl": candidate.get("url"),
+                "searchMode": candidate.get("searchMode"),
+                "coverage": 0.0,
+                "matchedLineCount": 0,
+                "globalRatio": 0.0,
+                "ranking": (0.0, 0, 0.0),
+            }
+            if best_rejection is None:
+                best_rejection = rejection
+            continue
+        alignment = align_utaten_lines(source_lines, page.get("lines") or [])
+        if not alignment.get("accepted"):
+            rejection = {
+                "reason": alignment.get("reason") or "no_valid_candidate",
+                "pageUrl": candidate.get("url"),
+                "searchMode": candidate.get("searchMode"),
+                "coverage": round(alignment.get("coverage") or 0.0, 3),
+                "matchedLineCount": int(alignment.get("matchedLineCount") or 0),
+                "globalRatio": round(alignment.get("globalRatio") or 0.0, 3),
+            }
+            ranking = (
+                alignment.get("coverage") or 0.0,
+                alignment.get("matchedLineCount") or 0,
+                alignment.get("globalRatio") or 0.0,
+            )
+            if best_rejection is None or ranking > best_rejection["ranking"]:
+                rejection["ranking"] = ranking
+                best_rejection = rejection
+            continue
+        ranking = (
+            alignment.get("coverage") or 0.0,
+            alignment.get("matchedLineCount") or 0,
+            alignment.get("globalRatio") or 0.0,
+        )
+        if best_match is None or ranking > best_match["ranking"]:
+            alignment["candidateCount"] = len(candidates)
+            best_match = {
+                "candidate": candidate,
+                "page": page,
+                "alignment": alignment,
+                "ranking": ranking,
+            }
+            if (
+                (alignment.get("coverage") or 0.0) >= UTATEN_STRONG_MATCH_COVERAGE
+                and (alignment.get("globalRatio") or 0.0) >= UTATEN_STRONG_MATCH_GLOBAL_RATIO
+                and (alignment.get("matchedLineRatio") or 0.0) >= UTATEN_STRONG_MATCHED_LINE_RATIO
+            ):
+                break
+
+    if not best_match:
+        if utaten_metadata["reason"] == "lookup_deadline_exceeded":
+            result["attemptedSources"] = list(attempted_sources)
+            return result
+        if best_rejection:
+            utaten_metadata["reason"] = best_rejection.get("reason") or "no_valid_candidate"
+            utaten_metadata["pageUrl"] = best_rejection.get("pageUrl")
+            utaten_metadata["searchMode"] = best_rejection.get("searchMode")
+            utaten_metadata["coverage"] = best_rejection.get("coverage") or 0.0
+            utaten_metadata["matchedLineCount"] = best_rejection.get("matchedLineCount") or 0
+            utaten_metadata["globalRatio"] = best_rejection.get("globalRatio") or 0.0
+        else:
+            utaten_metadata["reason"] = "no_valid_candidate"
+        result["attemptedSources"] = list(attempted_sources)
+        return result
+
+    result["attemptedSources"] = list(attempted_sources)
+    return apply_utaten_romaji_to_result(
+        result,
+        best_match["candidate"],
+        best_match["page"],
+        best_match["alignment"],
+    )
 
 
 def finalize_lines(lines, fallback_duration=None):
@@ -1276,13 +2223,13 @@ def fetch_ytmusic(payload, query, attempted_sources):
     )
 
 
-def fetch_apple_music(query, attempted_sources):
+def fetch_apple_music(query, attempted_sources, deadline_at=None):
     attempted_sources.append("apple_music")
     search_query = build_search_query(query)
     if not search_query:
         return None
     try:
-        results = request_json(APPLE_SEARCH_API, params={"q": search_query}, timeout=10.0, retries=1)
+        results = request_json(APPLE_SEARCH_API, params={"q": search_query}, timeout=10.0, retries=1, deadline_at=deadline_at)
     except Exception:
         return None
     if not isinstance(results, list) or not results:
@@ -1304,7 +2251,7 @@ def fetch_apple_music(query, attempted_sources):
 
     for _, item in ranked[:5]:
         try:
-            lyrics_data = request_json(APPLE_LYRICS_API, params={"id": item["id"]}, timeout=10.0, retries=1)
+            lyrics_data = request_json(APPLE_LYRICS_API, params={"id": item["id"]}, timeout=10.0, retries=1, deadline_at=deadline_at)
         except Exception:
             continue
         parsed = parse_apple_music_payload(lyrics_data, fallback_duration=query.get("duration"))
@@ -1367,7 +2314,7 @@ def fetch_apple_music(query, attempted_sources):
     return None
 
 
-def fetch_qq_music(query, attempted_sources):
+def fetch_qq_music(query, attempted_sources, deadline_at=None):
     attempted_sources.append("qq_music")
     if not query.get("track") or not query.get("artist") or not query.get("duration"):
         return None
@@ -1378,7 +2325,7 @@ def fetch_qq_music(query, attempted_sources):
         "duration": int(query.get("duration")),
     }
     try:
-        response = request_json(QQ_LYRICS_API, method="POST", data=payload, timeout=10.0, retries=1)
+        response = request_json(QQ_LYRICS_API, method="POST", data=payload, timeout=10.0, retries=1, deadline_at=deadline_at)
     except Exception:
         return None
     lines = clean_lines(parse_paxsenix_timed_content(response.get("lyrics")), query)
@@ -1397,7 +2344,7 @@ def fetch_qq_music(query, attempted_sources):
     )
 
 
-def fetch_lrclib(query, attempted_sources):
+def fetch_lrclib(query, attempted_sources, deadline_at=None):
     attempted_sources.append("lrclib")
     params = {}
     if query.get("track"):
@@ -1409,7 +2356,7 @@ def fetch_lrclib(query, attempted_sources):
     if not params:
         return None
     try:
-        results = request_json(LRCLIB_SEARCH_API, params=params, timeout=10.0, retries=1)
+        results = request_json(LRCLIB_SEARCH_API, params=params, timeout=10.0, retries=1, deadline_at=deadline_at)
     except Exception:
         return None
     if not isinstance(results, list) or not results:
@@ -1456,7 +2403,7 @@ def fetch_lrclib(query, attempted_sources):
     )
 
 
-def fetch_musixmatch(query, attempted_sources):
+def fetch_musixmatch(query, attempted_sources, deadline_at=None):
     attempted_sources.append("musixmatch")
     params = {
         "artist": query.get("artist") or "",
@@ -1472,7 +2419,7 @@ def fetch_musixmatch(query, attempted_sources):
         headers["Authorization"] = f"Bearer {PAXSENIX_API_TOKEN}"
 
     try:
-        response = request_json(MUSIXMATCH_API, params=params, headers=headers, timeout=10.0, retries=1)
+        response = request_json(MUSIXMATCH_API, params=params, headers=headers, timeout=10.0, retries=1, deadline_at=deadline_at)
     except Exception:
         return None
 
@@ -1512,17 +2459,17 @@ def fetch_musixmatch(query, attempted_sources):
     )
 
 
-def run_provider(provider_key, payload, query, attempted_sources):
+def run_provider(provider_key, payload, query, attempted_sources, deadline_at=None):
     if provider_key == "ytmusic":
         return fetch_ytmusic(payload, query, attempted_sources)
     if provider_key == "apple_music":
-        return fetch_apple_music(query, attempted_sources)
+        return fetch_apple_music(query, attempted_sources, deadline_at=deadline_at)
     if provider_key == "qq_music":
-        return fetch_qq_music(query, attempted_sources)
+        return fetch_qq_music(query, attempted_sources, deadline_at=deadline_at)
     if provider_key == "musixmatch":
-        return fetch_musixmatch(query, attempted_sources)
+        return fetch_musixmatch(query, attempted_sources, deadline_at=deadline_at)
     if provider_key == "lrclib":
-        return fetch_lrclib(query, attempted_sources)
+        return fetch_lrclib(query, attempted_sources, deadline_at=deadline_at)
     return None
 
 
@@ -1540,27 +2487,39 @@ def execute_lookup(payload):
     }
     preferred_source = normalize_source_key(payload.get("preferredSource"))
     attempted_sources = []
+    lookup_deadline_seconds = LOOKUP_DEADLINE_WITH_UTATEN_SECONDS if payload.get("utatenRomajiEnabled") else LOOKUP_DEADLINE_SECONDS
+    deadline_at = time.monotonic() + lookup_deadline_seconds
 
     if preferred_source == "auto":
+        started_at = time.time()
         line_candidate = None
         for provider_key in PROVIDER_ORDER:
-            result = run_provider(provider_key, payload, query, attempted_sources)
+            if is_deadline_exceeded(deadline_at, 5.0):
+                break
+            if line_candidate is not None and provider_key == "lrclib":
+                continue
+            if line_candidate is not None:
+                elapsed = time.time() - started_at
+                budget = AUTO_LINE_CANDIDATE_BUDGET_WITH_UTATEN_SECONDS if payload.get("utatenRomajiEnabled") else AUTO_LINE_CANDIDATE_BUDGET_SECONDS
+                if elapsed >= budget:
+                    break
+            result = run_provider(provider_key, payload, query, attempted_sources, deadline_at=deadline_at)
             if not result:
                 continue
             if result.get("type") == "word":
                 result["attemptedSources"] = list(attempted_sources)
-                return result
+                return maybe_apply_utaten_romaji(result, query, payload, attempted_sources, deadline_at=deadline_at)
             if line_candidate is None and result.get("type") == "line":
                 line_candidate = result
         if line_candidate:
             line_candidate["attemptedSources"] = list(attempted_sources)
-            return line_candidate
+            return maybe_apply_utaten_romaji(line_candidate, query, payload, attempted_sources, deadline_at=deadline_at)
         return build_missing_result(query, attempted_sources)
 
-    result = run_provider(preferred_source, payload, query, attempted_sources)
+    result = run_provider(preferred_source, payload, query, attempted_sources, deadline_at=deadline_at)
     if result:
         result["attemptedSources"] = list(attempted_sources)
-        return result
+        return maybe_apply_utaten_romaji(result, query, payload, attempted_sources, deadline_at=deadline_at)
     return build_missing_result(query, attempted_sources)
 
 

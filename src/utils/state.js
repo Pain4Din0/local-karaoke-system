@@ -8,6 +8,7 @@ const DEFAULT_PLAYER_STATUS = Object.freeze({
     loudnessNorm: true,
     lyricsEnabled: true,
     lyricsSource: 'auto',
+    lyricsUtatenRomajiEnabled: false,
 });
 
 class StateStore {

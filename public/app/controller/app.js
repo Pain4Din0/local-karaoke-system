@@ -118,7 +118,7 @@ createApp({
             demucs: { model: 'htdemucs', twoStems: 'vocals', outputFormat: 'mp3', overlap: 0.25, segment: 7.8, shifts: 1, overlapOutput: false, float32: false, clipMode: 'rescale', noSegment: false, jobs: 0, device: '', repo: '' },
             ffmpeg: { loudnessI: -16, loudnessTP: -1.5, loudnessLRA: 11, loudnessGainClamp: 12 },
             system: { deleteDelayMs: 20000, maxConcurrentDownloads: 1 },
-            lyrics: { enabled: true, source: 'auto' }
+            lyrics: { enabled: true, source: 'auto', utatenRomajiEnabled: false }
         });
         const playlistItems = ref([]);
         const selectedItems = ref(new Set()); // using Set for indices

@@ -764,6 +764,12 @@
                                 </option>
                             </select>
                         </div>
+                        <label class="flex items-center gap-2 text-zinc-400 cursor-pointer">
+                            <input type="checkbox" v-model="advancedConfig.lyrics.utatenRomajiEnabled"
+                                class="w-4 h-4 rounded border-zinc-600 bg-zinc-800 accent-blue-500">
+                            <span>{{ t('lyrics_utaten_romaji') }}</span>
+                            <span class="inline-flex items-center rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-300">{{ t('experimental_badge') }}</span>
+                        </label>
                     </div>
                 </section>
 

@@ -67,6 +67,7 @@ const DEFAULT_ADVANCED_CONFIG = {
     lyrics: {
         enabled: true,
         source: 'auto',
+        utatenRomajiEnabled: false,
     },
 };
 
@@ -155,6 +156,7 @@ function normalizeAdvancedConfig(inputConfig = {}) {
 
     merged.lyrics.enabled = merged.lyrics.enabled !== false;
     merged.lyrics.source = ALLOWED_LYRICS_SOURCES.has(merged.lyrics.source) ? merged.lyrics.source : DEFAULT_ADVANCED_CONFIG.lyrics.source;
+    merged.lyrics.utatenRomajiEnabled = !!merged.lyrics.utatenRomajiEnabled;
 
     return merged;
 }

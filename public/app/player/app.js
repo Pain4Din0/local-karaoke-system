@@ -69,6 +69,7 @@ createApp({
         let lyricsRequestId = 0;
         let lyricsEnabled = true;
         let lyricsSource = 'auto';
+        let lyricsUtatenRomajiEnabled = false;
         let amllInitialized = false;
         let amllCoverRefreshed = false;
 
@@ -226,9 +227,17 @@ createApp({
             if (!status) return;
             const nextEnabled = status.lyricsEnabled !== undefined ? !!status.lyricsEnabled : lyricsEnabled;
             const nextSource = status.lyricsSource || lyricsSource || 'auto';
-            const changed = nextEnabled !== lyricsEnabled || nextSource !== lyricsSource;
+            const nextUtatenRomajiEnabled = status.lyricsUtatenRomajiEnabled !== undefined
+                ? !!status.lyricsUtatenRomajiEnabled
+                : lyricsUtatenRomajiEnabled;
+            const changed = (
+                nextEnabled !== lyricsEnabled
+                || nextSource !== lyricsSource
+                || nextUtatenRomajiEnabled !== lyricsUtatenRomajiEnabled
+            );
             lyricsEnabled = nextEnabled;
             lyricsSource = nextSource;
+            lyricsUtatenRomajiEnabled = nextUtatenRomajiEnabled;
 
             if (!lyricsEnabled) {
                 resetLyricsState();
@@ -298,7 +307,8 @@ createApp({
                         volume: currentVolume,
                         pitch: currentPitch,
                         vocalRemoval: isVocalRemovalActive,
-                        loudnessNorm: isLoudnessNormEnabled
+                        loudnessNorm: isLoudnessNormEnabled,
+                        lyricsUtatenRomajiEnabled,
                     });
                 }
             }, 250); // 250ms interval (just for UI, not sync)
@@ -427,7 +437,8 @@ createApp({
                     volume: currentVolume,
                     pitch: 0,
                     vocalRemoval: false,
-                    loudnessNorm: isLoudnessNormEnabled
+                    loudnessNorm: isLoudnessNormEnabled,
+                    lyricsUtatenRomajiEnabled,
                 });
             });
 
@@ -675,7 +686,8 @@ createApp({
                         vocalRemoval: isVocalRemovalActive,
                         loudnessNorm: isLoudnessNormEnabled,
                         lyricsEnabled,
-                        lyricsSource
+                        lyricsSource,
+                        lyricsUtatenRomajiEnabled,
                     });
                 }
             }, 50);
