@@ -108,7 +108,7 @@ createApp({
         const showYtmCounterpartChoice = ref(false);
         const ytmCounterpartChoiceTrack = ref(null);
         const ytmCounterpartChoiceVideo = ref(null);
-        const ytmResolvingTrackId = ref('');
+        const ytmResolvingTrackIds = ref({});
         const ytmAddingTrackIds = ref({});
         const ytmAddedTrackIds = ref({});
         const advancedConfig = ref({
@@ -209,16 +209,29 @@ createApp({
                 }
             }
             ytmCounterpartRequests.clear();
-            ytmResolvingTrackId.value = '';
+            ytmResolvingTrackIds.value = {};
             closeYtmCounterpartChoice();
         };
 
         const isYtmTrackResolving = (item) => {
             const key = String(item?.id || item?.videoId || '').trim();
-            return !!key && key === ytmResolvingTrackId.value;
+            return !!key && !!ytmResolvingTrackIds.value[key];
         };
 
         const getYtmTrackActionKey = (item) => String(item?.id || item?.videoId || '').trim();
+
+        const setYtmTrackResolvingState = (trackKey, isResolving) => {
+            const key = String(trackKey || '').trim();
+            if (!key) return;
+            if (isResolving) {
+                ytmResolvingTrackIds.value = { ...ytmResolvingTrackIds.value, [key]: true };
+                return;
+            }
+            if (!ytmResolvingTrackIds.value[key]) return;
+            const next = { ...ytmResolvingTrackIds.value };
+            delete next[key];
+            ytmResolvingTrackIds.value = next;
+        };
 
         const clearYtmTrackSuccessState = (trackKey) => {
             const key = String(trackKey || '').trim();
@@ -827,7 +840,7 @@ createApp({
                 return;
             }
 
-            ytmResolvingTrackId.value = resolvingKey;
+            setYtmTrackResolvingState(resolvingKey, true);
             try {
                 const counterpart = await resolveYtmCounterpartForTrack(item);
                 if (counterpart && typeof counterpart === 'object' && String(counterpart.videoId || '').trim()) {
@@ -842,9 +855,7 @@ createApp({
                 console.warn('[Controller][YTM] Counterpart lookup failed, falling back to song', error || '');
                 queuePreparedYtmTrack(item, 'song');
             } finally {
-                if (ytmResolvingTrackId.value === resolvingKey) {
-                    ytmResolvingTrackId.value = '';
-                }
+                setYtmTrackResolvingState(resolvingKey, false);
             }
         };
 
