@@ -8,9 +8,6 @@ const logger = require('../utils/logger');
 const YTMUSIC_HELPER = path.join(SCRIPTS_DIR, 'ytmusic', 'search.py');
 const ALLOWED_FILTERS = new Set(['all', 'songs', 'albums', 'artists', 'singles']);
 const ALLOWED_DETAIL_KINDS = new Set(['album', 'playlist', 'artist', 'artist_collection']);
-const SEARCH_CACHE_TTL_MS = 20000;
-const DETAIL_CACHE_TTL_MS = 30000;
-const MAX_CACHE_ENTRIES = 80;
 const LANGUAGE_ALIASES = {
     zh: 'zh_CN',
     'zh-cn': 'zh_CN',
@@ -23,11 +20,6 @@ const LANGUAGE_ALIASES = {
     'en-us': 'en',
     'en-gb': 'en',
 };
-const searchCache = new Map();
-const detailCache = new Map();
-const inflightSearches = new Map();
-const inflightDetails = new Map();
-
 class YtMusicSearchError extends Error {
     constructor(message, code = 'ytmusic_failed', details = {}) {
         super(message);
@@ -50,69 +42,9 @@ const normalizeText = (value, fallback = '', maxLength = 300) => {
     return text.slice(0, maxLength);
 };
 
-const cloneJson = (value) => {
-    if (value === undefined) return undefined;
-    return JSON.parse(JSON.stringify(value));
-};
-
 const sanitizeLanguage = (value) => {
     const normalized = normalizeText(value, 'en', 20).replace(/-/g, '_').toLowerCase();
     return LANGUAGE_ALIASES[normalized] || 'en';
-};
-
-const pruneCache = (cache) => {
-    const now = Date.now();
-    for (const [key, entry] of cache.entries()) {
-        if (!entry || entry.expiresAt <= now) {
-            cache.delete(key);
-        }
-    }
-
-    while (cache.size > MAX_CACHE_ENTRIES) {
-        const oldestKey = cache.keys().next().value;
-        if (!oldestKey) break;
-        cache.delete(oldestKey);
-    }
-};
-
-const getCachedValue = (cache, key) => {
-    pruneCache(cache);
-    const entry = cache.get(key);
-    if (!entry || entry.expiresAt <= Date.now()) {
-        cache.delete(key);
-        return null;
-    }
-    return cloneJson(entry.value);
-};
-
-const setCachedValue = (cache, key, value, ttlMs) => {
-    cache.set(key, {
-        value: cloneJson(value),
-        expiresAt: Date.now() + ttlMs,
-    });
-    pruneCache(cache);
-};
-
-const runWithCache = async ({ cache, inflight, key, ttlMs, factory }) => {
-    const cached = getCachedValue(cache, key);
-    if (cached !== null) return cached;
-
-    if (inflight.has(key)) {
-        return cloneJson(await inflight.get(key));
-    }
-
-    const task = Promise.resolve()
-        .then(factory)
-        .then((result) => {
-            setCachedValue(cache, key, result, ttlMs);
-            return result;
-        })
-        .finally(() => {
-            inflight.delete(key);
-        });
-
-    inflight.set(key, task);
-    return cloneJson(await task);
 };
 
 const ensureHelperExists = () => {
@@ -292,65 +224,37 @@ const searchYouTubeMusic = async (query, options = {}) => {
     const filter = sanitizeFilter(options.filter);
     const limit = clampNumber(options.limit, 24, 1, 120);
     const language = sanitizeLanguage(options.language);
-    const cacheKey = JSON.stringify({
+    const result = await runPythonJson({
+        action: 'search',
         query: normalizedQuery,
         filter,
         limit,
         language,
-    });
+    }, limit > 72 ? 45000 : 30000);
 
-    return runWithCache({
-        cache: searchCache,
-        inflight: inflightSearches,
-        key: cacheKey,
-        ttlMs: SEARCH_CACHE_TTL_MS,
-        factory: async () => {
-            const result = await runPythonJson({
-                action: 'search',
-                query: normalizedQuery,
-                filter,
-                limit,
-                language,
-            }, limit > 72 ? 45000 : 30000);
-
-            return {
-                query: normalizedQuery,
-                filter,
-                sections: Array.isArray(result.sections) ? result.sections : [],
-                suggestions: [],
-            };
-        },
-    });
+    return {
+        query: normalizedQuery,
+        filter,
+        sections: Array.isArray(result.sections) ? result.sections : [],
+        suggestions: [],
+    };
 };
 
 const getYouTubeMusicDetail = async (request) => {
     const detailRequest = sanitizeDetailRequest(request);
     const language = sanitizeLanguage(request && request.language);
     const timeoutMs = detailRequest.limit > 200 ? 60000 : (detailRequest.kind === 'artist_collection' ? 40000 : 30000);
-    const cacheKey = JSON.stringify({
-        detailRequest,
+    const result = await runPythonJson({
+        action: 'detail',
+        ...detailRequest,
         language,
-    });
+    }, timeoutMs);
 
-    return runWithCache({
-        cache: detailCache,
-        inflight: inflightDetails,
-        key: cacheKey,
-        ttlMs: DETAIL_CACHE_TTL_MS,
-        factory: async () => {
-            const result = await runPythonJson({
-                action: 'detail',
-                ...detailRequest,
-                language,
-            }, timeoutMs);
+    if (!result.detail || typeof result.detail !== 'object') {
+        throw new YtMusicSearchError('YouTube Music detail response is incomplete', 'invalid_detail_payload');
+    }
 
-            if (!result.detail || typeof result.detail !== 'object') {
-                throw new YtMusicSearchError('YouTube Music detail response is incomplete', 'invalid_detail_payload');
-            }
-
-            return result.detail;
-        },
-    });
+    return result.detail;
 };
 
 const resolveYouTubeMusicCounterparts = async (tracks, options = {}) => {

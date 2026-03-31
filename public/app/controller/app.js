@@ -35,6 +35,7 @@ function throttle(func, limit) {
 createApp({
     setup() {
         const lang = ref('zh');
+        localStorage.removeItem('ktv_tutorial_completed');
 
         // Load saved language if available
         const savedLang = localStorage.getItem('ktv_lang');
@@ -85,7 +86,6 @@ createApp({
         const showShareModal = ref(false);
         const showPlaylistModal = ref(false);
         const showAdvancedSettings = ref(false);
-        const showYtmSearch = ref(false);
         const ytmQuery = ref('');
         const ytmFilter = ref(YTM_DEFAULT_FILTER);
         const ytmSections = ref([]);
@@ -105,6 +105,8 @@ createApp({
         const ytmDetailLoadingMore = ref(false);
         const ytmActiveDetailRequest = ref(null);
         const ytmErrorState = ref(null);
+        const ytmDisplayedQuery = ref('');
+        const ytmDisplayedFilter = ref(YTM_DEFAULT_FILTER);
         const showYtmCounterpartChoice = ref(false);
         const ytmCounterpartChoiceTrack = ref(null);
         const ytmCounterpartChoiceVideo = ref(null);
@@ -128,6 +130,7 @@ createApp({
 
         const currentNetwork = computed(() => networks.value[currentNetIndex.value] || networks.value[0]);
         const isAllSelected = computed(() => playlistItems.value.length > 0 && selectedItems.value.size === playlistItems.value.length);
+        const isSearchTabActive = computed(() => activeTab.value === 'search');
         const ytmFilterOptions = computed(() => ([
             { value: 'songs', label: t('ytm_filter_songs') },
             { value: 'albums', label: t('ytm_filter_albums') },
@@ -409,14 +412,19 @@ createApp({
 
 
         const saveNickname = () => {
-            if (!tempNick.value) return;
-            nickname.value = tempNick.value;
+            const nextNickname = String(tempNick.value || '').trim();
+            if (!nextNickname) {
+                pushNotification(t('join_warn'), 'warn');
+                return;
+            }
+            const previousNickname = String(nickname.value || '').trim();
+            nickname.value = nextNickname;
+            tempNick.value = nextNickname;
             localStorage.setItem('ktv_nickname', nickname.value);
             isRenaming.value = false;
-
-            // Check if tutorial should be shown
-            if (!localStorage.getItem('ktv_tutorial_completed')) {
-                startTutorial();
+            if (previousNickname && previousNickname !== nextNickname) {
+                resetYtmSearchState();
+                activeTab.value = 'playlist';
             }
         };
         const startRename = () => {
@@ -512,6 +520,8 @@ createApp({
             sections: ytmSections.value,
             detail: ytmDetail.value,
             hasSearched: ytmHasSearched.value,
+            displayedQuery: ytmDisplayedQuery.value,
+            displayedFilter: ytmDisplayedFilter.value,
             searchLimit: ytmSearchLimit.value,
             searchCanLoadMore: ytmSearchCanLoadMore.value,
             searchReachedEnd: ytmSearchReachedEnd.value,
@@ -529,6 +539,8 @@ createApp({
             ytmSections.value = Array.isArray(snapshot.sections) ? snapshot.sections : [];
             ytmDetail.value = snapshot.detail || null;
             ytmHasSearched.value = !!snapshot.hasSearched;
+            ytmDisplayedQuery.value = String(snapshot.displayedQuery || '').trim();
+            ytmDisplayedFilter.value = YTM_SEARCH_FILTERS.includes(snapshot.displayedFilter) ? snapshot.displayedFilter : YTM_DEFAULT_FILTER;
             ytmSearchLimit.value = Number(snapshot.searchLimit) || YTM_SEARCH_PAGE_SIZE;
             ytmSearchCanLoadMore.value = !!snapshot.searchCanLoadMore;
             ytmSearchReachedEnd.value = !!snapshot.searchReachedEnd;
@@ -553,6 +565,21 @@ createApp({
                 : null;
         };
 
+        const clearYtmSearchResults = (options = {}) => {
+            ytmSections.value = [];
+            ytmSearchLimit.value = YTM_SEARCH_PAGE_SIZE;
+            ytmSearchCanLoadMore.value = false;
+            ytmSearchReachedEnd.value = false;
+            ytmSearchLoadingMore.value = false;
+            if (!options.keepHasSearched) {
+                ytmHasSearched.value = false;
+            }
+            if (!options.keepDisplayedSignature) {
+                ytmDisplayedQuery.value = '';
+                ytmDisplayedFilter.value = YTM_DEFAULT_FILTER;
+            }
+        };
+
         const cancelYtmPendingRequests = (options = {}) => {
             const cancelSearch = options.search !== false;
             const cancelDetail = options.detail !== false;
@@ -570,22 +597,22 @@ createApp({
             }
         };
 
-        const resetYtmSearchState = () => {
+        const resetYtmSearchState = (options = {}) => {
+            const nextQuery = options.preserveQuery ? String(ytmQuery.value || '') : '';
+            const nextFilter = options.preserveFilter && YTM_SEARCH_FILTERS.includes(ytmFilter.value)
+                ? ytmFilter.value
+                : YTM_DEFAULT_FILTER;
+            cancelYtmPendingRequests();
             clearYtmCounterpartRequestState();
             resetYtmTrackFeedbackState();
-            ytmQuery.value = '';
-            ytmFilter.value = YTM_DEFAULT_FILTER;
-            ytmSections.value = [];
+            ytmQuery.value = nextQuery;
+            ytmFilter.value = nextFilter;
+            clearYtmSearchResults();
             ytmDetail.value = null;
             ytmViewMode.value = 'search';
             ytmLoading.value = false;
             ytmDetailLoading.value = false;
-            ytmHasSearched.value = false;
             ytmNavigationStack.value = [];
-            ytmSearchLimit.value = YTM_SEARCH_PAGE_SIZE;
-            ytmSearchCanLoadMore.value = false;
-            ytmSearchReachedEnd.value = false;
-            ytmSearchLoadingMore.value = false;
             ytmDetailLimit.value = 0;
             ytmDetailCanLoadMore.value = false;
             ytmDetailReachedEnd.value = false;
@@ -596,20 +623,12 @@ createApp({
             ytmSearchRequestMeta = null;
             ytmDetailRequestMeta = null;
             ytmErrorState.value = null;
+            ytmLastAutoLoadAt = 0;
         };
 
-        const openYtmSearch = () => {
-            showYtmSearch.value = true;
-            nextTick(() => {
-                const input = document.getElementById('ytm-search-input');
-                if (input) input.focus();
-            });
-        };
-
-        const closeYtmSearch = () => {
-            cancelYtmPendingRequests();
-            showYtmSearch.value = false;
-            resetYtmSearchState();
+        const setActiveTab = (tab) => {
+            if (!['playlist', 'history', 'search'].includes(tab)) return;
+            activeTab.value = tab;
         };
 
         const getYtmSectionTitle = (section) => {
@@ -722,6 +741,7 @@ createApp({
             const nextQuery = String(query || '').trim();
             const nextFilter = YTM_SEARCH_FILTERS.includes(filter) ? filter : YTM_DEFAULT_FILTER;
             if (!nextQuery) return;
+            setActiveTab('search');
             submitYtmSearch(nextQuery, {
                 filterOverride: nextFilter,
                 pushCurrentView: true,
@@ -772,11 +792,7 @@ createApp({
             return t('ytm_error_search_failed');
         };
 
-        const getYtmErrorHint = () => (
-            ytmVisibleCountCurrent.value > 0
-                ? t('ytm_error_showing_previous_results')
-                : t('ytm_error_retry_hint')
-        );
+        const getYtmErrorHint = () => t('ytm_error_retry_hint');
 
         const getYtmLoadedAllText = () => formatMessage('ytm_loaded_all_count', {
             count: ytmVisibleCountCurrent.value,
@@ -968,28 +984,32 @@ createApp({
                 restoreYtmViewState(snapshot);
                 return;
             }
-            closeYtmSearch();
+            ytmViewMode.value = 'search';
+            ytmDetail.value = null;
+            ytmDetailLoading.value = false;
+            ytmDetailLoadingMore.value = false;
+            ytmDetailLimit.value = 0;
+            ytmDetailCanLoadMore.value = false;
+            ytmDetailReachedEnd.value = false;
+            ytmActiveDetailRequest.value = null;
+            clearYtmErrorState();
         };
 
         const onYtmQueryInput = () => {
             const query = String(ytmQuery.value || '').trim();
             if (ytmViewMode.value === 'search') {
                 clearYtmErrorState();
+                cancelYtmPendingRequests({ search: true, detail: false });
             }
             if (!query && ytmViewMode.value === 'search') {
-                ytmSections.value = [];
-                ytmHasSearched.value = false;
-                ytmSearchLimit.value = YTM_SEARCH_PAGE_SIZE;
-                ytmSearchCanLoadMore.value = false;
-                ytmSearchReachedEnd.value = false;
-                ytmSearchLoadingMore.value = false;
+                clearYtmSearchResults();
                 return;
             }
-            if (ytmViewMode.value === 'search') {
-                ytmSearchLimit.value = YTM_SEARCH_PAGE_SIZE;
-                ytmSearchCanLoadMore.value = false;
-                ytmSearchReachedEnd.value = false;
-                ytmSearchLoadingMore.value = false;
+            if (ytmViewMode.value === 'search' && (
+                query !== ytmDisplayedQuery.value
+                || ytmFilter.value !== ytmDisplayedFilter.value
+            )) {
+                clearYtmSearchResults();
             }
         };
 
@@ -1023,6 +1043,7 @@ createApp({
             cancelYtmPendingRequests();
             if (!append) clearYtmCounterpartRequestState();
             clearYtmErrorState();
+            setActiveTab('search');
             ytmQuery.value = query;
             ytmFilter.value = filter;
             ytmViewMode.value = 'search';
@@ -1037,6 +1058,7 @@ createApp({
             ytmSearchLoadingMore.value = append;
             ytmHasSearched.value = true;
             if (!append) {
+                clearYtmSearchResults({ keepHasSearched: true, keepDisplayedSignature: false });
                 ytmSearchReachedEnd.value = false;
                 ytmSearchCanLoadMore.value = false;
             }
@@ -1072,6 +1094,11 @@ createApp({
         const changeYtmFilter = (filter) => {
             if (!YTM_SEARCH_FILTERS.includes(filter) || ytmFilter.value === filter) return;
             ytmFilter.value = filter;
+            if (ytmViewMode.value === 'search') {
+                clearYtmErrorState();
+                cancelYtmPendingRequests({ search: true, detail: false });
+                clearYtmSearchResults();
+            }
             if (String(ytmQuery.value || '').trim()) {
                 submitYtmSearch();
             }
@@ -1113,7 +1140,7 @@ createApp({
                 socket.emit('system_factory_reset');
             }
         };
-        const reAddHistory = (item) => { socket.emit('readd_history', item); activeTab.value = 'playlist'; };
+        const reAddHistory = (item) => { socket.emit('readd_history', item); setActiveTab('playlist'); };
 
         const exportHistory = () => {
             let text = "\uFEFF=== PLAYLIST HISTORY ===\n\n";
@@ -1132,76 +1159,6 @@ createApp({
         const sendPitch = throttle((val) => socket.emit('control_action', { type: 'pitch', value: val }), 100);
 
         const onSeekInput = () => { isDragging.value = true; };
-
-        // Tutorial Logic
-        const showTutorialOverlay = ref(false);
-        const tutorialStep = ref(1);
-
-        const mockPlaying = ref(false);
-        const mockVocalRemoved = ref(false);
-        const mockProcessing = ref(false);
-        const mockVolume = ref(80);
-        const mockPitch = ref(0);
-        const mockShowBatch = ref(false);
-        const mockBatchList = ref([
-            { title: '眩耀夜行', artist: 'スリーズブーケ', selected: true },
-            { title: 'エウレカ', artist: '菅叶和', selected: true },
-            { title: '自己肯定感爆上げ↑↑しゅきしゅきソング', artist: '藤田ことね (CV. 飯田ヒカル)', selected: true }
-        ]);
-        const mockBatchSelectedCount = computed(() => mockBatchList.value.filter(i => i.selected).length);
-        const mockBatchAllSelected = computed({
-            get: () => mockBatchList.value.length > 0 && mockBatchList.value.every(i => i.selected),
-            set: (val) => mockBatchList.value.forEach(i => i.selected = val)
-        });
-
-        const startTutorial = () => {
-            tutorialStep.value = 1;
-            showTutorialOverlay.value = true;
-        };
-
-        const endTutorial = () => {
-            showTutorialOverlay.value = false;
-            localStorage.setItem('ktv_tutorial_completed', 'true');
-        };
-
-        const nextStep = () => {
-            mockShowBatch.value = false;
-            if (tutorialStep.value < 7) tutorialStep.value++;
-        };
-
-        const prevStep = () => {
-            mockShowBatch.value = false;
-            if (tutorialStep.value > 1) tutorialStep.value--;
-        };
-
-        const mockAction = (action) => {
-            if (action === 'toggle_play') {
-                mockPlaying.value = !mockPlaying.value;
-            } else if (action === 'toggle_vocal') {
-                if (!mockProcessing.value) {
-                    if (mockVocalRemoved.value) {
-                        mockVocalRemoved.value = false;
-                    } else {
-                        mockProcessing.value = true;
-                        setTimeout(() => {
-                            mockProcessing.value = false;
-                            mockVocalRemoved.value = true;
-                        }, 1500);
-                    }
-                }
-            } else if (action === 'open_batch') {
-                mockShowBatch.value = true;
-            }
-        };
-
-        const restartTutorial = () => {
-            isRenaming.value = false;
-            startTutorial();
-        };
-
-        if (nickname.value && !localStorage.getItem('ktv_tutorial_completed')) {
-            setTimeout(() => startTutorial(), 500);
-        }
         const onSeekEnd = () => { isDragging.value = false; sendSeek(localCurrentTime.value); };
         const onVolumeInput = () => sendVolume(localVolumeDisplay.value);
 
@@ -1324,7 +1281,8 @@ createApp({
         socket.on('error_msg', (msg) => {
             finishYtmTrackAddRequest(msg?.requestId);
             isAdding.value = false;
-            if (showYtmSearch.value && YTM_KNOWN_ERROR_CODES.has(String(msg?.code || ''))) {
+            if ((isSearchTabActive.value || ytmLoading.value || ytmDetailLoading.value || ytmSearchLoadingMore.value || ytmDetailLoadingMore.value)
+                && YTM_KNOWN_ERROR_CODES.has(String(msg?.code || ''))) {
                 console.warn('[Controller][YTM]', msg?.message || 'YouTube Music request failed', msg || '');
                 return;
             }
@@ -1361,6 +1319,8 @@ createApp({
                     restoreYtmViewState(requestMeta.previousSnapshot);
                 } else {
                     ytmSearchCanLoadMore.value = false;
+                    ytmDisplayedQuery.value = '';
+                    ytmDisplayedFilter.value = YTM_DEFAULT_FILTER;
                 }
                 setYtmErrorState({
                     code: String(payload?.error?.code || 'ytmusic_failed').trim(),
@@ -1381,6 +1341,8 @@ createApp({
             }
             clearYtmErrorState();
             ytmSections.value = Array.isArray(payload.sections) ? payload.sections : [];
+            ytmDisplayedQuery.value = requestMeta.requestedQuery;
+            ytmDisplayedFilter.value = requestMeta.requestedFilter;
             const totalCount = countYtmSearchItems(ytmSections.value);
             const canInferSearchEnd = YTM_SEARCH_FILTERS.includes(requestMeta.requestedFilter);
             ytmSearchLimit.value = requestMeta.requestedLimit;
@@ -1524,6 +1486,7 @@ createApp({
         return {
             nickname, tempNick, saveNickname,
             playlist, currentPlaying, history, activeTab,
+            setActiveTab,
             addUrl, isAdding,
             notifications, dismissNotification,
             localPlaying, localCurrentTime, localDuration, localVolumeDisplay, isDragging,
@@ -1531,7 +1494,7 @@ createApp({
             reAddHistory, exportHistory,
             onSeekInput, onSeekEnd, onVolumeInput, formatTime,
 
-            lang, t, toggleLang, isRenaming, startRename, cancelRename, restartTutorial,
+            lang, t, toggleLang, isRenaming, startRename, cancelRename,
             showShareModal, openShare, networks, currentNetwork, nextNetwork, systemSSID, systemPort,
             showTuning, changePitch, resetPitch, localPitch,
             localVocalRemoval, toggleVocalRemoval,
@@ -1540,10 +1503,9 @@ createApp({
             autoProcessKaraoke, toggleAutoProcess, karaokeAvailable,
             showPlaylistModal, playlistItems, selectedItems, isAllSelected,
             closePlaylistModal, toggleItem, toggleSelectAll, confirmAddBatch,
-            showYtmSearch, openYtmSearch, closeYtmSearch,
             showYtmCounterpartChoice, ytmCounterpartChoiceTrack, closeYtmCounterpartChoice, chooseYtmCounterpartVariant,
             ytmQuery, ytmFilter, ytmFilterOptions, ytmSections, ytmDetail,
-            ytmViewMode, ytmLoading, ytmDetailLoading, ytmHasSearched, ytmCanGoBack,
+            ytmViewMode, ytmLoading, ytmDetailLoading, ytmHasSearched, ytmCanGoBack, isSearchTabActive,
             ytmHasVisibleResults, ytmCanLoadMoreCurrent, ytmReachedEndCurrent, ytmLoadingMoreCurrent, ytmErrorState,
             onYtmQueryInput, submitYtmSearch, changeYtmFilter, goBackYtmView,
             getYtmSectionTitle, getYtmItemTypeLabel, openYtmItem, openYtmSection,
@@ -1553,10 +1515,7 @@ createApp({
             getYtmErrorTitle, getYtmErrorHint, getYtmLoadedAllText, retryYtmRequest,
             queueSingleYtmTrack, openYtmBatchSelection, queueYtmDetailTracks, loadMoreYtmResults, onYtmResultsScroll,
             showAdvancedSettings, advancedConfig, openAdvancedSettings, closeAdvancedSettings, saveAdvancedSettings, restoreAdvancedDefaults,
-            getQueueProgressStyle,
-            showTutorialOverlay, tutorialStep, startTutorial, endTutorial, nextStep, prevStep,
-            mockPlaying, mockVocalRemoved, mockProcessing, mockVolume, mockPitch,
-            mockShowBatch, mockAction, mockBatchList, mockBatchSelectedCount, mockBatchAllSelected
+            getQueueProgressStyle
         };
     }
 }).mount('#app');

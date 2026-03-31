@@ -36,388 +36,6 @@
             </div>
         </div>
 
-        <!-- TUTORIAL OVERLAY -->
-        <div v-if="showTutorialOverlay" class="tutorial-overlay animate-fade-in">
-
-            <!-- Step 1: Welcome -->
-            <div v-if="tutorialStep === 1" class="tutorial-slide">
-                <div class="max-w-xs space-y-6">
-                    <div
-                        class="w-20 h-20 bg-blue-500 rounded-3xl mx-auto flex items-center justify-center shadow-2xl shadow-blue-500/20 mb-4">
-                        <i class="ri-music-2-fill text-4xl text-white leading-none translate-y-[2px]"></i>
-                    </div>
-                    <h2 class="text-3xl font-bold text-white">{{ t('tut_welcome_title') }}</h2>
-                    <p class="text-zinc-400 leading-relaxed">{{ t('tut_welcome_desc') }}</p>
-                </div>
-            </div>
-
-            <!-- Step 2: Main Interface -->
-            <div v-if="tutorialStep === 2" class="tutorial-slide">
-                <div class="space-y-6 w-full max-w-sm">
-                    <div class="text-left space-y-2">
-                        <h3 class="text-xl font-bold text-white">{{ t('tut_interface_title') }}</h3>
-                        <p class="text-sm text-zinc-400">{{ t('tut_interface_desc') }}</p>
-                    </div>
-
-                    <!-- Mock Player Card - Faithful Replication -->
-                    <div
-                        class="mock-component bg-zinc-900 p-5 rounded-2xl border border-zinc-800 shadow-xl text-left relative overflow-hidden">
-                        <div class="flex items-center justify-between mb-3">
-                            <div class="flex items-center gap-2">
-                                <div class="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]">
-                                </div>
-                                <span class="text-xs font-mono text-zinc-400 uppercase tracking-wider">PLAYING</span>
-                            </div>
-                            <span class="text-xs text-zinc-500 font-medium">User A</span>
-                        </div>
-                        <h3 class="text-lg font-medium leading-snug text-white mb-6 line-clamp-2">Never Gonna Give You
-                            Up
-                        </h3>
-                        <div class="space-y-2">
-                            <!-- Faithful Seek Bar -->
-                            <input type="range" min="0" max="245" step="1" value="83"
-                                class="w-full cursor-pointer pointer-events-none appearance-none bg-zinc-800 h-1 rounded-full slider-thumb-mock">
-                            <div class="flex justify-between text-[10px] font-mono text-zinc-500">
-                                <span>01:23</span><span>04:05</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Mock Queue Item - Faithful Replication -->
-                    <div
-                        class="mock-component group bg-zinc-900 border border-zinc-800 p-3 rounded-xl flex gap-3 items-center relative overflow-hidden text-left">
-                        <div class="flex-1 min-w-0 z-10">
-                            <h4 class="text-sm font-medium text-zinc-200 truncate">Dream Believers</h4>
-                            <div class="flex items-center gap-2 mt-1">
-                                <div class="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></div>
-                                <span class="text-xs text-zinc-500 truncate">User B</span>
-                            </div>
-                        </div>
-                        <div
-                            class="flex gap-1 z-10 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button
-                                class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-zinc-800 text-zinc-400"><i
-                                    class="ri-arrow-up-line"></i></button>
-                            <button
-                                class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-red-400"><i
-                                    class="ri-close-line"></i></button>
-                        </div>
-                    </div>
-
-                    <!-- Mock Footer - Fixed Interaction -->
-                    <div
-                        class="mock-component bg-zinc-900 border border-zinc-800 rounded-2xl p-4 flex items-center justify-between">
-                        <button
-                            class="interactive flex flex-col items-center gap-1 text-zinc-500 active:scale-95 transition"
-                            @click.stop="mockAction('replay')">
-                            <i class="ri-restart-line text-2xl"></i>
-                        </button>
-                        <button
-                            class="interactive w-14 h-14 rounded-full flex items-center justify-center bg-white text-black shadow-lg active:scale-95 transition"
-                            @click.stop="mockAction('toggle_play')">
-                            <i :class="mockPlaying ? 'ri-pause-fill' : 'ri-play-fill'" class="text-3xl"></i>
-                        </button>
-                        <button
-                            class="interactive flex flex-col items-center gap-1 text-zinc-500 active:scale-95 transition"
-                            @click.stop="mockAction('skip')">
-                            <i class="ri-skip-forward-fill text-2xl"></i>
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Step 3: Add Songs - Completely Redone -->
-            <div v-if="tutorialStep === 3" class="tutorial-slide">
-                <div class="space-y-6 w-full max-w-sm">
-                    <div class="text-left space-y-2">
-                        <h3 class="text-xl font-bold text-white">{{ t('tut_add_title') }}</h3>
-                        <p class="text-sm text-zinc-400">{{ t('tut_add_desc') }}</p>
-                    </div>
-
-                    <!-- Faithful Add Song Bar -->
-                    <div class="mock-component flex gap-3">
-                        <div class="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl flex items-center px-3">
-                            <i class="ri-link text-zinc-500"></i>
-                            <input type="text"
-                                class="bg-transparent w-full p-3 text-sm text-white outline-none placeholder-zinc-600"
-                                :placeholder="t('pasteLink')" disabled>
-                        </div>
-                        <button class="bg-white text-black w-12 rounded-xl flex items-center justify-center font-bold">
-                            <i class="ri-add-line"></i>
-                        </button>
-                    </div>
-
-                    <!-- Mock Batch Modal Trigger/Demo -->
-                    <button
-                        class="mock-component interactive bg-zinc-800/50 border border-dashed border-zinc-700 rounded-xl p-6 text-center space-y-4 w-full"
-                        @click="mockAction('open_batch')">
-                        <div class="flex justify-center gap-4">
-                            <i class="ri-bilibili-line text-3xl text-pink-400"></i>
-                            <i class="ri-youtube-line text-3xl text-red-500"></i>
-                            <i class="ri-play-list-2-line text-3xl text-blue-400"></i>
-                        </div>
-                        <div>
-                            <p class="text-sm font-bold text-zinc-300">{{ t('tut_add_hint') }}</p>
-                            <p class="text-xs text-zinc-500 mt-1">{{ t('click_to_see_batch') }}</p>
-                        </div>
-                    </button>
-
-                    <!-- Mock Batch Modal (Inner) -->
-                    <div v-if="mockShowBatch"
-                        class="fixed inset-0 z-10 flex flex-col pt-safe pb-safe bg-[#09090b]/95 backdrop-blur-md animate-fade-in"
-                        @click.self="mockShowBatch = false">
-                        <div class="px-4 py-3 border-b border-zinc-800 flex justify-between items-center bg-zinc-900">
-                            <div class="font-bold text-lg text-white">{{ t('select_songs') }}</div>
-                            <button @click="mockShowBatch = false"
-                                class="w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-400"><i
-                                    class="ri-close-line"></i></button>
-                        </div>
-                        <div
-                            class="px-4 py-2 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/50">
-                            <label
-                                class="flex items-center gap-2 text-sm text-zinc-300 pointer-events-auto cursor-pointer"><input
-                                    type="checkbox" v-model="mockBatchAllSelected"
-                                    class="w-4 h-4 rounded border-zinc-600 bg-zinc-800 accent-blue-500"> {{
-                                t('select_all') }} ({{ mockBatchList.length }})</label>
-                            <span class="text-xs text-zinc-500">{{ mockBatchSelectedCount }} {{ t('selected') }}</span>
-                        </div>
-                        <div class="p-4 space-y-2">
-                            <div v-for="(item, index) in mockBatchList" :key="index"
-                                class="flex items-center gap-3 p-3 rounded-xl border border-zinc-800 bg-zinc-900/50 pointer-events-auto cursor-pointer"
-                                @click="item.selected = !item.selected">
-                                <input type="checkbox" v-model="item.selected" @click.stop
-                                    class="w-5 h-5 rounded border-zinc-600 bg-zinc-800 accent-blue-500">
-                                <div class="min-w-0 flex-1">
-                                    <div class="text-sm font-medium text-zinc-200 truncate">{{ item.title }}
-                                    </div>
-                                    <div class="text-xs text-zinc-500">
-                                        {{ item.artist }}</div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="p-4 border-t border-zinc-800 bg-zinc-900 mt-auto">
-                            <button @click="mockShowBatch = false" :disabled="mockBatchSelectedCount === 0"
-                                class="w-full bg-blue-600 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 disabled:opacity-50 disabled:bg-zinc-800 pointer-events-auto">
-                                {{ t('add_selected') }} ({{ mockBatchSelectedCount }})
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Step 4: Song Status -->
-            <div v-if="tutorialStep === 4" class="tutorial-slide">
-                <div class="space-y-6 w-full max-w-sm text-left">
-                    <div>
-                        <h3 class="text-xl font-bold text-white mb-2">{{ t('tut_status_title') }}</h3>
-                        <p class="text-sm text-zinc-400">{{ t('tut_status_desc') }}</p>
-                    </div>
-
-                    <div class="space-y-3">
-                        <!-- Downloading -->
-                        <div class="flex items-center gap-4 bg-zinc-900 p-3 rounded-xl border border-zinc-800">
-                            <div class="w-3 h-3 rounded-full bg-blue-500 animate-pulse"></div>
-                            <div>
-                                <div class="text-sm font-bold text-blue-400">{{ t('tut_status_downloading') }}</div>
-                                <div class="text-xs text-zinc-500">{{ t('status_downloading_desc') }}</div>
-                            </div>
-                        </div>
-
-                        <!-- Ready to Play -->
-                        <div class="flex items-center gap-4 bg-zinc-900 p-3 rounded-xl border border-zinc-800">
-                            <div class="w-3 h-3 rounded-full bg-blue-500"></div>
-                            <div>
-                                <div class="text-sm font-bold text-blue-500">{{ t('status_ready') }}</div>
-                                <div class="text-xs text-zinc-500">{{ t('status_ready_desc') }}</div>
-                            </div>
-                        </div>
-
-                        <!-- Processing -->
-                        <div class="flex items-center gap-4 bg-zinc-900 p-3 rounded-xl border border-zinc-800">
-                            <div class="w-3 h-3 rounded-full bg-purple-500 animate-pulse"></div>
-                            <div>
-                                <div class="text-sm font-bold text-purple-400">{{ t('status_processing') }}</div>
-                                <div class="text-xs text-zinc-500">{{ t('status_processing_desc') }}</div>
-                            </div>
-                        </div>
-
-                        <!-- Fully Ready -->
-                        <div class="flex items-center gap-4 bg-zinc-900 p-3 rounded-xl border border-zinc-800">
-                            <div class="w-3 h-3 rounded-full bg-purple-500"></div>
-                            <div>
-                                <div class="text-sm font-bold text-purple-500">{{ t('status_full_ready') }}</div>
-                                <div class="text-xs text-zinc-500">{{ t('status_full_ready_desc') }}</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Step 5: Audio Settings -->
-            <div v-if="tutorialStep === 5" class="tutorial-slide">
-                <div class="space-y-6 w-full max-w-sm">
-                    <div class="text-left space-y-2">
-                        <h3 class="text-xl font-bold text-white">{{ t('tut_audio_title') }}</h3>
-                        <p class="text-sm text-zinc-400">{{ t('tut_audio_desc') }}</p>
-                    </div>
-
-                    <!-- Mock Audio Panel -->
-                    <div class="bg-zinc-900 rounded-2xl p-5 border border-zinc-700 shadow-xl space-y-6">
-                        <!-- Mock Vocal -->
-                        <div class="space-y-3 pb-4 border-b border-zinc-800">
-                            <div
-                                class="flex justify-between items-center text-xs text-zinc-500 uppercase tracking-wider">
-                                <span>{{ t('vocal_removal') }}</span>
-                                <span v-if="mockProcessing" class="text-purple-500 animate-pulse">{{ t('processing')
-                                    }}</span>
-                                <span v-else class="text-zinc-500">{{ mockVocalRemoved ? t('vocal_off') : t('vocal_on')
-                                    }}</span>
-                            </div>
-                            <div v-if="mockProcessing" class="w-full h-1.5 bg-zinc-800 rounded-full overflow-hidden">
-                                <div class="h-full bg-purple-500 w-2/3 animate-pulse"></div>
-                            </div>
-                            <button
-                                class="interactive w-full py-4 rounded-xl font-bold flex items-center justify-center gap-3 transition-all"
-                                :class="mockVocalRemoved ? 'bg-blue-500 text-white' : (mockProcessing ? 'bg-zinc-800 text-purple-500' : 'bg-zinc-800 text-zinc-400')"
-                                @click="mockAction('toggle_vocal')">
-                                <i v-if="mockProcessing" class="ri-loader-4-line animate-spin text-xl"></i>
-                                <i v-else :class="mockVocalRemoved ? 'ri-mic-off-fill' : 'ri-mic-line'"
-                                    class="text-xl"></i>
-                                <span>{{ mockProcessing ? t('processing') : (mockVocalRemoved ? t('vocal_off') :
-                                    t('start_process')) }}</span>
-                            </button>
-                            <div class="mt-2 p-2 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
-                                <p class="text-[10px] text-yellow-500/80 leading-snug"><i
-                                        class="ri-alert-line mr-1"></i>{{
-                                    t('vocal_warning') }}</p>
-                            </div>
-                        </div>
-
-                        <!-- Mock Volume -->
-                        <div class="space-y-3">
-                            <div class="flex justify-between text-xs text-zinc-500 uppercase tracking-wider">
-                                <span>{{ t('volume') }}</span>
-                                <span>{{ mockVolume }}%</span>
-                            </div>
-                            <div class="flex items-center gap-3">
-                                <i class="ri-volume-down-line text-zinc-500"></i>
-                                <input type="range" v-model="mockVolume"
-                                    class="flex-1 h-2 bg-zinc-800 rounded-lg appearance-none cursor-pointer">
-                                <i class="ri-volume-up-line text-zinc-500"></i>
-                            </div>
-                        </div>
-
-                        <!-- Mock Pitch - Faithful -->
-                        <div class="space-y-4">
-                            <div
-                                class="flex justify-between items-center text-xs text-zinc-500 uppercase tracking-wider">
-                                <div class="flex items-center gap-1.5">
-                                    <span>{{ t('pitch') }}</span>
-                                    <span
-                                        class="text-xs font-bold text-yellow-500 bg-yellow-500/10 px-1.5 py-0.5 rounded uppercase tracking-wider">Beta</span>
-                                </div>
-                                <button @click="mockPitch = 0"
-                                    class="text-xs text-blue-400 hover:text-blue-300 pointer-events-auto">{{ t('reset')
-                                    }}</button>
-                            </div>
-                            <div class="flex items-center justify-between gap-4">
-                                <button
-                                    class="interactive w-14 h-14 rounded-2xl bg-zinc-800 border border-zinc-700 flex items-center justify-center text-2xl text-zinc-300 active:scale-95 transition"
-                                    @click="mockPitch--"><i class="ri-subtract-line"></i></button>
-                                <div
-                                    class="flex-1 flex flex-col items-center justify-center h-14 bg-black/20 rounded-2xl border border-zinc-800">
-                                    <span class="text-2xl font-bold font-mono"
-                                        :class="mockPitch !== 0 ? 'text-blue-400' : 'text-zinc-500'">{{ mockPitch > 0 ?
-                                        '+' : '' }}{{ mockPitch }}</span>
-                                    <span class="text-[10px] text-zinc-600 uppercase tracking-widest">Semitones</span>
-                                </div>
-                                <button
-                                    class="interactive w-14 h-14 rounded-2xl bg-zinc-800 border border-zinc-700 flex items-center justify-center text-2xl text-zinc-300 active:scale-95 transition"
-                                    @click="mockPitch++"><i class="ri-add-line"></i></button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Step 6: Misc -->
-            <div v-if="tutorialStep === 6" class="tutorial-slide">
-                <div class="space-y-6 w-full max-w-sm text-left">
-                    <div>
-                        <h3 class="text-xl font-bold text-white mb-2">{{ t('tut_misc_title') }}</h3>
-                    </div>
-
-                    <div class="grid grid-cols-2 gap-4">
-                        <div
-                            class="bg-zinc-900 p-4 rounded-2xl border border-zinc-800 flex flex-col items-center text-center gap-2">
-                            <div
-                                class="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-400 border border-zinc-700">
-                                <i class="ri-restart-line"></i>
-                            </div>
-                            <div class="font-bold text-sm text-white">{{ t('reset') }}</div>
-                            <div class="text-[10px] text-zinc-500">{{ t('tut_reset_desc') }}</div>
-                        </div>
-                        <!-- Fixed Share with Title -->
-                        <div
-                            class="bg-zinc-900 p-4 rounded-2xl border border-zinc-800 flex flex-col items-center text-center gap-2">
-                            <div
-                                class="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-400 border border-zinc-700">
-                                <i class="ri-qr-code-line"></i>
-                            </div>
-                            <div class="font-bold text-sm text-white">{{ t('tut_share_title') }}</div>
-                            <div class="text-[10px] text-zinc-500">{{ t('tut_share_desc') }}</div>
-                        </div>
-                    </div>
-
-                    <div class="bg-zinc-900 p-4 rounded-2xl border border-zinc-800 flex items-center gap-4">
-                        <div
-                            class="h-8 px-3 rounded-full border border-zinc-700 bg-zinc-800 flex items-center justify-center text-xs text-zinc-400">
-                            {{ nickname }}</div>
-                        <div>
-                            <div class="font-bold text-sm text-white">{{ t('tut_nick_title') }}</div>
-                            <div class="text-[10px] text-zinc-500">{{ t('tut_nick_desc') }}</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Step 7: Final -->
-            <div v-if="tutorialStep === 7" class="tutorial-slide">
-                <div class="max-w-xs space-y-6">
-                    <div
-                        class="w-20 h-20 bg-green-500 rounded-full mx-auto flex items-center justify-center shadow-2xl shadow-green-500/20 mb-4 animate-bounce">
-                        <i class="ri-check-line text-4xl text-white"></i>
-                    </div>
-                    <h2 class="text-3xl font-bold text-white">{{ t('tut_final_title') }}</h2>
-                    <p class="text-zinc-400 leading-relaxed">{{ t('tut_final_desc') }}</p>
-
-                    <button @click="endTutorial"
-                        class="w-full bg-white text-black py-4 rounded-xl font-bold text-lg shadow-lg hover:scale-105 transition-transform">
-                        {{ t('tut_start_btn') }}
-                    </button>
-                </div>
-            </div>
-
-
-            <!-- Navigation Bottom Bar (Sticky) -->
-            <div class="tutorial-nav">
-                <!-- Dots -->
-                <div class="flex gap-2">
-                    <div v-for="i in 7" :key="i" class="tutorial-dot" :class="{ 'active': tutorialStep === i }"></div>
-                </div>
-
-                <!-- Buttons -->
-                <div class="flex gap-4">
-                    <button v-if="tutorialStep > 1" @click="prevStep"
-                        class="text-zinc-400 font-medium hover:text-white transition">{{ t('back') }}</button>
-                    <button v-if="tutorialStep < 7" @click="nextStep"
-                        class="bg-blue-600 text-white px-6 py-2 rounded-full font-bold shadow-lg shadow-blue-600/20 hover:scale-105 transition-transform">{{
-                        t('next') }}</button>
-                </div>
-            </div>
-        </div>
-
-
         <div v-if="!nickname || isRenaming"
             class="fixed inset-0 z-50 bg-black/95 flex items-center justify-center p-6 backdrop-blur-md">
             <div class="w-full max-w-sm text-center animate-scale-in">
@@ -430,13 +48,8 @@
                     class="w-full bg-white text-black py-4 rounded-xl font-bold btn-press mb-4">{{
                     isRenaming ? t('save') : t('join') }}</button>
                 <button v-if="isRenaming" @click="cancelRename"
-                    class="w-full bg-zinc-800 text-zinc-400 py-3 rounded-xl font-bold btn-press mb-4">{{
+                    class="w-full bg-zinc-800 text-zinc-400 py-3 rounded-xl font-bold btn-press">{{
                     t('cancel') }}</button>
-
-                <button v-if="isRenaming" @click="restartTutorial"
-                    class="w-full bg-blue-900/30 text-blue-400 py-3 rounded-xl font-bold btn-press border border-blue-900/50">
-                    <i class="ri-question-line mr-1"></i> {{ t('tutorial_restart') }}
-                </button>
             </div>
 
             <!-- Copyright / GitHub Badge -->
@@ -805,287 +418,6 @@
             </div>
         </div>
 
-        <!-- YOUTUBE MUSIC SEARCH MODAL -->
-        <div v-if="showYtmSearch"
-            class="fixed inset-0 z-50 bg-[#09090b]/95 backdrop-blur-md flex flex-col pt-safe pb-safe animate-fade-in">
-            <div class="relative px-4 py-3 border-b border-zinc-800 flex items-center justify-end bg-zinc-900">
-                <button v-if="ytmCanGoBack" @click="goBackYtmView"
-                    class="absolute left-4 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-300 hover:text-white">
-                    <i class="ri-arrow-left-line"></i>
-                </button>
-                <div class="absolute inset-x-0 top-1/2 -translate-y-1/2 text-center px-16 pointer-events-none">
-                    <div class="font-bold text-lg text-white truncate">{{ t('ytm_title') }}</div>
-                </div>
-                <button @click="closeYtmSearch"
-                    class="w-9 h-9 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-400 hover:text-white">
-                    <i class="ri-close-line"></i>
-                </button>
-            </div>
-
-            <div class="px-4 py-4 border-b border-zinc-800 bg-zinc-900/70 space-y-3">
-                <div class="flex gap-3">
-                    <div class="flex-1 bg-zinc-950/80 border border-zinc-800 rounded-xl flex items-center px-3 input-glow">
-                        <i class="ri-search-line text-zinc-500"></i>
-                        <input id="ytm-search-input" v-model="ytmQuery" type="text"
-                            class="bg-transparent w-full p-3 text-sm text-white outline-none placeholder-zinc-600"
-                            :placeholder="t('ytm_search_placeholder')" @input="onYtmQueryInput"
-                            @keydown.enter.prevent="submitYtmSearch()">
-                    </div>
-                    <button @click="submitYtmSearch()" :disabled="ytmLoading"
-                        class="bg-white text-black w-12 rounded-xl flex items-center justify-center font-bold btn-press disabled:opacity-50">
-                        <i v-if="ytmLoading" class="ri-loader-4-line animate-spin"></i>
-                        <i v-else class="ri-search-line"></i>
-                    </button>
-                </div>
-
-                <div class="flex gap-2 overflow-x-auto no-scrollbar">
-                    <button v-for="option in ytmFilterOptions" :key="option.value" @click="changeYtmFilter(option.value)"
-                        class="px-3 py-1.5 rounded-full border text-xs whitespace-nowrap transition-colors"
-                        :class="ytmFilter === option.value ? 'border-blue-500 bg-blue-500/15 text-blue-300' : 'border-zinc-700 bg-zinc-900 text-zinc-400 hover:text-white hover:border-zinc-500'">
-                        {{ option.label }}
-                    </button>
-                </div>
-            </div>
-
-            <div class="flex-1 overflow-y-auto p-4 space-y-6" @scroll.passive="onYtmResultsScroll">
-                <div v-if="ytmLoading || ytmDetailLoading" class="space-y-3">
-                    <div class="text-xs font-mono uppercase tracking-wider text-zinc-500">
-                        {{ ytmDetailLoading ? t('ytm_loading_detail') : t('ytm_searching') }}
-                    </div>
-                    <div v-for="index in 5" :key="index"
-                        class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 animate-pulse">
-                        <div class="h-3 bg-zinc-800 rounded w-20 mb-3"></div>
-                        <div class="h-4 bg-zinc-800 rounded w-2/3 mb-2"></div>
-                        <div class="h-3 bg-zinc-800 rounded w-1/2"></div>
-                    </div>
-                </div>
-
-                <template v-else-if="ytmViewMode === 'detail' && ytmDetail">
-                    <div class="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-3">
-                        <div class="text-xl font-semibold text-white leading-snug">{{ ytmDetail.title }}</div>
-                        <div v-if="ytmDetail.subtitle" class="text-sm text-zinc-400 leading-relaxed">{{ ytmDetail.subtitle }}</div>
-                        <div v-if="ytmDetail.description" class="text-sm text-zinc-500 leading-6">{{ ytmDetail.description }}</div>
-                    </div>
-
-                    <div v-if="ytmDetail.tracks && ytmDetail.tracks.length" class="space-y-2">
-                        <div class="flex items-center justify-between px-1">
-                            <div class="text-xs font-mono uppercase tracking-wider text-zinc-500">
-                                {{ t('ytm_filter_songs') }} ({{ ytmDetail.tracks.length }})
-                            </div>
-                        </div>
-                        <div v-for="item in ytmDetail.tracks" :key="item.id"
-                            class="bg-zinc-900 border border-zinc-800 rounded-2xl p-3 flex items-center gap-3">
-                            <div class="min-w-0 flex-1">
-                                <div class="flex items-center gap-2 mb-1">
-                                    <span class="text-[10px] font-mono uppercase tracking-wider text-zinc-500">{{ getYtmItemTypeLabel(item) }}</span>
-                                    <span v-if="item.durationText" class="text-[10px] text-zinc-600">{{ item.durationText }}</span>
-                                </div>
-                                <div class="text-sm font-medium text-zinc-100 truncate">{{ item.title }}</div>
-                                <div v-if="item.itemType === 'track' && hasYtmTrackMetaLinks(item)"
-                                    class="mt-0.5 flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap text-xs leading-5 text-zinc-500">
-                                    <template v-for="(artist, index) in getYtmTrackArtistLinks(item)" :key="`${item.id}-artist-${artist.key}`">
-                                        <button @click.stop="openYtmArtistRef(artist)"
-                                            type="button"
-                                            :title="artist.name"
-                                            class="inline-block max-w-[11rem] shrink-0 truncate p-0 align-baseline text-left text-zinc-500 hover:text-zinc-200 transition">
-                                            {{ artist.name }}
-                                        </button>
-                                        <span v-if="index < getYtmTrackArtistLinks(item).length - 1" class="shrink-0 text-zinc-600">·</span>
-                                    </template>
-                                    <template v-if="getYtmTrackAlbumLink(item)">
-                                        <span v-if="getYtmTrackArtistLinks(item).length > 0" class="shrink-0 text-zinc-600">·</span>
-                                        <button @click.stop="openYtmAlbumRef(getYtmTrackAlbumLink(item))"
-                                            type="button"
-                                            :title="getYtmTrackAlbumLink(item).name"
-                                            class="min-w-0 max-w-[60%] truncate p-0 align-baseline text-left text-zinc-500 hover:text-zinc-200 transition">
-                                            {{ getYtmTrackAlbumLink(item).name }}
-                                        </button>
-                                    </template>
-                                </div>
-                                <div v-else-if="item.subtitle" class="text-xs text-zinc-500 truncate">{{ item.subtitle }}</div>
-                            </div>
-                            <button @click="queueSingleYtmTrack(item)" :disabled="isYtmTrackBusy(item)"
-                                class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 btn-press border transition-all duration-200 ease-out transform-gpu disabled:opacity-60"
-                                :class="getYtmTrackAddButtonClass(item)"
-                                :title="t('ytm_add')">
-                                <i v-if="isYtmTrackBusy(item)" class="ri-loader-4-line animate-spin text-lg"></i>
-                                <i v-else-if="isYtmTrackAdded(item)" class="ri-check-line text-lg"></i>
-                                <i v-else class="ri-add-line text-lg"></i>
-                            </button>
-                        </div>
-                    </div>
-
-                    <div v-for="section in ytmDetail.sections" :key="section.key" class="space-y-2">
-                        <div class="flex items-center justify-between px-1">
-                            <div class="text-xs font-mono uppercase tracking-wider text-zinc-500">{{ getYtmSectionTitle(section) }}</div>
-                            <button v-if="section.openAction" @click="openYtmSection(section)"
-                                class="text-xs flex items-center gap-1 text-zinc-400 border border-zinc-700 px-2 py-1 rounded hover:bg-zinc-800 hover:text-white transition">
-                                <i class="ri-arrow-right-line"></i> {{ t('ytm_more') }}
-                            </button>
-                        </div>
-                        <div v-for="item in section.items" :key="item.id"
-                            class="bg-zinc-900 border border-zinc-800 rounded-2xl p-3 flex items-center gap-3">
-                            <div class="min-w-0 flex-1">
-                                <div class="flex items-center gap-2 mb-1">
-                                    <span class="text-[10px] font-mono uppercase tracking-wider text-zinc-500">{{ getYtmItemTypeLabel(item) }}</span>
-                                    <span v-if="item.durationText" class="text-[10px] text-zinc-600">{{ item.durationText }}</span>
-                                </div>
-                                <div class="text-sm font-medium text-zinc-100 truncate">{{ item.title }}</div>
-                                <div v-if="item.itemType === 'track' && hasYtmTrackMetaLinks(item)"
-                                    class="mt-0.5 flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap text-xs leading-5 text-zinc-500">
-                                    <template v-for="(artist, index) in getYtmTrackArtistLinks(item)" :key="`${item.id}-artist-${artist.key}`">
-                                        <button @click.stop="openYtmArtistRef(artist)"
-                                            type="button"
-                                            :title="artist.name"
-                                            class="inline-block max-w-[11rem] shrink-0 truncate p-0 align-baseline text-left text-zinc-500 hover:text-zinc-200 transition">
-                                            {{ artist.name }}
-                                        </button>
-                                        <span v-if="index < getYtmTrackArtistLinks(item).length - 1" class="shrink-0 text-zinc-600">·</span>
-                                    </template>
-                                    <template v-if="getYtmTrackAlbumLink(item)">
-                                        <span v-if="getYtmTrackArtistLinks(item).length > 0" class="shrink-0 text-zinc-600">·</span>
-                                        <button @click.stop="openYtmAlbumRef(getYtmTrackAlbumLink(item))"
-                                            type="button"
-                                            :title="getYtmTrackAlbumLink(item).name"
-                                            class="min-w-0 max-w-[60%] truncate p-0 align-baseline text-left text-zinc-500 hover:text-zinc-200 transition">
-                                            {{ getYtmTrackAlbumLink(item).name }}
-                                        </button>
-                                    </template>
-                                </div>
-                                <div v-else-if="item.subtitle" class="text-xs text-zinc-500 truncate">{{ item.subtitle }}</div>
-                            </div>
-                            <button v-if="item.itemType === 'track'" @click="queueSingleYtmTrack(item)" :disabled="isYtmTrackBusy(item)"
-                                class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 btn-press border transition-all duration-200 ease-out transform-gpu disabled:opacity-60"
-                                :class="getYtmTrackAddButtonClass(item)"
-                                :title="t('ytm_add')">
-                                <i v-if="isYtmTrackBusy(item)" class="ri-loader-4-line animate-spin text-lg"></i>
-                                <i v-else-if="isYtmTrackAdded(item)" class="ri-check-line text-lg"></i>
-                                <i v-else class="ri-add-line text-lg"></i>
-                            </button>
-                            <button v-else @click="openYtmItem(item)"
-                                class="w-10 h-10 rounded-xl bg-zinc-800 text-zinc-200 flex items-center justify-center shrink-0 btn-press border border-zinc-700"
-                                :title="t('ytm_open')">
-                                <i class="ri-arrow-right-s-line text-lg"></i>
-                            </button>
-                        </div>
-                    </div>
-                </template>
-
-                <template v-else>
-                    <div v-if="ytmSections.length > 0" class="space-y-6">
-                        <div v-for="section in ytmSections" :key="section.key" class="space-y-2">
-                            <div class="text-xs font-mono uppercase tracking-wider text-zinc-500 px-1">{{ getYtmSectionTitle(section) }}</div>
-                            <div v-for="item in section.items" :key="item.id"
-                                class="bg-zinc-900 border border-zinc-800 rounded-2xl p-3 flex items-center gap-3">
-                                <div class="min-w-0 flex-1">
-                                    <div class="flex items-center gap-2 mb-1">
-                                        <span class="text-[10px] font-mono uppercase tracking-wider text-zinc-500">{{ getYtmItemTypeLabel(item) }}</span>
-                                        <span v-if="item.durationText" class="text-[10px] text-zinc-600">{{ item.durationText }}</span>
-                                    </div>
-                                    <div class="text-sm font-medium text-zinc-100 truncate">{{ item.title }}</div>
-                                    <div v-if="item.itemType === 'track' && hasYtmTrackMetaLinks(item)"
-                                        class="mt-0.5 flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap text-xs leading-5 text-zinc-500">
-                                        <template v-for="(artist, index) in getYtmTrackArtistLinks(item)" :key="`${item.id}-artist-${artist.key}`">
-                                            <button @click.stop="openYtmArtistRef(artist)"
-                                                type="button"
-                                                :title="artist.name"
-                                                class="inline-block max-w-[11rem] shrink-0 truncate p-0 align-baseline text-left text-zinc-500 hover:text-zinc-200 transition">
-                                                {{ artist.name }}
-                                            </button>
-                                            <span v-if="index < getYtmTrackArtistLinks(item).length - 1" class="shrink-0 text-zinc-600">·</span>
-                                        </template>
-                                        <template v-if="getYtmTrackAlbumLink(item)">
-                                            <span v-if="getYtmTrackArtistLinks(item).length > 0" class="shrink-0 text-zinc-600">·</span>
-                                            <button @click.stop="openYtmAlbumRef(getYtmTrackAlbumLink(item))"
-                                                type="button"
-                                                :title="getYtmTrackAlbumLink(item).name"
-                                                class="min-w-0 max-w-[60%] truncate p-0 align-baseline text-left text-zinc-500 hover:text-zinc-200 transition">
-                                                {{ getYtmTrackAlbumLink(item).name }}
-                                            </button>
-                                        </template>
-                                    </div>
-                                    <div v-else-if="item.subtitle" class="text-xs text-zinc-500 truncate">{{ item.subtitle }}</div>
-                                </div>
-                                <button v-if="item.itemType === 'track'" @click="queueSingleYtmTrack(item)" :disabled="isYtmTrackBusy(item)"
-                                    class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 btn-press border transition-all duration-200 ease-out transform-gpu disabled:opacity-60"
-                                    :class="getYtmTrackAddButtonClass(item)"
-                                    :title="t('ytm_add')">
-                                    <i v-if="isYtmTrackBusy(item)" class="ri-loader-4-line animate-spin text-lg"></i>
-                                    <i v-else-if="isYtmTrackAdded(item)" class="ri-check-line text-lg"></i>
-                                    <i v-else class="ri-add-line text-lg"></i>
-                                </button>
-                                <button v-else @click="openYtmItem(item)"
-                                    class="w-10 h-10 rounded-xl bg-zinc-800 text-zinc-200 flex items-center justify-center shrink-0 btn-press border border-zinc-700"
-                                    :title="t('ytm_open')">
-                                    <i class="ri-arrow-right-s-line text-lg"></i>
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div v-else-if="ytmHasSearched && !ytmErrorState"
-                        class="min-h-[280px] flex flex-col items-center justify-center text-center px-6 text-zinc-500">
-                        <i class="ri-search-eye-line text-3xl mb-3 text-zinc-600"></i>
-                        <div class="text-sm text-zinc-300 mb-1">{{ t('ytm_no_results') }}</div>
-                        <div class="text-xs leading-6">{{ t('ytm_try_keyword') }}</div>
-                    </div>
-
-                    <div v-else-if="ytmErrorState" class="min-h-[280px]"></div>
-
-                    <div v-else
-                        class="min-h-[280px] flex flex-col items-center justify-center text-center px-6 text-zinc-500">
-                        <i class="ri-youtube-line text-3xl mb-3 text-red-400/80"></i>
-                        <div class="text-sm text-zinc-300 mb-1">{{ t('ytm_title') }}</div>
-                        <div class="text-xs leading-6">{{ t('ytm_search_placeholder') }}</div>
-                    </div>
-                </template>
-
-                <div v-if="ytmErrorState || ytmLoadingMoreCurrent || ytmHasVisibleResults" class="pt-1 pb-2">
-                    <div v-if="ytmErrorState"
-                        class="rounded-2xl border border-amber-500/25 bg-amber-500/5 px-4 py-4 text-center">
-                        <div class="text-sm text-amber-200">{{ getYtmErrorTitle() }}</div>
-                        <div class="mt-1 text-xs leading-5 text-zinc-400">{{ getYtmErrorHint() }}</div>
-                        <div class="mt-3 flex justify-center">
-                            <button @click="retryYtmRequest"
-                                class="min-w-[9rem] rounded-xl border border-amber-400/40 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-100 transition hover:border-amber-300 hover:bg-amber-500/15">
-                                <i class="ri-refresh-line mr-2"></i>{{ t('ytm_retry') }}
-                            </button>
-                        </div>
-                    </div>
-                    <div v-else-if="ytmLoadingMoreCurrent" class="space-y-2">
-                        <div v-for="index in 2" :key="`ytm-load-more-${index}`"
-                            class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 animate-pulse">
-                            <div class="h-3 bg-zinc-800 rounded w-20 mb-3"></div>
-                            <div class="h-4 bg-zinc-800 rounded w-2/3 mb-2"></div>
-                            <div class="h-3 bg-zinc-800 rounded w-1/2"></div>
-                        </div>
-                    </div>
-                    <div v-else-if="ytmCanLoadMoreCurrent" class="flex justify-center">
-                        <button @click="loadMoreYtmResults()" :disabled="ytmLoadingMoreCurrent"
-                            class="min-w-[11rem] rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-3 text-sm text-zinc-200 transition hover:border-zinc-500 hover:text-white disabled:opacity-60 disabled:hover:border-zinc-700 disabled:hover:text-zinc-200">
-                            <i class="ri-arrow-down-line mr-2"></i>
-                            {{ t('ytm_load_more') }}
-                        </button>
-                    </div>
-                    <div v-else-if="ytmReachedEndCurrent" class="text-center text-xs text-zinc-500 tracking-wide py-2">
-                        {{ getYtmLoadedAllText() }}
-                    </div>
-                </div>
-            </div>
-
-            <div v-if="ytmViewMode === 'detail' && ytmDetail && ytmDetail.tracks && ytmDetail.tracks.length"
-                class="p-4 border-t border-zinc-800 bg-zinc-900 flex gap-3">
-                <button @click="openYtmBatchSelection(ytmDetail.tracks)"
-                    class="flex-1 py-3 rounded-xl border border-zinc-700 text-zinc-200 hover:bg-zinc-800 transition">
-                    {{ t('ytm_pick_tracks') }}
-                </button>
-                <button @click="queueYtmDetailTracks"
-                    class="flex-1 py-3 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-500 transition">
-                    {{ t('ytm_add_all') }} ({{ ytmDetail.tracks.length }})
-                </button>
-            </div>
-        </div>
-
         <div v-if="showYtmCounterpartChoice"
             class="fixed inset-0 z-[70] bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-4"
             @click.self="closeYtmCounterpartChoice">
@@ -1325,26 +657,33 @@
                 </div>
             </div>
             <div class="flex gap-6 border-b border-zinc-800">
-                <button @click="activeTab = 'playlist'" id="tab-playlist"
+                <button @click="setActiveTab('playlist')" id="tab-playlist"
                     class="pb-2 text-sm font-medium transition-colors duration-200 relative"
                     :class="activeTab === 'playlist' ? 'text-white' : 'text-zinc-500'">
                     {{ t('playlist') }} <span v-if="activeTab === 'playlist'"
                         class="absolute bottom-0 left-0 w-full h-[2px] bg-white rounded-full transition-all duration-300"></span>
                 </button>
-                <button @click="activeTab = 'history'"
+                <button @click="setActiveTab('history')"
                     class="pb-2 text-sm font-medium transition-colors duration-200 relative"
                     :class="activeTab === 'history' ? 'text-white' : 'text-zinc-500'">
                     {{ t('history') }} <span v-if="activeTab === 'history'"
                         class="absolute bottom-0 left-0 w-full h-[2px] bg-white rounded-full transition-all duration-300"></span>
                 </button>
+                <button @click="setActiveTab('search')" id="tab-search"
+                    class="pb-2 text-sm font-medium transition-colors duration-200 relative"
+                    :class="activeTab === 'search' ? 'text-white' : 'text-zinc-500'">
+                    {{ t('ytm_title') }} <span v-if="activeTab === 'search'"
+                        class="absolute bottom-0 left-0 w-full h-[2px] bg-white rounded-full transition-all duration-300"></span>
+                </button>
             </div>
         </header>
 
-        <main class="flex-1 min-h-0 overflow-y-auto no-scrollbar p-4 space-y-4 bg-[#09090b]">
+        <main class="flex-1 min-h-0 overflow-hidden bg-[#09090b] p-4">
+            <div class="flex h-full min-h-0 flex-col gap-4">
 
-            <div v-if="currentPlaying"
-                class="animate-fade-slide-up bg-zinc-900 p-5 rounded-2xl border border-zinc-800 shadow-sm animate-shimmer-border"
-                id="player-card">
+                <div v-if="!isSearchTabActive && currentPlaying"
+                    class="animate-fade-slide-up bg-zinc-900 p-5 rounded-2xl border border-zinc-800 shadow-sm animate-shimmer-border"
+                    id="player-card">
                 <div class="flex items-center justify-between mb-3">
                     <div class="flex items-center gap-2">
                         <div class="w-2 h-2 rounded-full" :class="[
@@ -1401,13 +740,15 @@
                     </div>
                 </div>
             </div>
-            <div v-else
-                class="h-40 flex flex-col items-center justify-center border border-dashed border-zinc-800 rounded-2xl text-zinc-600">
+                <div v-else-if="!isSearchTabActive"
+                    class="h-40 flex flex-col items-center justify-center border border-dashed border-zinc-800 rounded-2xl text-zinc-600">
                 <i class="ri-music-2-line text-2xl mb-2 opacity-50 animate-gentle-float"></i><span class="text-xs">{{
                     t('idle') }}</span>
             </div>
 
-            <div v-if="activeTab === 'playlist'" class="space-y-4">
+            <div class="flex-1 min-h-0">
+            <div v-show="activeTab === 'playlist'" class="controller-tab-panel h-full overflow-y-auto no-scrollbar pr-1">
+                <div class="space-y-4 pb-8">
                 <div class="flex gap-3">
                     <div id="input-add-song"
                         class="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl flex items-center px-3 input-glow">
@@ -1419,12 +760,8 @@
                         class="bg-white text-black w-12 rounded-xl flex items-center justify-center font-bold btn-press disabled:opacity-50"><i
                             v-if="isAdding" class="ri-loader-4-line animate-spin"></i><i v-else
                             class="ri-add-line"></i></button>
-                    <button @click="openYtmSearch" :title="t('ytm_entry')"
-                        class="bg-zinc-900 border border-zinc-700 text-zinc-200 w-12 rounded-xl flex items-center justify-center font-bold btn-press hover:text-white hover:border-zinc-500">
-                        <i class="ri-search-line"></i>
-                    </button>
                 </div>
-                <div class="space-y-2 pb-8">
+                <div class="space-y-2">
                     <div class="flex items-center justify-between px-1 mb-2">
                         <div class="text-xs font-mono text-zinc-500 uppercase">{{ t('queue') }} ({{ playlist.length }})
                         </div>
@@ -1473,9 +810,11 @@
                         </div>
                     </transition-group>
                 </div>
+                </div>
             </div>
 
-            <div v-if="activeTab === 'history'" class="space-y-3">
+            <div v-show="activeTab === 'history'" class="controller-tab-panel h-full overflow-y-auto no-scrollbar pr-1">
+                <div class="space-y-3 pb-8">
                 <div class="flex justify-end">
                     <button @click="exportHistory"
                         class="text-xs flex items-center gap-1 text-zinc-400 border border-zinc-700 px-3 py-1.5 rounded hover:bg-zinc-800 hover:text-white transition"><i
@@ -1492,10 +831,293 @@
                                 class="ri-add-circle-line text-xl"></i></button>
                     </div>
                 </div>
+                </div>
+            </div>
+
+            <div v-show="activeTab === 'search'" class="controller-tab-panel h-full overflow-y-auto no-scrollbar"
+                @scroll.passive="onYtmResultsScroll">
+                <div class="search-toolbar sticky top-0 z-10 -mx-4 px-4 pb-4">
+                    <div
+                        class="rounded-[28px] border border-zinc-800/80 bg-zinc-950/90 p-3 shadow-[0_18px_48px_rgba(0,0,0,0.28)] backdrop-blur-xl space-y-3">
+                        <div class="flex items-center gap-2">
+                            <button v-if="ytmCanGoBack" @click="goBackYtmView"
+                                class="w-10 h-10 rounded-2xl border border-zinc-700 bg-zinc-900 text-zinc-300 flex items-center justify-center hover:text-white hover:border-zinc-500">
+                                <i class="ri-arrow-left-line"></i>
+                            </button>
+                            <div class="flex-1 bg-zinc-900/90 border border-zinc-800 rounded-2xl flex items-center px-3 input-glow">
+                                <i class="ri-search-line text-zinc-500"></i>
+                                <input id="ytm-search-input" v-model="ytmQuery" type="text"
+                                    class="bg-transparent w-full p-3 text-sm text-white outline-none placeholder-zinc-600"
+                                    :placeholder="t('ytm_search_placeholder')" @input="onYtmQueryInput"
+                                    @keydown.enter.prevent="submitYtmSearch()">
+                            </div>
+                            <button @click="submitYtmSearch()" :disabled="ytmLoading || ytmDetailLoading"
+                                class="bg-white text-black w-12 h-10 rounded-2xl flex items-center justify-center font-bold btn-press disabled:opacity-50">
+                                <i v-if="ytmLoading || ytmDetailLoading" class="ri-loader-4-line animate-spin"></i>
+                                <i v-else class="ri-search-line"></i>
+                            </button>
+                        </div>
+
+                        <div class="flex gap-2 overflow-x-auto no-scrollbar">
+                            <button v-for="option in ytmFilterOptions" :key="option.value" @click="changeYtmFilter(option.value)"
+                                class="px-3 py-1.5 rounded-full border text-xs whitespace-nowrap transition-colors"
+                                :class="ytmFilter === option.value ? 'border-blue-500 bg-blue-500/15 text-blue-300' : 'border-zinc-700 bg-zinc-900 text-zinc-400 hover:text-white hover:border-zinc-500'">
+                                {{ option.label }}
+                            </button>
+                        </div>
+
+                        <div class="flex items-center justify-between gap-3 px-1">
+                            <div class="text-[10px] font-mono uppercase tracking-[0.3em] text-zinc-500 truncate">
+                                {{ ytmViewMode === 'detail' ? (ytmDetail?.title || t('ytm_title')) : t('ytm_title') }}
+                            </div>
+                            <div v-if="ytmHasVisibleResults" class="text-[10px] text-zinc-600 whitespace-nowrap">
+                                {{ getYtmLoadedAllText() }}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="space-y-6 pb-8">
+                    <div v-if="ytmLoading || ytmDetailLoading" class="space-y-3">
+                        <div class="text-xs font-mono uppercase tracking-wider text-zinc-500">
+                            {{ ytmDetailLoading ? t('ytm_loading_detail') : t('ytm_searching') }}
+                        </div>
+                        <div v-for="index in 5" :key="index"
+                            class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 animate-pulse">
+                            <div class="h-3 bg-zinc-800 rounded w-20 mb-3"></div>
+                            <div class="h-4 bg-zinc-800 rounded w-2/3 mb-2"></div>
+                            <div class="h-3 bg-zinc-800 rounded w-1/2"></div>
+                        </div>
+                    </div>
+
+                    <template v-else-if="ytmViewMode === 'detail' && ytmDetail">
+                        <div class="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-3">
+                            <div class="text-xl font-semibold text-white leading-snug">{{ ytmDetail.title }}</div>
+                            <div v-if="ytmDetail.subtitle" class="text-sm text-zinc-400 leading-relaxed">{{ ytmDetail.subtitle }}</div>
+                            <div v-if="ytmDetail.description" class="text-sm text-zinc-500 leading-6">{{ ytmDetail.description }}</div>
+                        </div>
+
+                        <div v-if="ytmDetail.tracks && ytmDetail.tracks.length" class="space-y-2">
+                            <div class="flex items-center justify-between px-1">
+                                <div class="text-xs font-mono uppercase tracking-wider text-zinc-500">
+                                    {{ t('ytm_filter_songs') }} ({{ ytmDetail.tracks.length }})
+                                </div>
+                            </div>
+                            <div v-for="item in ytmDetail.tracks" :key="item.id"
+                                class="bg-zinc-900 border border-zinc-800 rounded-2xl p-3 flex items-center gap-3">
+                                <div class="min-w-0 flex-1">
+                                    <div class="flex items-center gap-2 mb-1">
+                                        <span class="text-[10px] font-mono uppercase tracking-wider text-zinc-500">{{ getYtmItemTypeLabel(item) }}</span>
+                                        <span v-if="item.durationText" class="text-[10px] text-zinc-600">{{ item.durationText }}</span>
+                                    </div>
+                                    <div class="text-sm font-medium text-zinc-100 truncate">{{ item.title }}</div>
+                                    <div v-if="item.itemType === 'track' && hasYtmTrackMetaLinks(item)"
+                                        class="mt-0.5 flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap text-xs leading-5 text-zinc-500">
+                                        <template v-for="(artist, index) in getYtmTrackArtistLinks(item)" :key="`${item.id}-artist-${artist.key}`">
+                                            <button @click.stop="openYtmArtistRef(artist)"
+                                                type="button"
+                                                :title="artist.name"
+                                                class="inline-block max-w-[11rem] shrink-0 truncate p-0 align-baseline text-left text-zinc-500 hover:text-zinc-200 transition">
+                                                {{ artist.name }}
+                                            </button>
+                                            <span v-if="index < getYtmTrackArtistLinks(item).length - 1" class="shrink-0 text-zinc-600">·</span>
+                                        </template>
+                                        <template v-if="getYtmTrackAlbumLink(item)">
+                                            <span v-if="getYtmTrackArtistLinks(item).length > 0" class="shrink-0 text-zinc-600">·</span>
+                                            <button @click.stop="openYtmAlbumRef(getYtmTrackAlbumLink(item))"
+                                                type="button"
+                                                :title="getYtmTrackAlbumLink(item).name"
+                                                class="min-w-0 max-w-[60%] truncate p-0 align-baseline text-left text-zinc-500 hover:text-zinc-200 transition">
+                                                {{ getYtmTrackAlbumLink(item).name }}
+                                            </button>
+                                        </template>
+                                    </div>
+                                    <div v-else-if="item.subtitle" class="text-xs text-zinc-500 truncate">{{ item.subtitle }}</div>
+                                </div>
+                                <button @click="queueSingleYtmTrack(item)" :disabled="isYtmTrackBusy(item)"
+                                    class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 btn-press border transition-all duration-200 ease-out transform-gpu disabled:opacity-60"
+                                    :class="getYtmTrackAddButtonClass(item)"
+                                    :title="t('ytm_add')">
+                                    <i v-if="isYtmTrackBusy(item)" class="ri-loader-4-line animate-spin text-lg"></i>
+                                    <i v-else-if="isYtmTrackAdded(item)" class="ri-check-line text-lg"></i>
+                                    <i v-else class="ri-add-line text-lg"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div v-for="section in ytmDetail.sections" :key="section.key" class="space-y-2">
+                            <div class="flex items-center justify-between px-1">
+                                <div class="text-xs font-mono uppercase tracking-wider text-zinc-500">{{ getYtmSectionTitle(section) }}</div>
+                                <button v-if="section.openAction" @click="openYtmSection(section)"
+                                    class="text-xs flex items-center gap-1 text-zinc-400 border border-zinc-700 px-2 py-1 rounded hover:bg-zinc-800 hover:text-white transition">
+                                    <i class="ri-arrow-right-line"></i> {{ t('ytm_more') }}
+                                </button>
+                            </div>
+                            <div v-for="item in section.items" :key="item.id"
+                                class="bg-zinc-900 border border-zinc-800 rounded-2xl p-3 flex items-center gap-3">
+                                <div class="min-w-0 flex-1">
+                                    <div class="flex items-center gap-2 mb-1">
+                                        <span class="text-[10px] font-mono uppercase tracking-wider text-zinc-500">{{ getYtmItemTypeLabel(item) }}</span>
+                                        <span v-if="item.durationText" class="text-[10px] text-zinc-600">{{ item.durationText }}</span>
+                                    </div>
+                                    <div class="text-sm font-medium text-zinc-100 truncate">{{ item.title }}</div>
+                                    <div v-if="item.itemType === 'track' && hasYtmTrackMetaLinks(item)"
+                                        class="mt-0.5 flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap text-xs leading-5 text-zinc-500">
+                                        <template v-for="(artist, index) in getYtmTrackArtistLinks(item)" :key="`${item.id}-artist-${artist.key}`">
+                                            <button @click.stop="openYtmArtistRef(artist)"
+                                                type="button"
+                                                :title="artist.name"
+                                                class="inline-block max-w-[11rem] shrink-0 truncate p-0 align-baseline text-left text-zinc-500 hover:text-zinc-200 transition">
+                                                {{ artist.name }}
+                                            </button>
+                                            <span v-if="index < getYtmTrackArtistLinks(item).length - 1" class="shrink-0 text-zinc-600">·</span>
+                                        </template>
+                                        <template v-if="getYtmTrackAlbumLink(item)">
+                                            <span v-if="getYtmTrackArtistLinks(item).length > 0" class="shrink-0 text-zinc-600">·</span>
+                                            <button @click.stop="openYtmAlbumRef(getYtmTrackAlbumLink(item))"
+                                                type="button"
+                                                :title="getYtmTrackAlbumLink(item).name"
+                                                class="min-w-0 max-w-[60%] truncate p-0 align-baseline text-left text-zinc-500 hover:text-zinc-200 transition">
+                                                {{ getYtmTrackAlbumLink(item).name }}
+                                            </button>
+                                        </template>
+                                    </div>
+                                    <div v-else-if="item.subtitle" class="text-xs text-zinc-500 truncate">{{ item.subtitle }}</div>
+                                </div>
+                                <button v-if="item.itemType === 'track'" @click="queueSingleYtmTrack(item)" :disabled="isYtmTrackBusy(item)"
+                                    class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 btn-press border transition-all duration-200 ease-out transform-gpu disabled:opacity-60"
+                                    :class="getYtmTrackAddButtonClass(item)"
+                                    :title="t('ytm_add')">
+                                    <i v-if="isYtmTrackBusy(item)" class="ri-loader-4-line animate-spin text-lg"></i>
+                                    <i v-else-if="isYtmTrackAdded(item)" class="ri-check-line text-lg"></i>
+                                    <i v-else class="ri-add-line text-lg"></i>
+                                </button>
+                                <button v-else @click="openYtmItem(item)"
+                                    class="w-10 h-10 rounded-xl bg-zinc-800 text-zinc-200 flex items-center justify-center shrink-0 btn-press border border-zinc-700"
+                                    :title="t('ytm_open')">
+                                    <i class="ri-arrow-right-s-line text-lg"></i>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div v-if="ytmDetail.tracks && ytmDetail.tracks.length" class="grid grid-cols-2 gap-3">
+                            <button @click="openYtmBatchSelection(ytmDetail.tracks)"
+                                class="py-3 rounded-xl border border-zinc-700 text-zinc-200 hover:bg-zinc-800 transition">
+                                {{ t('ytm_pick_tracks') }}
+                            </button>
+                            <button @click="queueYtmDetailTracks"
+                                class="py-3 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-500 transition">
+                                {{ t('ytm_add_all') }} ({{ ytmDetail.tracks.length }})
+                            </button>
+                        </div>
+                    </template>
+
+                    <template v-else>
+                        <div v-if="ytmSections.length > 0" class="space-y-6">
+                            <div v-for="section in ytmSections" :key="section.key" class="space-y-2">
+                                <div class="text-xs font-mono uppercase tracking-wider text-zinc-500 px-1">{{ getYtmSectionTitle(section) }}</div>
+                                <div v-for="item in section.items" :key="item.id"
+                                    class="bg-zinc-900 border border-zinc-800 rounded-2xl p-3 flex items-center gap-3">
+                                    <div class="min-w-0 flex-1">
+                                        <div class="flex items-center gap-2 mb-1">
+                                            <span class="text-[10px] font-mono uppercase tracking-wider text-zinc-500">{{ getYtmItemTypeLabel(item) }}</span>
+                                            <span v-if="item.durationText" class="text-[10px] text-zinc-600">{{ item.durationText }}</span>
+                                        </div>
+                                        <div class="text-sm font-medium text-zinc-100 truncate">{{ item.title }}</div>
+                                        <div v-if="item.itemType === 'track' && hasYtmTrackMetaLinks(item)"
+                                            class="mt-0.5 flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap text-xs leading-5 text-zinc-500">
+                                            <template v-for="(artist, index) in getYtmTrackArtistLinks(item)" :key="`${item.id}-artist-${artist.key}`">
+                                                <button @click.stop="openYtmArtistRef(artist)"
+                                                    type="button"
+                                                    :title="artist.name"
+                                                    class="inline-block max-w-[11rem] shrink-0 truncate p-0 align-baseline text-left text-zinc-500 hover:text-zinc-200 transition">
+                                                    {{ artist.name }}
+                                                </button>
+                                                <span v-if="index < getYtmTrackArtistLinks(item).length - 1" class="shrink-0 text-zinc-600">·</span>
+                                            </template>
+                                            <template v-if="getYtmTrackAlbumLink(item)">
+                                                <span v-if="getYtmTrackArtistLinks(item).length > 0" class="shrink-0 text-zinc-600">·</span>
+                                                <button @click.stop="openYtmAlbumRef(getYtmTrackAlbumLink(item))"
+                                                    type="button"
+                                                    :title="getYtmTrackAlbumLink(item).name"
+                                                    class="min-w-0 max-w-[60%] truncate p-0 align-baseline text-left text-zinc-500 hover:text-zinc-200 transition">
+                                                    {{ getYtmTrackAlbumLink(item).name }}
+                                                </button>
+                                            </template>
+                                        </div>
+                                        <div v-else-if="item.subtitle" class="text-xs text-zinc-500 truncate">{{ item.subtitle }}</div>
+                                    </div>
+                                    <button v-if="item.itemType === 'track'" @click="queueSingleYtmTrack(item)" :disabled="isYtmTrackBusy(item)"
+                                        class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 btn-press border transition-all duration-200 ease-out transform-gpu disabled:opacity-60"
+                                        :class="getYtmTrackAddButtonClass(item)"
+                                        :title="t('ytm_add')">
+                                        <i v-if="isYtmTrackBusy(item)" class="ri-loader-4-line animate-spin text-lg"></i>
+                                        <i v-else-if="isYtmTrackAdded(item)" class="ri-check-line text-lg"></i>
+                                        <i v-else class="ri-add-line text-lg"></i>
+                                    </button>
+                                    <button v-else @click="openYtmItem(item)"
+                                        class="w-10 h-10 rounded-xl bg-zinc-800 text-zinc-200 flex items-center justify-center shrink-0 btn-press border border-zinc-700"
+                                        :title="t('ytm_open')">
+                                        <i class="ri-arrow-right-s-line text-lg"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div v-else-if="ytmHasSearched && !ytmErrorState"
+                            class="min-h-[280px] flex flex-col items-center justify-center text-center px-6 text-zinc-500">
+                            <i class="ri-search-eye-line text-3xl mb-3 text-zinc-600"></i>
+                            <div class="text-sm text-zinc-300 mb-1">{{ t('ytm_no_results') }}</div>
+                            <div class="text-xs leading-6">{{ t('ytm_try_keyword') }}</div>
+                        </div>
+
+                        <div v-else-if="ytmErrorState" class="min-h-[280px]"></div>
+
+                        <div v-else
+                            class="min-h-[280px] flex flex-col items-center justify-center text-center px-6 text-zinc-500">
+                            <i class="ri-youtube-line text-3xl mb-3 text-red-400/80"></i>
+                            <div class="text-sm text-zinc-300 mb-1">{{ t('ytm_title') }}</div>
+                            <div class="text-xs leading-6">{{ t('ytm_search_placeholder') }}</div>
+                        </div>
+                    </template>
+
+                    <div v-if="ytmErrorState || ytmLoadingMoreCurrent || ytmHasVisibleResults" class="pt-1 pb-2">
+                        <div v-if="ytmErrorState"
+                            class="rounded-2xl border border-amber-500/25 bg-amber-500/5 px-4 py-4 text-center">
+                            <div class="text-sm text-amber-200">{{ getYtmErrorTitle() }}</div>
+                            <div class="mt-1 text-xs leading-5 text-zinc-400">{{ getYtmErrorHint() }}</div>
+                            <div class="mt-3 flex justify-center">
+                                <button @click="retryYtmRequest"
+                                    class="min-w-[9rem] rounded-xl border border-amber-400/40 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-100 transition hover:border-amber-300 hover:bg-amber-500/15">
+                                    <i class="ri-refresh-line mr-2"></i>{{ t('ytm_retry') }}
+                                </button>
+                            </div>
+                        </div>
+                        <div v-else-if="ytmLoadingMoreCurrent" class="space-y-2">
+                            <div v-for="index in 2" :key="`ytm-load-more-${index}`"
+                                class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 animate-pulse">
+                                <div class="h-3 bg-zinc-800 rounded w-20 mb-3"></div>
+                                <div class="h-4 bg-zinc-800 rounded w-2/3 mb-2"></div>
+                                <div class="h-3 bg-zinc-800 rounded w-1/2"></div>
+                            </div>
+                        </div>
+                        <div v-else-if="ytmCanLoadMoreCurrent" class="flex justify-center">
+                            <button @click="loadMoreYtmResults()" :disabled="ytmLoadingMoreCurrent"
+                                class="min-w-[11rem] rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-3 text-sm text-zinc-200 transition hover:border-zinc-500 hover:text-white disabled:opacity-60 disabled:hover:border-zinc-700 disabled:hover:text-zinc-200">
+                                <i class="ri-arrow-down-line mr-2"></i>
+                                {{ t('ytm_load_more') }}
+                            </button>
+                        </div>
+                        <div v-else-if="ytmReachedEndCurrent" class="text-center text-xs text-zinc-500 tracking-wide py-2">
+                            {{ getYtmLoadedAllText() }}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            </div>
             </div>
         </main>
 
-        <footer class="flex-none bg-zinc-900 border-t border-zinc-800 pb-safe z-20">
+        <footer v-if="!isSearchTabActive" class="flex-none bg-zinc-900 border-t border-zinc-800 pb-safe z-20">
             <div class="px-6 py-3 border-b border-zinc-800/50 flex items-center justify-between">
                 <!-- Tuning Button -->
                 <button @click="showTuning = true" id="btn-tuning"
