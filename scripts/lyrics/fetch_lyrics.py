@@ -32,11 +32,9 @@ PAXSENIX_TOKEN_FILE = os.path.join(ROOT_DIR, "paxsenix_token.txt")
 APPLE_SEARCH_API = "https://lyrics.paxsenix.org/apple-music/search"
 APPLE_LYRICS_API = "https://lyrics.paxsenix.org/apple-music/lyrics"
 QQ_LYRICS_API = "https://lyrics.paxsenix.org/qq/lyrics-metadata"
-LRCLIB_SEARCH_API = "https://lrclib.net/api/search"
-MUSIXMATCH_API = "https://api.paxsenix.org/musixmatch/tracks/match/lyrics"
 UTATEN_SEARCH_API = "https://utaten.com/lyric/search"
 
-PROVIDER_ORDER = ["ytmusic", "apple_music", "qq_music", "musixmatch", "lrclib"]
+PROVIDER_ORDER = ["ytmusic", "apple_music", "qq_music"]
 WORDLIKE_TYPES = {"word", "syllable", "character", "verbatim"}
 UTATEN_LINE_MERGE_LIMIT = 6
 UTATEN_SOURCE_LINE_MERGE_LIMIT = 4
@@ -45,8 +43,7 @@ UTATEN_COVERAGE_THRESHOLD = 0.85
 UTATEN_MATCHED_LINE_RATIO_THRESHOLD = 0.7
 UTATEN_MIN_MATCHED_LINES = 6
 UTATEN_MIN_LINE_SIMILARITY = 0.58
-AUTO_LINE_CANDIDATE_BUDGET_WITH_UTATEN_SECONDS = 10.0
-AUTO_LINE_CANDIDATE_BUDGET_SECONDS = 18.0
+
 UTATEN_STRONG_MATCH_COVERAGE = 0.995
 UTATEN_STRONG_MATCH_GLOBAL_RATIO = 0.97
 UTATEN_STRONG_MATCHED_LINE_RATIO = 0.95
@@ -2061,24 +2058,7 @@ def parse_apple_music_payload(lyrics_data, fallback_duration=None):
     }
 
 
-def parse_musixmatch_lines(content):
-    lines = []
-    if not isinstance(content, list):
-        return lines
-    for item in content:
-        if not isinstance(item, dict):
-            continue
-        text = normalize_space(item.get("text"))
-        start = None
-        time_data = item.get("time")
-        if isinstance(time_data, dict):
-            try:
-                start = round(float(time_data.get("total")) / 1000.0, 3)
-            except Exception:
-                start = None
-        if text and start is not None:
-            lines.append({"text": text, "start": start, "end": None, "words": None})
-    return lines
+
 
 
 def has_word_level(lines):
@@ -2344,119 +2324,10 @@ def fetch_qq_music(query, attempted_sources, deadline_at=None):
     )
 
 
-def fetch_lrclib(query, attempted_sources, deadline_at=None):
-    attempted_sources.append("lrclib")
-    params = {}
-    if query.get("track"):
-        params["track_name"] = query["track"]
-    if query.get("artist"):
-        params["artist_name"] = query["artist"]
-    if query.get("album"):
-        params["album_name"] = query["album"]
-    if not params:
-        return None
-    try:
-        results = request_json(LRCLIB_SEARCH_API, params=params, timeout=10.0, retries=1, deadline_at=deadline_at)
-    except Exception:
-        return None
-    if not isinstance(results, list) or not results:
-        return None
-
-    ranked = []
-    for item in results:
-        if not isinstance(item, dict):
-            continue
-        score = score_candidate(
-            item.get("trackName") or item.get("track_name"),
-            item.get("artistName") or item.get("artist_name"),
-            item.get("albumName") or item.get("album_name"),
-            parse_duration_seconds(item.get("duration")),
-            query,
-        )
-        if item.get("syncedLyrics") or item.get("synced_lyrics"):
-            score += 20
-        ranked.append((score, item))
-    ranked.sort(key=lambda pair: pair[0], reverse=True)
-    best = ranked[0][1] if ranked else None
-    if not best:
-        return None
-
-    synced_lyrics = best.get("syncedLyrics") or best.get("synced_lyrics") or ""
-    if not synced_lyrics:
-        return None
-    parsed = parse_lrc(synced_lyrics, fallback_duration=query.get("duration"))
-    if not parsed:
-        return None
-    lines = clean_lines(parsed["lines"], query)
-    return build_result(
-        source="LRCLIB",
-        provider="lrclib",
-        lines=lines,
-        attempted_sources=attempted_sources,
-        metadata={
-            "track": best.get("trackName") or best.get("track_name") or query.get("track"),
-            "artist": best.get("artistName") or best.get("artist_name") or query.get("artist"),
-            "album": best.get("albumName") or best.get("album_name") or query.get("album"),
-        },
-        plain_lyrics=best.get("plainLyrics") or best.get("plain_lyrics") or None,
-        result_type=parsed["type"],
-    )
 
 
-def fetch_musixmatch(query, attempted_sources, deadline_at=None):
-    attempted_sources.append("musixmatch")
-    params = {
-        "artist": query.get("artist") or "",
-        "title": query.get("track") or "",
-        "album": query.get("album") or "",
-        "duration": query.get("duration") or "",
-    }
-    if not params["artist"] or not params["title"]:
-        return None
 
-    headers = {}
-    if PAXSENIX_API_TOKEN:
-        headers["Authorization"] = f"Bearer {PAXSENIX_API_TOKEN}"
 
-    try:
-        response = request_json(MUSIXMATCH_API, params=params, headers=headers, timeout=10.0, retries=1, deadline_at=deadline_at)
-    except Exception:
-        return None
-
-    track = response.get("track") if isinstance(response, dict) else None
-    if not isinstance(track, dict) or not track.get("has_lyrics"):
-        return None
-
-    if track.get("has_richsync") and isinstance(response.get("richsync"), list):
-        lines = clean_lines(parse_paxsenix_timed_content(response.get("richsync")), query)
-        result = build_result(
-            source="Musixmatch",
-            provider="musixmatch",
-            lines=lines,
-            attempted_sources=attempted_sources,
-            metadata={
-                "track": track.get("track_name") or query.get("track"),
-                "artist": track.get("artist_name") or query.get("artist"),
-                "album": track.get("album_name") or query.get("album"),
-            },
-            result_type="word",
-        )
-        if result:
-            return result
-
-    lines = clean_lines(parse_musixmatch_lines(response.get("lyrics")), query)
-    return build_result(
-        source="Musixmatch",
-        provider="musixmatch",
-        lines=lines,
-        attempted_sources=attempted_sources,
-        metadata={
-            "track": track.get("track_name") or query.get("track"),
-            "artist": track.get("artist_name") or query.get("artist"),
-            "album": track.get("album_name") or query.get("album"),
-        },
-        result_type="line",
-    )
 
 
 def run_provider(provider_key, payload, query, attempted_sources, deadline_at=None):
@@ -2466,16 +2337,13 @@ def run_provider(provider_key, payload, query, attempted_sources, deadline_at=No
         return fetch_apple_music(query, attempted_sources, deadline_at=deadline_at)
     if provider_key == "qq_music":
         return fetch_qq_music(query, attempted_sources, deadline_at=deadline_at)
-    if provider_key == "musixmatch":
-        return fetch_musixmatch(query, attempted_sources, deadline_at=deadline_at)
-    if provider_key == "lrclib":
-        return fetch_lrclib(query, attempted_sources, deadline_at=deadline_at)
     return None
 
 
 def normalize_source_key(value):
     source = normalize_space(value).lower()
     return source if source in {"auto", *PROVIDER_ORDER} else "auto"
+
 
 
 def execute_lookup(payload):
@@ -2491,29 +2359,42 @@ def execute_lookup(payload):
     deadline_at = time.monotonic() + lookup_deadline_seconds
 
     if preferred_source == "auto":
-        started_at = time.time()
-        line_candidate = None
-        for provider_key in PROVIDER_ORDER:
-            if is_deadline_exceeded(deadline_at, 5.0):
-                break
-            if line_candidate is not None and provider_key == "lrclib":
-                continue
-            if line_candidate is not None:
-                elapsed = time.time() - started_at
-                budget = AUTO_LINE_CANDIDATE_BUDGET_WITH_UTATEN_SECONDS if payload.get("utatenRomajiEnabled") else AUTO_LINE_CANDIDATE_BUDGET_SECONDS
-                if elapsed >= budget:
-                    break
-            result = run_provider(provider_key, payload, query, attempted_sources, deadline_at=deadline_at)
-            if not result:
-                continue
-            if result.get("type") == "word":
+        cached_line_results = {}
+
+        # Phase 1: Apple Music (word-level preferred)
+        if not is_deadline_exceeded(deadline_at, 5.0):
+            result = run_provider("apple_music", payload, query, attempted_sources, deadline_at=deadline_at)
+            if result:
+                if result.get("type") == "word":
+                    result["attemptedSources"] = list(attempted_sources)
+                    return maybe_apply_utaten_romaji(result, query, payload, attempted_sources, deadline_at=deadline_at)
+                if result.get("type") == "line":
+                    cached_line_results["apple_music"] = result
+
+        # Phase 2: QQ Music (word-level preferred)
+        if not is_deadline_exceeded(deadline_at, 5.0):
+            result = run_provider("qq_music", payload, query, attempted_sources, deadline_at=deadline_at)
+            if result:
+                if result.get("type") == "word":
+                    result["attemptedSources"] = list(attempted_sources)
+                    return maybe_apply_utaten_romaji(result, query, payload, attempted_sources, deadline_at=deadline_at)
+                if result.get("type") == "line":
+                    cached_line_results["qq_music"] = result
+
+        # Phase 3: YouTube Music (line-level only)
+        if not is_deadline_exceeded(deadline_at, 5.0):
+            result = run_provider("ytmusic", payload, query, attempted_sources)
+            if result and result.get("type") == "line":
                 result["attemptedSources"] = list(attempted_sources)
                 return maybe_apply_utaten_romaji(result, query, payload, attempted_sources, deadline_at=deadline_at)
-            if line_candidate is None and result.get("type") == "line":
-                line_candidate = result
-        if line_candidate:
-            line_candidate["attemptedSources"] = list(attempted_sources)
-            return maybe_apply_utaten_romaji(line_candidate, query, payload, attempted_sources, deadline_at=deadline_at)
+
+        # Phase 4: Fall back to cached line results (Apple Music first, then QQ)
+        for fallback_key in ("apple_music", "qq_music"):
+            if fallback_key in cached_line_results:
+                line_result = cached_line_results[fallback_key]
+                line_result["attemptedSources"] = list(attempted_sources)
+                return maybe_apply_utaten_romaji(line_result, query, payload, attempted_sources, deadline_at=deadline_at)
+
         return build_missing_result(query, attempted_sources)
 
     result = run_provider(preferred_source, payload, query, attempted_sources, deadline_at=deadline_at)

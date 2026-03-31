@@ -28,8 +28,7 @@ export const messages = {
         lyrics_source_ytmusic: "YouTube Music",
         lyrics_source_apple_music: "Apple Music",
         lyrics_source_qq_music: "QQ Music",
-        lyrics_source_musixmatch: "Musixmatch",
-        lyrics_source_lrclib: "LRCLIB",
+
         lyrics_utaten_romaji: "Utaten Romaji",
         vocal_hint: "Processing may take 1-2 minutes",
         vocal_warning: "Uses Demucs AI model. May cause high system load. First-time model loading might be slow (stuck at 99%), please wait.",
@@ -165,8 +164,7 @@ export const messages = {
         lyrics_source_ytmusic: "YouTube Music",
         lyrics_source_apple_music: "Apple Music",
         lyrics_source_qq_music: "QQ 音乐",
-        lyrics_source_musixmatch: "Musixmatch",
-        lyrics_source_lrclib: "LRCLIB",
+
         lyrics_utaten_romaji: "Utaten 罗马音",
         vocal_hint: "处理可能需要 1-2 分钟",
         vocal_warning: "使用 Demucs AI 模型进行处理。可能会造成较大性能开销。首次加载模型时可能较慢（进度条卡在99%），请耐心等待或留意控制台输出。",
@@ -302,8 +300,7 @@ export const messages = {
         lyrics_source_ytmusic: "YouTube Music",
         lyrics_source_apple_music: "Apple Music",
         lyrics_source_qq_music: "QQ Music",
-        lyrics_source_musixmatch: "Musixmatch",
-        lyrics_source_lrclib: "LRCLIB",
+
         lyrics_utaten_romaji: "Utaten ローマ字",
         vocal_hint: "処理には 1～2 分かかります",
         vocal_warning: "Demucs AIモデルを使用します。システム負荷が高くなる可能性があります。初回モデル読み込みは遅くなる場合があります（99%で停止）、お待ちください。",

@@ -22,7 +22,7 @@ const {
     serializeYtMusicError,
 } = require('./src/services/ytmusicSearch');
 
-const ALLOWED_LYRICS_SOURCES = new Set(['auto', 'ytmusic', 'apple_music', 'qq_music', 'musixmatch', 'lrclib']);
+const ALLOWED_LYRICS_SOURCES = new Set(['auto', 'ytmusic', 'apple_music', 'qq_music']);
 const ALLOWED_QUEUE_ACTIONS = new Set(['delete', 'top']);
 const pendingDeleteTimers = new Map();
 let shutdownInProgress = false;

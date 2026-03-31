@@ -80,8 +80,6 @@ createApp({
             { value: 'ytmusic', label: t('lyrics_source_ytmusic') },
             { value: 'apple_music', label: t('lyrics_source_apple_music') },
             { value: 'qq_music', label: t('lyrics_source_qq_music') },
-            { value: 'musixmatch', label: t('lyrics_source_musixmatch') },
-            { value: 'lrclib', label: t('lyrics_source_lrclib') },
         ]));
 
         const showShareModal = ref(false);
