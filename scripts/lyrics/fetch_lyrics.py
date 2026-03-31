@@ -7,6 +7,7 @@ import sys
 import time
 import unicodedata
 import xml.etree.ElementTree as ET
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from difflib import SequenceMatcher
 from html.parser import HTMLParser
 from urllib.error import HTTPError, URLError
@@ -38,15 +39,36 @@ PROVIDER_ORDER = ["ytmusic", "apple_music", "qq_music"]
 WORDLIKE_TYPES = {"word", "syllable", "character", "verbatim"}
 UTATEN_LINE_MERGE_LIMIT = 6
 UTATEN_SOURCE_LINE_MERGE_LIMIT = 4
-UTATEN_GLOBAL_RATIO_THRESHOLD = 0.82
-UTATEN_COVERAGE_THRESHOLD = 0.85
-UTATEN_MATCHED_LINE_RATIO_THRESHOLD = 0.7
-UTATEN_MIN_MATCHED_LINES = 6
-UTATEN_MIN_LINE_SIMILARITY = 0.58
+UTATEN_GLOBAL_RATIO_THRESHOLD = 0.74
+UTATEN_COVERAGE_THRESHOLD = 0.72
+UTATEN_MATCHED_LINE_RATIO_THRESHOLD = 0.55
+UTATEN_MIN_MATCHED_LINES = 4
+UTATEN_MIN_LINE_SIMILARITY = 0.5
 
-UTATEN_STRONG_MATCH_COVERAGE = 0.995
-UTATEN_STRONG_MATCH_GLOBAL_RATIO = 0.97
-UTATEN_STRONG_MATCHED_LINE_RATIO = 0.95
+UTATEN_STRONG_MATCH_COVERAGE = 0.9
+UTATEN_STRONG_MATCH_GLOBAL_RATIO = 0.86
+UTATEN_STRONG_MATCHED_LINE_RATIO = 0.72
+UTATEN_SEARCH_CANDIDATES_PER_STEP = 3
+UTATEN_SEARCH_REQUEST_TIMEOUT = 4.0
+UTATEN_PAGE_REQUEST_TIMEOUT = 5.0
+UTATEN_SEARCH_WORKERS = 3
+UTATEN_PAGE_FETCH_WORKERS = 4
+UTATEN_PREVIEW_SOURCE_LINE_LIMIT = 6
+UTATEN_PREVIEW_CANDIDATE_LINE_LIMIT = 12
+UTATEN_PREVIEW_ALIGNMENT_OPTIONS = {
+    "lineMergeLimit": 4,
+    "sourceLineMergeLimit": 4,
+    "globalRatioThreshold": 0.68,
+    "coverageThreshold": 0.68,
+    "matchedLineRatioThreshold": 0.55,
+    "minMatchedLines": 3,
+    "minLineSimilarity": 0.46,
+}
+UTATEN_NO_RESULT_MARKERS = (
+    "ごめんなさい。歌詞が見つかりませんでした。",
+    "ごめんなさい。歌詞が見つかりませんでした",
+    "歌詞が見つかりませんでした",
+)
 LOOKUP_DEADLINE_WITH_UTATEN_SECONDS = 40.0
 LOOKUP_DEADLINE_SECONDS = 27.0
 BAD_TITLE_TERMS = (
@@ -840,7 +862,18 @@ def select_utaten_body_search_line(lines, query):
     return ""
 
 
+def strip_html_tags(value):
+    return re.sub(r"<[^>]+>", " ", str(value or ""))
+
+
+def is_utaten_search_miss_page(page_text):
+    normalized_text = normalize_space(html.unescape(strip_html_tags(page_text or "")))
+    return any(marker in normalized_text for marker in UTATEN_NO_RESULT_MARKERS)
+
+
 def parse_utaten_search_results(page_text):
+    if is_utaten_search_miss_page(page_text):
+        return []
     parser = UtatenSearchResultsParser()
     parser.feed(page_text or "")
     parser.close()
@@ -860,43 +893,59 @@ def parse_utaten_search_results(page_text):
     return results
 
 
-def fetch_utaten_search_candidates(query, source_lines, deadline_at=None):
-    candidates = []
-    seen_lyric_ids = set()
+def build_utaten_search_steps(query, source_lines):
     body_line = select_utaten_body_search_line(source_lines, query)
-    search_steps = [
+    raw_search_steps = [
         ("artist_title", {"artist_name": query.get("artist") or "", "title": query.get("track") or ""}),
         ("title", {"title": query.get("track") or ""}),
         ("body", {"body": body_line}),
     ]
-    for search_mode, params in search_steps:
+    search_steps = []
+    for priority, (search_mode, params) in enumerate(raw_search_steps):
         filtered_params = {key: value for key, value in params.items() if normalize_space(value)}
         if not filtered_params:
             continue
-        if is_deadline_exceeded(deadline_at, 4.0):
+        search_steps.append({
+            "searchMode": search_mode,
+            "params": filtered_params,
+            "priority": priority,
+        })
+    return search_steps
+
+
+def fetch_utaten_search_step_candidates(step, deadline_at=None):
+    if not step:
+        return []
+    if is_deadline_exceeded(deadline_at, 1.5):
+        return []
+    try:
+        page_text = request_text(
+            UTATEN_SEARCH_API,
+            params=step.get("params"),
+            timeout=UTATEN_SEARCH_REQUEST_TIMEOUT,
+            retries=0,
+            deadline_at=deadline_at,
+        )
+    except Exception:
+        return []
+    if is_utaten_search_miss_page(page_text):
+        return []
+
+    candidates = []
+    for search_rank, item in enumerate(parse_utaten_search_results(page_text)):
+        next_candidate = dict(item)
+        next_candidate["searchMode"] = step.get("searchMode")
+        next_candidate["searchPriority"] = step.get("priority", 99)
+        next_candidate["searchRank"] = search_rank
+        candidates.append(next_candidate)
+        if len(candidates) >= UTATEN_SEARCH_CANDIDATES_PER_STEP:
             break
-        try:
-            page_text = request_text(UTATEN_SEARCH_API, params=filtered_params, timeout=10.0, retries=1, deadline_at=deadline_at)
-        except Exception:
-            continue
-        step_count = 0
-        for item in parse_utaten_search_results(page_text):
-            lyric_id = item.get("lyricId") or item.get("url")
-            if lyric_id in seen_lyric_ids:
-                continue
-            seen_lyric_ids.add(lyric_id)
-            next_candidate = dict(item)
-            next_candidate["searchMode"] = search_mode
-            candidates.append(next_candidate)
-            step_count += 1
-            if step_count >= 5:
-                break
     return candidates
 
 
 def fetch_utaten_romaji_page(url, deadline_at=None):
     try:
-        page_text = request_text(url, timeout=10.0, retries=1, deadline_at=deadline_at)
+        page_text = request_text(url, timeout=UTATEN_PAGE_REQUEST_TIMEOUT, retries=0, deadline_at=deadline_at)
     except Exception:
         return None
     parser = UtatenRomajiPageParser()
@@ -910,6 +959,38 @@ def fetch_utaten_romaji_page(url, deadline_at=None):
         "lines": lines,
         "fullNorm": "".join(line["norm"] for line in lines if line.get("norm")),
     }
+
+
+def build_utaten_preview_source_lines(source_lines):
+    preview_lines = []
+    for line in source_lines or []:
+        text = normalize_space(line.get("text"))
+        if not text or count_japanese_chars(text) <= 0:
+            continue
+        preview_lines.append({
+            "index": line.get("index"),
+            "text": text,
+        })
+        if len(preview_lines) >= UTATEN_PREVIEW_SOURCE_LINE_LIMIT:
+            break
+    return preview_lines
+
+
+def build_utaten_preview_candidate_lines(utaten_lines, source_preview_lines):
+    target_chars = sum(len(normalize_utaten_match_text(line.get("text"))) for line in source_preview_lines or [])
+    if target_chars <= 0:
+        return list(utaten_lines or [])[:UTATEN_PREVIEW_CANDIDATE_LINE_LIMIT]
+
+    preview_lines = []
+    collected_chars = 0
+    for line in utaten_lines or []:
+        preview_lines.append(line)
+        collected_chars += len(line.get("norm") or "")
+        if len(preview_lines) >= UTATEN_PREVIEW_CANDIDATE_LINE_LIMIT:
+            break
+        if collected_chars >= target_chars and len(preview_lines) >= min(4, len(source_preview_lines or [])):
+            break
+    return preview_lines
 
 
 def score_utaten_alignment_candidate(source_norm, utaten_norm):
@@ -1017,7 +1098,19 @@ def split_utaten_span_for_source_lines(source_lines, utaten_span):
     return allocations
 
 
-def align_utaten_lines(source_lines, utaten_lines):
+def align_utaten_lines(source_lines, utaten_lines, options=None):
+    settings = {
+        "lineMergeLimit": UTATEN_LINE_MERGE_LIMIT,
+        "sourceLineMergeLimit": UTATEN_SOURCE_LINE_MERGE_LIMIT,
+        "globalRatioThreshold": UTATEN_GLOBAL_RATIO_THRESHOLD,
+        "coverageThreshold": UTATEN_COVERAGE_THRESHOLD,
+        "matchedLineRatioThreshold": UTATEN_MATCHED_LINE_RATIO_THRESHOLD,
+        "minMatchedLines": UTATEN_MIN_MATCHED_LINES,
+        "minLineSimilarity": UTATEN_MIN_LINE_SIMILARITY,
+    }
+    if isinstance(options, dict):
+        settings.update({key: value for key, value in options.items() if value is not None})
+
     normalized_source_lines = []
     for line in source_lines or []:
         text = normalize_space(line.get("text"))
@@ -1044,10 +1137,18 @@ def align_utaten_lines(source_lines, utaten_lines):
     source_full_norm = "".join(line["norm"] for line in eligible_source_lines)
     utaten_full_norm = "".join(line.get("norm") or "" for line in utaten_lines)
     if not source_full_norm or not utaten_full_norm:
-        return None
+        return {
+            "accepted": False,
+            "reason": "insufficient_alignment_input",
+            "globalRatio": 0.0,
+            "coverage": 0.0,
+            "matchedLineCount": 0,
+            "matchedLineRatio": 0.0,
+            "matches": {},
+        }
 
     global_ratio = SequenceMatcher(None, source_full_norm, utaten_full_norm).ratio()
-    if global_ratio < UTATEN_GLOBAL_RATIO_THRESHOLD:
+    if global_ratio < settings["globalRatioThreshold"]:
         return {
             "accepted": False,
             "reason": "global_ratio_below_threshold",
@@ -1109,7 +1210,7 @@ def align_utaten_lines(source_lines, utaten_lines):
                     dp[source_index][utaten_index + 1] = skip_utaten_state
             if source_index >= source_count:
                 continue
-            for source_merge_length in range(1, UTATEN_SOURCE_LINE_MERGE_LIMIT + 1):
+            for source_merge_length in range(1, settings["sourceLineMergeLimit"] + 1):
                 next_source_index = source_index + source_merge_length
                 if next_source_index > source_count:
                     break
@@ -1118,13 +1219,13 @@ def align_utaten_lines(source_lines, utaten_lines):
                 source_norm = source_span.get("norm")
                 if not source_norm:
                     continue
-                for utaten_merge_length in range(1, UTATEN_LINE_MERGE_LIMIT + 1):
+                for utaten_merge_length in range(1, settings["lineMergeLimit"] + 1):
                     next_utaten_index = utaten_index + utaten_merge_length
                     if next_utaten_index > utaten_count:
                         break
                     utaten_span = combine_utaten_line_span(utaten_lines[utaten_index:next_utaten_index])
                     similarity = score_utaten_alignment_candidate(source_norm, utaten_span.get("norm"))
-                    if similarity < UTATEN_MIN_LINE_SIMILARITY:
+                    if similarity < settings["minLineSimilarity"]:
                         continue
                     allocations = None
                     if source_merge_length > 1:
@@ -1194,8 +1295,8 @@ def align_utaten_lines(source_lines, utaten_lines):
     matched_line_count = final_state["matchedLines"]
     coverage = (final_state["matchedChars"] / total_source_chars) if total_source_chars else 0.0
     matched_line_ratio = (matched_line_count / len(required_source_lines)) if required_source_lines else 0.0
-    min_required_lines = min(UTATEN_MIN_MATCHED_LINES, len(required_source_lines))
-    if coverage < UTATEN_COVERAGE_THRESHOLD:
+    min_required_lines = min(settings["minMatchedLines"], len(required_source_lines))
+    if coverage < settings["coverageThreshold"]:
         return {
             "accepted": False,
             "reason": "coverage_below_threshold",
@@ -1205,7 +1306,7 @@ def align_utaten_lines(source_lines, utaten_lines):
             "matchedLineRatio": matched_line_ratio,
             "matches": matches,
         }
-    if matched_line_ratio < UTATEN_MATCHED_LINE_RATIO_THRESHOLD:
+    if matched_line_ratio < settings["matchedLineRatioThreshold"]:
         return {
             "accepted": False,
             "reason": "matched_line_ratio_below_threshold",
@@ -1373,6 +1474,194 @@ def apply_utaten_romaji_to_result(result, candidate, page, alignment):
     return result
 
 
+def build_utaten_alignment_ranking(alignment, candidate=None):
+    candidate = candidate or {}
+    return (
+        round(alignment.get("coverage") or 0.0, 6),
+        int(alignment.get("matchedLineCount") or 0),
+        round(alignment.get("matchedLineRatio") or 0.0, 6),
+        round(alignment.get("globalRatio") or 0.0, 6),
+        -int(candidate.get("searchPriority") or 0),
+        -int(candidate.get("searchRank") or 0),
+    )
+
+
+def fetch_utaten_candidate_page(candidate, deadline_at=None):
+    if not isinstance(candidate, dict):
+        return None
+    page = fetch_utaten_romaji_page(candidate.get("url"), deadline_at=deadline_at)
+    if not page:
+        return None
+    return {
+        "candidate": candidate,
+        "page": page,
+    }
+
+
+def evaluate_utaten_candidate(source_lines, preview_source_lines, candidate_page):
+    candidate = (candidate_page or {}).get("candidate") or {}
+    page = (candidate_page or {}).get("page") or {}
+    page_lines = page.get("lines") or []
+    preview_lines = build_utaten_preview_candidate_lines(page_lines, preview_source_lines)
+    preview_alignment = align_utaten_lines(
+        preview_source_lines,
+        preview_lines,
+        options=UTATEN_PREVIEW_ALIGNMENT_OPTIONS,
+    )
+    if not preview_alignment.get("accepted"):
+        return {
+            "accepted": False,
+            "reason": f"preview_{preview_alignment.get('reason') or 'no_valid_candidate'}",
+            "candidate": candidate,
+            "page": page,
+            "alignment": preview_alignment,
+            "ranking": build_utaten_alignment_ranking(preview_alignment, candidate),
+        }
+
+    alignment = align_utaten_lines(source_lines, page_lines)
+    if not alignment.get("accepted"):
+        return {
+            "accepted": False,
+            "reason": alignment.get("reason") or "no_valid_candidate",
+            "candidate": candidate,
+            "page": page,
+            "alignment": alignment,
+            "previewAlignment": preview_alignment,
+            "ranking": build_utaten_alignment_ranking(alignment, candidate),
+        }
+
+    alignment["candidateCount"] = 0
+    return {
+        "accepted": True,
+        "candidate": candidate,
+        "page": page,
+        "alignment": alignment,
+        "previewAlignment": preview_alignment,
+        "ranking": build_utaten_alignment_ranking(alignment, candidate),
+    }
+
+
+def find_best_utaten_candidate_match(query, source_lines, deadline_at=None):
+    preview_source_lines = build_utaten_preview_source_lines(source_lines)
+    search_steps = build_utaten_search_steps(query, source_lines)
+    if not preview_source_lines or not search_steps:
+        return {
+            "candidateCount": 0,
+            "bestMatch": None,
+            "bestRejection": None,
+        }
+
+    executor = ThreadPoolExecutor(max_workers=UTATEN_SEARCH_WORKERS + UTATEN_PAGE_FETCH_WORKERS)
+    pending_search_futures = {}
+    pending_page_futures = {}
+    seen_lyric_ids = set()
+    candidate_count = 0
+    best_match = None
+    best_rejection = None
+
+    try:
+        for step in search_steps:
+            if is_deadline_exceeded(deadline_at, 1.5):
+                break
+            future = executor.submit(fetch_utaten_search_step_candidates, step, deadline_at)
+            pending_search_futures[future] = step
+
+        while (pending_search_futures or pending_page_futures) and not is_deadline_exceeded(deadline_at, 1.0):
+            done, _ = wait(
+                [*pending_search_futures.keys(), *pending_page_futures.keys()],
+                timeout=0.2,
+                return_when=FIRST_COMPLETED,
+            )
+            if not done:
+                continue
+
+            for future in done:
+                if future in pending_search_futures:
+                    pending_search_futures.pop(future, None)
+                    try:
+                        candidates = future.result() or []
+                    except Exception:
+                        candidates = []
+
+                    for candidate in candidates:
+                        lyric_id = candidate.get("lyricId") or candidate.get("url")
+                        if lyric_id in seen_lyric_ids:
+                            continue
+                        seen_lyric_ids.add(lyric_id)
+                        candidate_count += 1
+                        page_future = executor.submit(fetch_utaten_candidate_page, candidate, deadline_at)
+                        pending_page_futures[page_future] = candidate
+                    continue
+
+                candidate = pending_page_futures.pop(future, None) or {}
+                try:
+                    candidate_page = future.result()
+                except Exception:
+                    candidate_page = None
+
+                if not candidate_page:
+                    rejection = {
+                        "reason": "candidate_page_fetch_failed",
+                        "pageUrl": candidate.get("url"),
+                        "searchMode": candidate.get("searchMode"),
+                        "coverage": 0.0,
+                        "matchedLineCount": 0,
+                        "globalRatio": 0.0,
+                        "ranking": (0.0, 0, 0.0, 0.0, 0, 0),
+                    }
+                    if best_rejection is None or rejection["ranking"] > best_rejection["ranking"]:
+                        best_rejection = rejection
+                    continue
+
+                evaluation = evaluate_utaten_candidate(source_lines, preview_source_lines, candidate_page)
+                alignment = evaluation.get("alignment") or {}
+                candidate_info = evaluation.get("candidate") or candidate
+                ranking = evaluation.get("ranking") or (0.0, 0, 0.0, 0.0, 0, 0)
+
+                if not evaluation.get("accepted"):
+                    rejection = {
+                        "reason": evaluation.get("reason") or "no_valid_candidate",
+                        "pageUrl": candidate_info.get("url"),
+                        "searchMode": candidate_info.get("searchMode"),
+                        "coverage": round(alignment.get("coverage") or 0.0, 3),
+                        "matchedLineCount": int(alignment.get("matchedLineCount") or 0),
+                        "globalRatio": round(alignment.get("globalRatio") or 0.0, 3),
+                        "ranking": ranking,
+                    }
+                    if best_rejection is None or ranking > best_rejection["ranking"]:
+                        best_rejection = rejection
+                    continue
+
+                alignment["candidateCount"] = candidate_count
+                next_match = {
+                    "candidate": candidate_info,
+                    "page": evaluation.get("page"),
+                    "alignment": alignment,
+                    "previewAlignment": evaluation.get("previewAlignment"),
+                    "ranking": ranking,
+                }
+                if best_match is None or ranking > best_match["ranking"]:
+                    best_match = next_match
+                if (
+                    (alignment.get("coverage") or 0.0) >= UTATEN_STRONG_MATCH_COVERAGE
+                    and (alignment.get("globalRatio") or 0.0) >= UTATEN_STRONG_MATCH_GLOBAL_RATIO
+                    and (alignment.get("matchedLineRatio") or 0.0) >= UTATEN_STRONG_MATCHED_LINE_RATIO
+                ):
+                    return {
+                        "candidateCount": candidate_count,
+                        "bestMatch": best_match,
+                        "bestRejection": best_rejection,
+                    }
+
+        return {
+            "candidateCount": candidate_count,
+            "bestMatch": best_match,
+            "bestRejection": best_rejection,
+        }
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+
 def maybe_apply_utaten_romaji(result, query, payload, attempted_sources, deadline_at=None):
     if not isinstance(result, dict) or result.get("found") is not True:
         return result
@@ -1405,74 +1694,19 @@ def maybe_apply_utaten_romaji(result, query, payload, attempted_sources, deadlin
     if "utaten" not in attempted_sources:
         attempted_sources.append("utaten")
 
-    candidates = fetch_utaten_search_candidates(query, source_lines, deadline_at=deadline_at)
-    utaten_metadata["candidateCount"] = len(candidates)
-    if not candidates:
+    candidate_lookup = find_best_utaten_candidate_match(query, source_lines, deadline_at=deadline_at)
+    utaten_metadata["candidateCount"] = int(candidate_lookup.get("candidateCount") or 0)
+    best_match = candidate_lookup.get("bestMatch")
+    best_rejection = candidate_lookup.get("bestRejection")
+
+    if utaten_metadata["candidateCount"] <= 0 and not best_match:
         utaten_metadata["reason"] = "lookup_deadline_exceeded" if is_deadline_exceeded(deadline_at, 3.0) else "no_search_candidates"
         result["attemptedSources"] = list(attempted_sources)
         return result
 
-    best_match = None
-    best_rejection = None
-    for candidate in candidates:
-        if is_deadline_exceeded(deadline_at, 2.5):
-            utaten_metadata["reason"] = "lookup_deadline_exceeded"
-            break
-        page = fetch_utaten_romaji_page(candidate.get("url"), deadline_at=deadline_at)
-        if not page:
-            rejection = {
-                "reason": "candidate_page_fetch_failed",
-                "pageUrl": candidate.get("url"),
-                "searchMode": candidate.get("searchMode"),
-                "coverage": 0.0,
-                "matchedLineCount": 0,
-                "globalRatio": 0.0,
-                "ranking": (0.0, 0, 0.0),
-            }
-            if best_rejection is None:
-                best_rejection = rejection
-            continue
-        alignment = align_utaten_lines(source_lines, page.get("lines") or [])
-        if not alignment.get("accepted"):
-            rejection = {
-                "reason": alignment.get("reason") or "no_valid_candidate",
-                "pageUrl": candidate.get("url"),
-                "searchMode": candidate.get("searchMode"),
-                "coverage": round(alignment.get("coverage") or 0.0, 3),
-                "matchedLineCount": int(alignment.get("matchedLineCount") or 0),
-                "globalRatio": round(alignment.get("globalRatio") or 0.0, 3),
-            }
-            ranking = (
-                alignment.get("coverage") or 0.0,
-                alignment.get("matchedLineCount") or 0,
-                alignment.get("globalRatio") or 0.0,
-            )
-            if best_rejection is None or ranking > best_rejection["ranking"]:
-                rejection["ranking"] = ranking
-                best_rejection = rejection
-            continue
-        ranking = (
-            alignment.get("coverage") or 0.0,
-            alignment.get("matchedLineCount") or 0,
-            alignment.get("globalRatio") or 0.0,
-        )
-        if best_match is None or ranking > best_match["ranking"]:
-            alignment["candidateCount"] = len(candidates)
-            best_match = {
-                "candidate": candidate,
-                "page": page,
-                "alignment": alignment,
-                "ranking": ranking,
-            }
-            if (
-                (alignment.get("coverage") or 0.0) >= UTATEN_STRONG_MATCH_COVERAGE
-                and (alignment.get("globalRatio") or 0.0) >= UTATEN_STRONG_MATCH_GLOBAL_RATIO
-                and (alignment.get("matchedLineRatio") or 0.0) >= UTATEN_STRONG_MATCHED_LINE_RATIO
-            ):
-                break
-
     if not best_match:
-        if utaten_metadata["reason"] == "lookup_deadline_exceeded":
+        if is_deadline_exceeded(deadline_at, 1.0):
+            utaten_metadata["reason"] = "lookup_deadline_exceeded"
             result["attemptedSources"] = list(attempted_sources)
             return result
         if best_rejection:
