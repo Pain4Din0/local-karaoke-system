@@ -678,10 +678,11 @@
             </div>
         </header>
 
-        <main class="flex-1 min-h-0 overflow-hidden bg-[#09090b] p-4">
-            <div class="flex h-full min-h-0 flex-col gap-4">
+        <main :class="isSearchTabActive ? 'flex-1 min-h-0 overflow-hidden bg-[#09090b] p-4' : 'flex-1 min-h-0 overflow-y-auto no-scrollbar bg-[#09090b] p-4'">
+            <template v-if="!isSearchTabActive">
+                <div class="space-y-4">
 
-                <div v-if="!isSearchTabActive && currentPlaying"
+                <div v-if="currentPlaying"
                     class="animate-fade-slide-up bg-zinc-900 p-5 rounded-2xl border border-zinc-800 shadow-sm animate-shimmer-border"
                     id="player-card">
                 <div class="flex items-center justify-between mb-3">
@@ -740,15 +741,14 @@
                     </div>
                 </div>
             </div>
-                <div v-else-if="!isSearchTabActive"
+                <div v-else
                     class="h-40 flex flex-col items-center justify-center border border-dashed border-zinc-800 rounded-2xl text-zinc-600">
                 <i class="ri-music-2-line text-2xl mb-2 opacity-50 animate-gentle-float"></i><span class="text-xs">{{
                     t('idle') }}</span>
             </div>
 
-            <div class="flex-1 min-h-0">
-            <div v-show="activeTab === 'playlist'" class="controller-tab-panel h-full overflow-y-auto no-scrollbar pr-1">
-                <div class="space-y-4 pb-8">
+            <div v-show="activeTab === 'playlist'" class="space-y-4 pb-8">
+                <div class="space-y-4">
                 <div class="flex gap-3">
                     <div id="input-add-song"
                         class="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl flex items-center px-3 input-glow">
@@ -813,8 +813,8 @@
                 </div>
             </div>
 
-            <div v-show="activeTab === 'history'" class="controller-tab-panel h-full overflow-y-auto no-scrollbar pr-1">
-                <div class="space-y-3 pb-8">
+            <div v-show="activeTab === 'history'" class="space-y-3 pb-8">
+                <div class="space-y-3">
                 <div class="flex justify-end">
                     <button @click="exportHistory"
                         class="text-xs flex items-center gap-1 text-zinc-400 border border-zinc-700 px-3 py-1.5 rounded hover:bg-zinc-800 hover:text-white transition"><i
@@ -834,8 +834,12 @@
                 </div>
             </div>
 
-            <div v-show="activeTab === 'search'" class="controller-tab-panel h-full overflow-y-auto no-scrollbar"
-                @scroll.passive="onYtmResultsScroll">
+                </div>
+            </template>
+            <template v-else>
+                <div class="flex h-full min-h-0 flex-col">
+                    <div v-show="activeTab === 'search'" class="controller-tab-panel h-full overflow-y-auto no-scrollbar"
+                        @scroll.passive="onYtmResultsScroll">
                 <div class="search-toolbar sticky top-0 z-10 -mx-4 px-4 pb-4">
                     <div
                         class="rounded-[28px] border border-zinc-800/80 bg-zinc-950/90 p-3 shadow-[0_18px_48px_rgba(0,0,0,0.28)] backdrop-blur-xl space-y-3">
@@ -1112,9 +1116,9 @@
                         </div>
                     </div>
                 </div>
-            </div>
-            </div>
-            </div>
+                    </div>
+                </div>
+            </template>
         </main>
 
         <footer v-if="!isSearchTabActive" class="flex-none bg-zinc-900 border-t border-zinc-800 pb-safe z-20">
