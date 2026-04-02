@@ -7,6 +7,34 @@ const logger = require('../utils/logger');
 
 const isYouTubeLikeUrl = (url) => /(^https?:\/\/)?(www\.)?(youtube\.com|youtu\.be|music\.youtube\.com)\b/i.test(url);
 
+const isBilibiliMultiPartUrl = (url = '') => {
+    const normalizedUrl = String(url || '').trim();
+    if (!normalizedUrl) return false;
+    try {
+        const parsed = new URL(normalizedUrl);
+        if (!parsed.hostname.toLowerCase().endsWith('bilibili.com')) return false;
+        const pathname = parsed.pathname.toLowerCase();
+        if (!pathname.startsWith('/video/')) return false;
+        return !parsed.searchParams.has('p');
+    } catch (error) {
+        return false;
+    }
+};
+
+const extractBilibiliBvid = (url = '') => {
+    const normalizedUrl = String(url || '').trim();
+    if (!normalizedUrl) return null;
+    try {
+        const parsed = new URL(normalizedUrl);
+        if (!parsed.hostname.toLowerCase().endsWith('bilibili.com')) return null;
+        const match = parsed.pathname.match(/\/video\/(BV[\da-zA-Z]+)/i);
+        return match ? match[1] : null;
+    } catch (error) {
+        const match = normalizedUrl.match(/\/video\/(BV[\da-zA-Z]+)/i);
+        return match ? match[1] : null;
+    }
+};
+
 const detectSourcePlatform = (url = '') => {
     const normalizedUrl = String(url || '').trim();
     if (!normalizedUrl) return null;
@@ -216,6 +244,20 @@ const requestJson = (url, timeoutMs = 15000) => new Promise((resolve, reject) =>
     request.on('error', reject);
 });
 
+const fetchBilibiliPageList = async (bvid) => {
+    if (!bvid) return null;
+    const apiUrl = `https://api.bilibili.com/x/player/pagelist?bvid=${encodeURIComponent(bvid)}&jsonp=jsonp`;
+    try {
+        const response = await requestJson(apiUrl, 10000);
+        if (response && response.code === 0 && Array.isArray(response.data) && response.data.length > 0) {
+            return response.data;
+        }
+    } catch (error) {
+        logger.warn('Fetcher', 'Bilibili pagelist API request failed', { bvid, error });
+    }
+    return null;
+};
+
 const fetchBilibiliFavorites = async (url, mediaId) => {
     let allMedias = [];
     let pageNumber = 1;
@@ -273,6 +315,32 @@ const fetchUrlInfo = async (url) => {
         const fromApi = await fetchBilibiliFavorites(normalizedUrl, biliFavMatch[1]);
         if (fromApi) return fromApi;
         logger.warn('Fetcher', 'Bilibili favorites API returned no data, falling back to yt-dlp', { url: normalizedUrl });
+    }
+
+    const bvid = extractBilibiliBvid(normalizedUrl);
+    if (bvid && isBilibiliMultiPartUrl(normalizedUrl)) {
+        const pageList = await fetchBilibiliPageList(bvid);
+        if (pageList && pageList.length > 1) {
+            logger.info('Fetcher', `Bilibili multi-part video detected with ${pageList.length} parts`, { bvid });
+            return {
+                list: pageList.map((part) => ({
+                    title: `P${part.page} - ${part.part || `Part ${part.page}`}`,
+                    uploader: 'Bilibili',
+                    artist: 'Bilibili',
+                    album: '',
+                    track: part.part || `P${part.page}`,
+                    duration: Number.isFinite(part.duration) ? part.duration : null,
+                    sourceId: bvid,
+                    extractor: 'BiliBili',
+                    pic: null,
+                    originalUrl: `https://www.bilibili.com/video/${bvid}?p=${part.page}`,
+                    sourcePlatform: 'bilibili',
+                    partNumber: part.page,
+                    partTitle: part.part || `P${part.page}`,
+                    cid: part.cid,
+                })),
+            };
+        }
     }
 
     return runYtDlp(normalizedUrl, { playlistMode });
