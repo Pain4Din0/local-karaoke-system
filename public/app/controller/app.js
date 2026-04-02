@@ -1144,7 +1144,7 @@ createApp({
 
         const exportHistory = () => {
             let text = "\uFEFF=== PLAYLIST HISTORY ===\n\n";
-            history.value.forEach((item, index) => { text += `${index + 1}. ${item.title}\n   UP: ${item.uploader} | BY: ${item.requester} | URL: ${item.originalUrl}\n\n`; });
+            [...history.value].reverse().forEach((item, index) => { text += `${index + 1}. ${item.title}\n   UP: ${item.uploader} | BY: ${item.requester} | URL: ${item.originalUrl}\n\n`; });
             const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
