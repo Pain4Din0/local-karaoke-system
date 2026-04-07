@@ -122,6 +122,7 @@ createApp({
         });
         const playlistItems = ref([]);
         const selectedItems = ref(new Set()); // using Set for indices
+        const expandedPlaylistGroups = ref(new Set());
 
         const networks = ref([{ name: 'Loading', ip: '...' }]);
         const currentNetIndex = ref(0);
@@ -130,6 +131,48 @@ createApp({
 
         const currentNetwork = computed(() => networks.value[currentNetIndex.value] || networks.value[0]);
         const isAllSelected = computed(() => playlistItems.value.length > 0 && selectedItems.value.size === playlistItems.value.length);
+        const playlistDisplayGroups = computed(() => {
+            const groups = [];
+            const groupIndexByKey = new Map();
+
+            playlistItems.value.forEach((item, index) => {
+                const groupKey = String(item?.groupKey || '').trim();
+                if (!groupKey) {
+                    groups.push({
+                        key: `item-${index}`,
+                        isGroup: false,
+                        item,
+                        index,
+                        indices: [index],
+                    });
+                    return;
+                }
+
+                let group = groupIndexByKey.get(groupKey);
+                if (!group) {
+                    group = {
+                        key: groupKey,
+                        isGroup: true,
+                        title: String(item?.groupTitle || item?.album || item?.title || '').trim(),
+                        subtitle: String(item?.groupSubtitle || item?.uploader || '').trim(),
+                        description: String(item?.groupDescription || '').trim(),
+                        indices: [],
+                        items: [],
+                    };
+                    groupIndexByKey.set(groupKey, group);
+                    groups.push(group);
+                }
+
+                group.indices.push(index);
+                group.items.push(item);
+            });
+
+            return groups.map((group) => ({
+                ...group,
+                selectedCount: group.indices.reduce((count, itemIndex) => count + (selectedItems.value.has(itemIndex) ? 1 : 0), 0),
+                allSelected: group.indices.length > 0 && group.indices.every((itemIndex) => selectedItems.value.has(itemIndex)),
+            }));
+        });
         const isSearchTabActive = computed(() => activeTab.value === 'search');
         const ytmFilterOptions = computed(() => ([
             { value: 'songs', label: t('ytm_filter_songs') },
@@ -466,7 +509,16 @@ createApp({
         const openSongSelection = (items, options = {}) => {
             const nextItems = Array.isArray(items) ? items.filter(Boolean) : [];
             playlistItems.value = nextItems;
-            selectedItems.value = new Set(nextItems.map((_, index) => index));
+            selectedItems.value = new Set();
+            nextItems.forEach((item, index) => {
+                if (item && item.selected === false) return;
+                selectedItems.value.add(index);
+            });
+            expandedPlaylistGroups.value = new Set(
+                nextItems
+                    .map((item) => String(item?.groupKey || '').trim())
+                    .filter(Boolean),
+            );
             showPlaylistModal.value = true;
             if (!options.keepBusyState) {
                 isAdding.value = false;
@@ -478,6 +530,7 @@ createApp({
             showPlaylistModal.value = false;
             playlistItems.value = [];
             selectedItems.value.clear();
+            expandedPlaylistGroups.value = new Set();
             if (!keepBusyState) {
                 isAdding.value = false;
             }
@@ -500,8 +553,37 @@ createApp({
             }
         };
 
+        const isPlaylistGroupExpanded = (groupKey) => expandedPlaylistGroups.value.has(String(groupKey || '').trim());
+
+        const togglePlaylistGroupExpanded = (groupKey) => {
+            const key = String(groupKey || '').trim();
+            if (!key) return;
+            const next = new Set(expandedPlaylistGroups.value);
+            if (next.has(key)) {
+                next.delete(key);
+            } else {
+                next.add(key);
+            }
+            expandedPlaylistGroups.value = next;
+        };
+
+        const togglePlaylistGroupSelection = (group) => {
+            if (!group || !Array.isArray(group.indices)) return;
+            const next = new Set(selectedItems.value);
+            const shouldSelect = !group.allSelected;
+            group.indices.forEach((index) => {
+                if (shouldSelect) {
+                    next.add(index);
+                } else {
+                    next.delete(index);
+                }
+            });
+            selectedItems.value = next;
+        };
+
         const confirmAddBatch = () => {
             const songsToAdd = Array.from(selectedItems.value)
+                .sort((left, right) => left - right)
                 .map(idx => playlistItems.value[idx])
                 .filter(Boolean);
             if (songsToAdd.length > 0) {
@@ -1501,8 +1583,9 @@ createApp({
             localLoudnessNorm, toggleLoudnessNorm,
             lyricsSourceOptions,
             autoProcessKaraoke, toggleAutoProcess, karaokeAvailable,
-            showPlaylistModal, playlistItems, selectedItems, isAllSelected,
+            showPlaylistModal, playlistItems, selectedItems, isAllSelected, playlistDisplayGroups,
             closePlaylistModal, toggleItem, toggleSelectAll, confirmAddBatch,
+            isPlaylistGroupExpanded, togglePlaylistGroupExpanded, togglePlaylistGroupSelection,
             showYtmCounterpartChoice, ytmCounterpartChoiceTrack, closeYtmCounterpartChoice, chooseYtmCounterpartVariant,
             ytmQuery, ytmFilter, ytmFilterOptions, ytmSections, ytmDetail,
             ytmViewMode, ytmLoading, ytmDetailLoading, ytmHasSearched, ytmCanGoBack, isSearchTabActive,

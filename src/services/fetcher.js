@@ -7,17 +7,32 @@ const logger = require('../utils/logger');
 
 const isYouTubeLikeUrl = (url) => /(^https?:\/\/)?(www\.)?(youtube\.com|youtu\.be|music\.youtube\.com)\b/i.test(url);
 
-const isBilibiliMultiPartUrl = (url = '') => {
+const getBilibiliRequestedPartNumber = (url = '') => {
+    const normalizedUrl = String(url || '').trim();
+    if (!normalizedUrl) return null;
+    try {
+        const parsed = new URL(normalizedUrl);
+        if (!parsed.hostname.toLowerCase().endsWith('bilibili.com')) return null;
+        const pathname = parsed.pathname.toLowerCase();
+        if (!pathname.startsWith('/video/')) return null;
+        const requestedPart = Number(parsed.searchParams.get('p'));
+        return Number.isInteger(requestedPart) && requestedPart > 0 ? requestedPart : null;
+    } catch (error) {
+        const match = normalizedUrl.match(/[?&]p=(\d+)/i);
+        const requestedPart = match ? Number(match[1]) : null;
+        return Number.isInteger(requestedPart) && requestedPart > 0 ? requestedPart : null;
+    }
+};
+
+const isBilibiliVideoUrl = (url = '') => {
     const normalizedUrl = String(url || '').trim();
     if (!normalizedUrl) return false;
     try {
         const parsed = new URL(normalizedUrl);
         if (!parsed.hostname.toLowerCase().endsWith('bilibili.com')) return false;
-        const pathname = parsed.pathname.toLowerCase();
-        if (!pathname.startsWith('/video/')) return false;
-        return !parsed.searchParams.has('p');
+        return parsed.pathname.toLowerCase().startsWith('/video/');
     } catch (error) {
-        return false;
+        return /bilibili\.com\/video\//i.test(normalizedUrl);
     }
 };
 
@@ -258,6 +273,53 @@ const fetchBilibiliPageList = async (bvid) => {
     return null;
 };
 
+const normalizeBilibiliPartItems = ({
+    bvid,
+    pageList,
+    videoTitle,
+    uploader,
+    requestedPart = null,
+    sourcePlatform = 'bilibili',
+    fallbackTitle = null,
+    fallbackTrack = null,
+    fallbackDuration = null,
+}) => {
+    if (!bvid || !Array.isArray(pageList) || pageList.length === 0) return [];
+    const totalParts = pageList.length;
+    const requestedPartNumber = Number.isInteger(requestedPart) && requestedPart > 0 ? requestedPart : null;
+    const requestedPartExists = requestedPartNumber ? pageList.some((part) => Number(part?.page) === requestedPartNumber) : false;
+
+    return pageList.map((part) => {
+        const partNumber = Number(part?.page) || 1;
+        const partTitle = part?.part || `P${partNumber}`;
+        const resolvedVideoTitle = videoTitle || fallbackTitle || `Video ${bvid}`;
+        const resolvedTrack = part?.part || fallbackTrack || `${resolvedVideoTitle} - P${partNumber}`;
+
+        return {
+            title: totalParts > 1 ? `P${partNumber} - ${partTitle} - ${resolvedVideoTitle}` : resolvedVideoTitle,
+            uploader: uploader || 'Unknown',
+            artist: uploader || 'Unknown',
+            album: resolvedVideoTitle,
+            track: resolvedTrack,
+            duration: Number.isFinite(part?.duration) ? part.duration : fallbackDuration,
+            sourceId: bvid,
+            extractor: 'BiliBili',
+            pic: null,
+            originalUrl: `https://www.bilibili.com/video/${bvid}?p=${partNumber}`,
+            sourcePlatform,
+            partNumber,
+            partTitle,
+            partCount: totalParts,
+            groupKey: totalParts > 1 ? bvid : null,
+            groupTitle: resolvedVideoTitle,
+            groupSubtitle: uploader || 'Unknown',
+            groupDescription: totalParts > 1 ? `${totalParts} parts` : '',
+            selected: requestedPartNumber ? (requestedPartExists ? partNumber === requestedPartNumber : true) : true,
+            cid: part?.cid || null,
+        };
+    });
+};
+
 const fetchBilibiliVideoView = async (bvid) => {
     if (!bvid) return null;
     const apiUrl = `https://api.bilibili.com/x/web-interface/view?bvid=${encodeURIComponent(bvid)}`;
@@ -300,21 +362,88 @@ const fetchBilibiliFavorites = async (url, mediaId) => {
 
     if (allMedias.length === 0) return null;
 
-    logger.info('Fetcher', `Bilibili favorites lookup returned ${allMedias.length} item(s)`, { mediaId });
-    return {
-        list: allMedias.map((item) => ({
-            title: item.title,
-            uploader: item.upper ? item.upper.name : 'Unknown',
-            artist: item.upper ? item.upper.name : 'Unknown',
+    const videoViewCache = new Map();
+    const pageListCache = new Map();
+    const getCachedVideoView = async (bvid) => {
+        const normalizedBvid = String(bvid || '').trim();
+        if (!normalizedBvid) return null;
+        if (videoViewCache.has(normalizedBvid)) return videoViewCache.get(normalizedBvid);
+        const value = await fetchBilibiliVideoView(normalizedBvid);
+        videoViewCache.set(normalizedBvid, value);
+        return value;
+    };
+    const getCachedPageList = async (bvid) => {
+        const normalizedBvid = String(bvid || '').trim();
+        if (!normalizedBvid) return null;
+        if (pageListCache.has(normalizedBvid)) return pageListCache.get(normalizedBvid);
+        const value = await fetchBilibiliPageList(normalizedBvid);
+        pageListCache.set(normalizedBvid, value);
+        return value;
+    };
+
+    const list = [];
+    for (const item of allMedias) {
+        const bvid = String(item?.bvid || '').trim();
+        const fallbackTitle = String(item?.title || '').trim();
+        const fallbackUploader = item?.upper && item.upper.name ? item.upper.name : 'Unknown';
+        const fallbackDuration = Number.isFinite(item?.duration) ? item.duration : null;
+
+        if (!bvid) {
+            list.push({
+                title: fallbackTitle || 'Unknown Title',
+                uploader: fallbackUploader,
+                artist: fallbackUploader,
+                album: '',
+                track: fallbackTitle || 'Unknown Title',
+                duration: fallbackDuration,
+                sourceId: null,
+                extractor: 'BiliBili',
+                pic: null,
+                originalUrl: url,
+                sourcePlatform: detectSourcePlatform(url),
+                selected: true,
+            });
+            continue;
+        }
+
+        const pageList = await getCachedPageList(bvid);
+        if (Array.isArray(pageList) && pageList.length > 1) {
+            const videoView = await getCachedVideoView(bvid);
+            const videoTitle = videoView && videoView.title ? videoView.title : fallbackTitle || `Video ${bvid}`;
+            const uploader = videoView && videoView.uploader ? videoView.uploader : fallbackUploader;
+            list.push(...normalizeBilibiliPartItems({
+                bvid,
+                pageList,
+                videoTitle,
+                uploader,
+                requestedPart: null,
+                sourcePlatform: detectSourcePlatform(url),
+                fallbackTitle,
+                fallbackTrack: fallbackTitle || `Video ${bvid}`,
+                fallbackDuration,
+            }));
+            continue;
+        }
+
+        list.push({
+            title: fallbackTitle || `Video ${bvid}`,
+            uploader: fallbackUploader,
+            artist: fallbackUploader,
             album: '',
-            track: item.title,
-            duration: Number.isFinite(item.duration) ? item.duration : null,
-            sourceId: item.bvid || null,
+            track: fallbackTitle || `Video ${bvid}`,
+            duration: fallbackDuration,
+            sourceId: bvid,
             extractor: 'BiliBili',
             pic: null,
-            originalUrl: item.bvid ? `https://www.bilibili.com/video/${item.bvid}` : url,
+            originalUrl: `https://www.bilibili.com/video/${bvid}`,
             sourcePlatform: detectSourcePlatform(url),
-        })),
+            selected: true,
+        });
+    }
+
+    logger.info('Fetcher', `Bilibili favorites lookup returned ${list.length} item(s)`, { mediaId });
+    return {
+        list,
     };
 };
 
@@ -335,30 +464,26 @@ const fetchUrlInfo = async (url) => {
     }
 
     const bvid = extractBilibiliBvid(normalizedUrl);
-    if (bvid && isBilibiliMultiPartUrl(normalizedUrl)) {
+    if (bvid && isBilibiliVideoUrl(normalizedUrl)) {
         const pageList = await fetchBilibiliPageList(bvid);
         if (pageList && pageList.length > 1) {
             const videoView = await fetchBilibiliVideoView(bvid);
             const videoTitle = videoView && videoView.title ? videoView.title : `Video ${bvid}`;
             const uploader = videoView && videoView.uploader ? videoView.uploader : 'Unknown';
+            const requestedPart = getBilibiliRequestedPartNumber(normalizedUrl);
             logger.info('Fetcher', `Bilibili multi-part video detected with ${pageList.length} parts`, { bvid });
             return {
-                list: pageList.map((part) => ({
-                    title: `P${part.page} - ${videoTitle} - ${part.part || `Part ${part.page}`}`,
+                list: normalizeBilibiliPartItems({
+                    bvid,
+                    pageList,
+                    videoTitle,
                     uploader,
-                    artist: uploader,
-                    album: videoTitle,
-                    track: part.part || `${videoTitle} - P${part.page}`,
-                    duration: Number.isFinite(part.duration) ? part.duration : null,
-                    sourceId: bvid,
-                    extractor: 'BiliBili',
-                    pic: null,
-                    originalUrl: `https://www.bilibili.com/video/${bvid}?p=${part.page}`,
+                    requestedPart,
                     sourcePlatform: 'bilibili',
-                    partNumber: part.page,
-                    partTitle: part.part || `P${part.page}`,
-                    cid: part.cid,
-                })),
+                    fallbackTitle: videoTitle,
+                    fallbackTrack: videoTitle,
+                    fallbackDuration: null,
+                }),
             };
         }
     }
