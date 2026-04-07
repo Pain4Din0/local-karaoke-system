@@ -258,6 +258,23 @@ const fetchBilibiliPageList = async (bvid) => {
     return null;
 };
 
+const fetchBilibiliVideoView = async (bvid) => {
+    if (!bvid) return null;
+    const apiUrl = `https://api.bilibili.com/x/web-interface/view?bvid=${encodeURIComponent(bvid)}`;
+    try {
+        const response = await requestJson(apiUrl, 10000);
+        if (response && response.code === 0 && response.data) {
+            return {
+                title: response.data.title || null,
+                uploader: response.data.owner && response.data.owner.name ? response.data.owner.name : null,
+            };
+        }
+    } catch (error) {
+        logger.warn('Fetcher', 'Bilibili view API request failed', { bvid, error });
+    }
+    return null;
+};
+
 const fetchBilibiliFavorites = async (url, mediaId) => {
     let allMedias = [];
     let pageNumber = 1;
@@ -321,14 +338,17 @@ const fetchUrlInfo = async (url) => {
     if (bvid && isBilibiliMultiPartUrl(normalizedUrl)) {
         const pageList = await fetchBilibiliPageList(bvid);
         if (pageList && pageList.length > 1) {
+            const videoView = await fetchBilibiliVideoView(bvid);
+            const videoTitle = videoView && videoView.title ? videoView.title : `Video ${bvid}`;
+            const uploader = videoView && videoView.uploader ? videoView.uploader : 'Unknown';
             logger.info('Fetcher', `Bilibili multi-part video detected with ${pageList.length} parts`, { bvid });
             return {
                 list: pageList.map((part) => ({
-                    title: `P${part.page} - ${part.part || `Part ${part.page}`}`,
-                    uploader: 'Bilibili',
-                    artist: 'Bilibili',
-                    album: '',
-                    track: part.part || `P${part.page}`,
+                    title: `P${part.page} - ${videoTitle} - ${part.part || `Part ${part.page}`}`,
+                    uploader,
+                    artist: uploader,
+                    album: videoTitle,
+                    track: part.part || `${videoTitle} - P${part.page}`,
                     duration: Number.isFinite(part.duration) ? part.duration : null,
                     sourceId: bvid,
                     extractor: 'BiliBili',
