@@ -1,4 +1,5 @@
 const { spawn } = require('child_process');
+const http = require('http');
 const https = require('https');
 
 const { getAdvancedConfig } = require('../config/configManager');
@@ -6,13 +7,168 @@ const { YT_DLP_EXE, getCookiesPath, buildChildProcessEnv, appendYtDlpJsRuntimeAr
 const logger = require('../utils/logger');
 
 const isYouTubeLikeUrl = (url) => /(^https?:\/\/)?(www\.)?(youtube\.com|youtu\.be|music\.youtube\.com)\b/i.test(url);
+const isBilibiliHost = (host = '') => {
+    const normalizedHost = String(host || '').toLowerCase();
+    return normalizedHost.endsWith('bilibili.com')
+        || normalizedHost === 'b23.tv'
+        || normalizedHost.endsWith('.b23.tv')
+        || normalizedHost === 'bili2233.cn'
+        || normalizedHost.endsWith('.bili2233.cn');
+};
+
+const trimUrlBoundaryChars = (value = '') => {
+    let result = String(value || '').trim();
+    if (!result) return '';
+
+    while (result && !/[a-z0-9]/i.test(result[0])) {
+        result = result.slice(1);
+    }
+    while (result && !/[a-z0-9/#?=&%_-]/i.test(result[result.length - 1])) {
+        result = result.slice(0, -1).trimEnd();
+    }
+
+    return result.trim();
+};
+
+const normalizePossibleUrl = (value = '') => {
+    const candidate = trimUrlBoundaryChars(value);
+    if (!candidate) return null;
+
+    const nextUrl = /^[a-z][a-z\d+.-]*:\/\//i.test(candidate) ? candidate : `https://${candidate}`;
+    try {
+        const parsed = new URL(nextUrl);
+        if (!/^https?:$/i.test(parsed.protocol)) return null;
+        if (!parsed.hostname || !parsed.hostname.includes('.')) return null;
+        return parsed.toString();
+    } catch (error) {
+        return null;
+    }
+};
+
+const extractFirstUrlFromText = (value = '') => {
+    const text = String(value || '').trim();
+    if (!text) return null;
+
+    const directUrl = normalizePossibleUrl(text);
+    if (directUrl) return directUrl;
+
+    const withSchemeMatches = text.match(/https?:\/\/[^\s<>"']+/ig) || [];
+    for (const item of withSchemeMatches) {
+        const parsed = normalizePossibleUrl(item);
+        if (parsed) return parsed;
+    }
+
+    const domainMatches = text.match(/(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:\/[^\s<>"']*)?/ig) || [];
+    for (const item of domainMatches) {
+        const parsed = normalizePossibleUrl(item);
+        if (parsed) return parsed;
+    }
+
+    return null;
+};
+
+const isBilibiliShortUrl = (url = '') => {
+    try {
+        const host = new URL(url).hostname.toLowerCase();
+        return host === 'b23.tv'
+            || host.endsWith('.b23.tv')
+            || host === 'bili2233.cn'
+            || host.endsWith('.bili2233.cn');
+    } catch (error) {
+        return /(^https?:\/\/)?([a-z0-9-]+\.)?(b23\.tv|bili2233\.cn)\b/i.test(String(url || ''));
+    }
+};
+
+const requestRedirectMeta = (url, method = 'HEAD', timeoutMs = 7000) => new Promise((resolve, reject) => {
+    let parsed;
+    try {
+        parsed = new URL(url);
+    } catch (error) {
+        reject(error);
+        return;
+    }
+
+    const transport = parsed.protocol === 'http:' ? http : https;
+    const request = transport.request(parsed, {
+        method,
+        timeout: timeoutMs,
+        headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36',
+            'Accept': '*/*',
+        },
+    }, (response) => {
+        const locationHeader = response.headers.location;
+        const location = Array.isArray(locationHeader) ? locationHeader[0] : locationHeader;
+        response.resume();
+        resolve({
+            statusCode: Number(response.statusCode) || 0,
+            location: typeof location === 'string' ? location : '',
+        });
+    });
+
+    request.on('timeout', () => {
+        request.destroy(new Error(`timeout_${timeoutMs}`));
+    });
+    request.on('error', reject);
+    request.end();
+});
+
+const resolveShortUrlRedirect = async (url, maxRedirects = 6) => {
+    let currentUrl = url;
+
+    for (let index = 0; index < maxRedirects; index += 1) {
+        let metadata = null;
+        try {
+            metadata = await requestRedirectMeta(currentUrl, 'HEAD', 7000);
+        } catch (error) {
+            metadata = null;
+        }
+
+        if (!metadata || metadata.statusCode === 405 || metadata.statusCode === 501) {
+            try {
+                metadata = await requestRedirectMeta(currentUrl, 'GET', 7000);
+            } catch (error) {
+                metadata = null;
+            }
+        }
+
+        if (!metadata) return currentUrl;
+
+        if (metadata.statusCode >= 300 && metadata.statusCode < 400 && metadata.location) {
+            try {
+                currentUrl = new URL(metadata.location, currentUrl).toString();
+                continue;
+            } catch (error) {
+                return currentUrl;
+            }
+        }
+
+        return currentUrl;
+    }
+
+    return currentUrl;
+};
+
+const normalizeIncomingUrl = async (input = '') => {
+    const extractedUrl = extractFirstUrlFromText(input);
+    if (!extractedUrl) return null;
+
+    if (!isBilibiliShortUrl(extractedUrl)) return extractedUrl;
+
+    const resolvedUrl = await resolveShortUrlRedirect(extractedUrl);
+    if (resolvedUrl && resolvedUrl !== extractedUrl) {
+        logger.info('Fetcher', 'Resolved Bilibili short URL', { shortUrl: extractedUrl, resolvedUrl });
+    }
+
+    return resolvedUrl || extractedUrl;
+};
 
 const getBilibiliRequestedPartNumber = (url = '') => {
     const normalizedUrl = String(url || '').trim();
     if (!normalizedUrl) return null;
     try {
         const parsed = new URL(normalizedUrl);
-        if (!parsed.hostname.toLowerCase().endsWith('bilibili.com')) return null;
+        if (!isBilibiliHost(parsed.hostname)) return null;
         const pathname = parsed.pathname.toLowerCase();
         if (!pathname.startsWith('/video/')) return null;
         const requestedPart = Number(parsed.searchParams.get('p'));
@@ -29,7 +185,7 @@ const isBilibiliVideoUrl = (url = '') => {
     if (!normalizedUrl) return false;
     try {
         const parsed = new URL(normalizedUrl);
-        if (!parsed.hostname.toLowerCase().endsWith('bilibili.com')) return false;
+        if (!isBilibiliHost(parsed.hostname)) return false;
         return parsed.pathname.toLowerCase().startsWith('/video/');
     } catch (error) {
         return /bilibili\.com\/video\//i.test(normalizedUrl);
@@ -41,7 +197,7 @@ const extractBilibiliBvid = (url = '') => {
     if (!normalizedUrl) return null;
     try {
         const parsed = new URL(normalizedUrl);
-        if (!parsed.hostname.toLowerCase().endsWith('bilibili.com')) return null;
+        if (!isBilibiliHost(parsed.hostname)) return null;
         const match = parsed.pathname.match(/\/video\/(BV[\da-zA-Z]+)/i);
         return match ? match[1] : null;
     } catch (error) {
@@ -58,11 +214,11 @@ const detectSourcePlatform = (url = '') => {
         const host = parsed.hostname.toLowerCase();
         if (host === 'music.youtube.com') return 'ytmusic';
         if (host.endsWith('youtube.com') || host === 'youtu.be') return 'youtube';
-        if (host.endsWith('bilibili.com')) return 'bilibili';
+        if (isBilibiliHost(host)) return 'bilibili';
     } catch (error) {
         if (/music\.youtube\.com/i.test(normalizedUrl)) return 'ytmusic';
         if (/youtube\.com|youtu\.be/i.test(normalizedUrl)) return 'youtube';
-        if (/bilibili\.com/i.test(normalizedUrl)) return 'bilibili';
+        if (/bilibili\.com|b23\.tv|bili2233\.cn/i.test(normalizedUrl)) return 'bilibili';
     }
     return null;
 };
@@ -448,13 +604,14 @@ const fetchBilibiliFavorites = async (url, mediaId) => {
 };
 
 const fetchUrlInfo = async (url) => {
-    const normalizedUrl = typeof url === 'string' ? url.trim() : '';
+    const rawInput = typeof url === 'string' ? url : '';
+    const normalizedUrl = await normalizeIncomingUrl(rawInput);
     if (!normalizedUrl) {
-        logger.warn('Fetcher', 'Ignoring empty URL parse request');
+        logger.warn('Fetcher', 'Ignoring parse request without a recognizable URL', { input: rawInput });
         return null;
     }
 
-    const playlistMode = isPlaylistLikeUrl(normalizedUrl);
+    const playlistMode = isPlaylistLikeUrl(normalizedUrl) || isBilibiliShortUrl(normalizedUrl);
     const biliFavMatch = normalizedUrl.match(/space\.bilibili\.com\/\d+\/favlist\?.*fid=(\d+)/);
 
     if (biliFavMatch) {

@@ -57,7 +57,7 @@ const getCookiesPath = (url = '') => {
     if (typeof url !== 'string' || !url.trim()) return null;
     const normalizedUrl = url.toLowerCase();
 
-    if (normalizedUrl.includes('bilibili.com')) {
+    if (normalizedUrl.includes('bilibili.com') || normalizedUrl.includes('b23.tv') || normalizedUrl.includes('bili2233.cn')) {
         const cookiePath = path.join(ROOT_DIR, 'cookies_bilibili.txt');
         return fs.existsSync(cookiePath) ? cookiePath : null;
     }
