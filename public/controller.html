@@ -505,7 +505,7 @@
                         <div v-show="isPlaylistGroupExpanded(group.key)" class="border-t border-zinc-800/80 bg-zinc-950/50">
                             <button v-for="(item, partIndex) in group.items" :key="item.originalUrl || `${group.key}-${partIndex}`"
                                 type="button"
-                                class="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-zinc-800/50"
+                                class="flex w-full items-center gap-3 pl-8 pr-4 py-3 text-left transition-colors hover:bg-zinc-800/50"
                                 @click="toggleItem(group.indices[partIndex])">
                                 <div @click.stop>
                                     <input type="checkbox" :checked="selectedItems.has(group.indices[partIndex])"

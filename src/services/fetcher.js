@@ -45,26 +45,46 @@ const normalizePossibleUrl = (value = '') => {
     }
 };
 
-const extractFirstUrlFromText = (value = '') => {
+const extractAllUrlsFromText = (value = '') => {
     const text = String(value || '').trim();
-    if (!text) return null;
+    if (!text) return [];
 
+    const candidates = [];
     const directUrl = normalizePossibleUrl(text);
-    if (directUrl) return directUrl;
-
-    const withSchemeMatches = text.match(/https?:\/\/[^\s<>"']+/ig) || [];
-    for (const item of withSchemeMatches) {
-        const parsed = normalizePossibleUrl(item);
-        if (parsed) return parsed;
+    if (directUrl) {
+        candidates.push(directUrl);
     }
 
-    const domainMatches = text.match(/(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:\/[^\s<>"']*)?/ig) || [];
-    for (const item of domainMatches) {
-        const parsed = normalizePossibleUrl(item);
-        if (parsed) return parsed;
+    const withSchemePattern = /https?:\/\/[^\s<>"'`]+/ig;
+    for (const match of text.matchAll(withSchemePattern)) {
+        const token = match && match[0] ? match[0] : '';
+        if (!token) continue;
+        const parsed = normalizePossibleUrl(token);
+        if (parsed) candidates.push(parsed);
     }
 
-    return null;
+    const domainPattern = /(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+(?::\d+)?(?:\/[^\s<>"'`]*)?/ig;
+    for (const match of text.matchAll(domainPattern)) {
+        const token = match && match[0] ? match[0] : '';
+        if (!token) continue;
+
+        const matchIndex = Number(match.index) || 0;
+        const prevChar = matchIndex > 0 ? text[matchIndex - 1] : '';
+        if (prevChar === '@') continue;
+
+        const parsed = normalizePossibleUrl(token);
+        if (parsed) candidates.push(parsed);
+    }
+
+    const unique = [];
+    const seen = new Set();
+    for (const item of candidates) {
+        if (!item || seen.has(item)) continue;
+        seen.add(item);
+        unique.push(item);
+    }
+
+    return unique;
 };
 
 const isBilibiliShortUrl = (url = '') => {
@@ -149,18 +169,29 @@ const resolveShortUrlRedirect = async (url, maxRedirects = 6) => {
     return currentUrl;
 };
 
-const normalizeIncomingUrl = async (input = '') => {
-    const extractedUrl = extractFirstUrlFromText(input);
-    if (!extractedUrl) return null;
+const normalizeIncomingUrls = async (input = '') => {
+    const extractedUrls = extractAllUrlsFromText(input);
+    if (extractedUrls.length === 0) return [];
 
-    if (!isBilibiliShortUrl(extractedUrl)) return extractedUrl;
+    const normalizedUrls = [];
+    const seen = new Set();
 
-    const resolvedUrl = await resolveShortUrlRedirect(extractedUrl);
-    if (resolvedUrl && resolvedUrl !== extractedUrl) {
-        logger.info('Fetcher', 'Resolved Bilibili short URL', { shortUrl: extractedUrl, resolvedUrl });
+    for (const extractedUrl of extractedUrls) {
+        const nextUrl = isBilibiliShortUrl(extractedUrl)
+            ? (await resolveShortUrlRedirect(extractedUrl)) || extractedUrl
+            : extractedUrl;
+
+        if (nextUrl !== extractedUrl) {
+            logger.info('Fetcher', 'Resolved Bilibili short URL', { shortUrl: extractedUrl, resolvedUrl: nextUrl });
+        }
+
+        if (!seen.has(nextUrl)) {
+            seen.add(nextUrl);
+            normalizedUrls.push(nextUrl);
+        }
     }
 
-    return resolvedUrl || extractedUrl;
+    return normalizedUrls;
 };
 
 const getBilibiliRequestedPartNumber = (url = '') => {
@@ -603,14 +634,7 @@ const fetchBilibiliFavorites = async (url, mediaId) => {
     };
 };
 
-const fetchUrlInfo = async (url) => {
-    const rawInput = typeof url === 'string' ? url : '';
-    const normalizedUrl = await normalizeIncomingUrl(rawInput);
-    if (!normalizedUrl) {
-        logger.warn('Fetcher', 'Ignoring parse request without a recognizable URL', { input: rawInput });
-        return null;
-    }
-
+const fetchSingleUrlInfo = async (normalizedUrl) => {
     const playlistMode = isPlaylistLikeUrl(normalizedUrl) || isBilibiliShortUrl(normalizedUrl);
     const biliFavMatch = normalizedUrl.match(/space\.bilibili\.com\/\d+\/favlist\?.*fid=(\d+)/);
 
@@ -646,6 +670,42 @@ const fetchUrlInfo = async (url) => {
     }
 
     return runYtDlp(normalizedUrl, { playlistMode });
+};
+
+const fetchUrlInfo = async (url) => {
+    const rawInput = typeof url === 'string' ? url : '';
+    const normalizedUrls = await normalizeIncomingUrls(rawInput);
+    if (normalizedUrls.length === 0) {
+        logger.warn('Fetcher', 'Ignoring parse request without a recognizable URL', { input: rawInput });
+        return null;
+    }
+
+    if (normalizedUrls.length === 1) {
+        return fetchSingleUrlInfo(normalizedUrls[0]);
+    }
+
+    logger.info('Fetcher', `Detected ${normalizedUrls.length} URLs from mixed input`, {
+        inputLength: rawInput.length,
+        urlCount: normalizedUrls.length,
+    });
+
+    const list = [];
+    const seenSongUrls = new Set();
+
+    for (const sourceUrl of normalizedUrls) {
+        const result = await fetchSingleUrlInfo(sourceUrl);
+        if (!result || !Array.isArray(result.list) || result.list.length === 0) continue;
+
+        for (const item of result.list) {
+            if (!item || typeof item !== 'object') continue;
+            const songUrl = String(item.originalUrl || '').trim();
+            if (songUrl && seenSongUrls.has(songUrl)) continue;
+            if (songUrl) seenSongUrls.add(songUrl);
+            list.push(item);
+        }
+    }
+
+    return list.length > 0 ? { list } : null;
 };
 
 module.exports = {
