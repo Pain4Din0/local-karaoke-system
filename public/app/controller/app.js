@@ -85,6 +85,10 @@ createApp({
 
         const showShareModal = ref(false);
         const showPlaylistModal = ref(false);
+        const showBiliUidModal = ref(false);
+        const biliUidProfile = ref(null);
+        const biliUidFavorites = ref([]);
+        const selectedBiliFavoriteIds = ref(new Set());
         const showAdvancedSettings = ref(false);
         const ytmQuery = ref('');
         const ytmFilter = ref(YTM_DEFAULT_FILTER);
@@ -131,6 +135,10 @@ createApp({
 
         const currentNetwork = computed(() => networks.value[currentNetIndex.value] || networks.value[0]);
         const isAllSelected = computed(() => playlistItems.value.length > 0 && selectedItems.value.size === playlistItems.value.length);
+        const isAllBiliFavoritesSelected = computed(() => (
+            biliUidFavorites.value.length > 0
+            && selectedBiliFavoriteIds.value.size === biliUidFavorites.value.length
+        ));
         const playlistDisplayGroups = computed(() => {
             const groups = [];
             const groupIndexByKey = new Map();
@@ -209,6 +217,7 @@ createApp({
         let notificationId = 0;
         let ytmSearchRequestId = null;
         let ytmDetailRequestId = null;
+        let biliUidLookupRequestId = null;
         let ytmSearchRequestMeta = null;
         let ytmDetailRequestMeta = null;
         let ytmLastAutoLoadAt = 0;
@@ -479,6 +488,111 @@ createApp({
         };
         const formatTime = (seconds) => { if (!seconds || isNaN(seconds)) return "00:00"; const m = Math.floor(seconds / 60); const s = Math.floor(seconds % 60); return `${m}:${s.toString().padStart(2, '0')}`; };
 
+        const hasUrlLikeToken = (value = '') => /https?:\/\/|www\.|(?:[a-z0-9-]+\.)+[a-z]{2,}/i.test(String(value || ''));
+
+        const extractBilibiliUidCandidate = (value = '') => {
+            const text = String(value || '').trim();
+            if (!text || hasUrlLikeToken(text)) return null;
+            const match = text.match(/^uid\s*[:：]\s*(\d{1,20})$/i) || text.match(/^(\d{1,20})$/);
+            if (!match) return null;
+            const normalizedUid = String(match[1] || '').replace(/^0+(?=\d)/, '').trim();
+            if (!/^[1-9]\d{0,19}$/.test(normalizedUid)) return null;
+            return normalizedUid;
+        };
+
+        const openBiliUidFavoritesModal = (payload) => {
+            const profile = payload && payload.profile && typeof payload.profile === 'object'
+                ? payload.profile
+                : null;
+            const favorites = Array.isArray(payload?.favorites)
+                ? payload.favorites.filter((item) => item && typeof item.url === 'string' && item.url)
+                : [];
+
+            biliUidProfile.value = profile;
+            biliUidFavorites.value = favorites;
+            selectedBiliFavoriteIds.value = new Set(
+                favorites
+                    .map((item) => String(item?.id || '').trim())
+                    .filter(Boolean),
+            );
+            showBiliUidModal.value = true;
+
+            if (favorites.length === 0) {
+                pushNotification(t('bili_uid_no_public_favorites'), 'warn');
+            }
+        };
+
+        const closeBiliUidModal = (options = {}) => {
+            const keepBusyState = !!options.keepBusyState;
+            const keepInput = !!options.keepInput;
+            showBiliUidModal.value = false;
+            biliUidProfile.value = null;
+            biliUidFavorites.value = [];
+            selectedBiliFavoriteIds.value = new Set();
+            if (!keepBusyState) {
+                isAdding.value = false;
+            }
+            if (!keepInput) {
+                addUrl.value = '';
+            }
+        };
+
+        const toggleBiliFavoriteSelection = (favoriteId) => {
+            const key = String(favoriteId || '').trim();
+            if (!key) return;
+            const next = new Set(selectedBiliFavoriteIds.value);
+            if (next.has(key)) {
+                next.delete(key);
+            } else {
+                next.add(key);
+            }
+            selectedBiliFavoriteIds.value = next;
+        };
+
+        const toggleSelectAllBiliFavorites = () => {
+            if (isAllBiliFavoritesSelected.value) {
+                selectedBiliFavoriteIds.value = new Set();
+                return;
+            }
+            selectedBiliFavoriteIds.value = new Set(
+                biliUidFavorites.value
+                    .map((item) => String(item?.id || '').trim())
+                    .filter(Boolean),
+            );
+        };
+
+        const lookupBilibiliUid = (uid) => {
+            const normalizedUid = String(uid || '').trim();
+            if (!normalizedUid) return;
+            showBiliUidModal.value = false;
+            isAdding.value = true;
+            biliUidLookupRequestId = `bili_uid_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+            socket.emit('bilibili_lookup_uid', {
+                uid: normalizedUid,
+                requestId: biliUidLookupRequestId,
+            });
+        };
+
+        const importSelectedBiliFavorites = () => {
+            const selectedFavorites = biliUidFavorites.value.filter((item) => (
+                selectedBiliFavoriteIds.value.has(String(item?.id || '').trim())
+            ));
+            const favoriteUrls = selectedFavorites
+                .map((item) => String(item?.url || '').trim())
+                .filter(Boolean);
+
+            if (favoriteUrls.length === 0) {
+                pushNotification(t('bili_uid_select_favorites_first'));
+                return;
+            }
+
+            const combinedInput = favoriteUrls.join('\n');
+            closeBiliUidModal({ keepBusyState: true, keepInput: true });
+            addUrl.value = combinedInput;
+            isAdding.value = true;
+            socket.emit('parse_url', combinedInput);
+        };
+
         const addSong = () => {
             const nextUrl = String(addUrl.value || '').trim();
             if (!nextUrl) {
@@ -486,6 +600,13 @@ createApp({
                 return;
             }
             addUrl.value = nextUrl;
+
+            const uidCandidate = extractBilibiliUidCandidate(nextUrl);
+            if (uidCandidate) {
+                lookupBilibiliUid(uidCandidate);
+                return;
+            }
+
             isAdding.value = true;
             socket.emit('parse_url', nextUrl);
         };
@@ -1523,6 +1644,22 @@ createApp({
             }
         });
 
+        socket.on('bilibili_uid_result', (payload) => {
+            if (!payload || payload.requestId !== biliUidLookupRequestId) return;
+            biliUidLookupRequestId = null;
+            isAdding.value = false;
+
+            if (payload.ok !== true) {
+                pushNotification(
+                    String(payload?.message || '').trim() || t('bili_uid_lookup_failed'),
+                    'warn',
+                );
+                return;
+            }
+
+            openBiliUidFavoritesModal(payload);
+        });
+
         socket.on('parse_result', (result) => {
             if (result && result.list) {
                 if (result.list.length === 1) {
@@ -1583,6 +1720,8 @@ createApp({
             localLoudnessNorm, toggleLoudnessNorm,
             lyricsSourceOptions,
             autoProcessKaraoke, toggleAutoProcess, karaokeAvailable,
+            showBiliUidModal, biliUidProfile, biliUidFavorites, selectedBiliFavoriteIds, isAllBiliFavoritesSelected,
+            closeBiliUidModal, toggleBiliFavoriteSelection, toggleSelectAllBiliFavorites, importSelectedBiliFavorites,
             showPlaylistModal, playlistItems, selectedItems, isAllSelected, playlistDisplayGroups,
             closePlaylistModal, toggleItem, toggleSelectAll, confirmAddBatch,
             isPlaylistGroupExpanded, togglePlaylistGroupExpanded, togglePlaylistGroupSelection,

@@ -457,6 +457,94 @@
             </div>
         </div>
 
+        <div v-if="showBiliUidModal"
+            class="fixed inset-0 z-[65] bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-4"
+            @click.self="closeBiliUidModal">
+            <div class="w-full max-w-md max-h-[85vh] rounded-3xl border border-zinc-800 bg-zinc-950 shadow-2xl overflow-hidden flex flex-col">
+                <div class="p-5 space-y-2 border-b border-zinc-800">
+                    <div class="text-lg font-semibold text-white">{{ t('bili_uid_modal_title') }}</div>
+                    <div class="text-sm leading-6 text-zinc-400">{{ t('bili_uid_modal_subtitle') }}</div>
+                </div>
+
+                <div class="flex-1 p-4 space-y-4 overflow-y-auto">
+                    <div class="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4 space-y-3">
+                        <div class="min-w-0">
+                            <div class="text-sm font-semibold text-white truncate">{{ biliUidProfile?.name || ('UID ' + (biliUidProfile?.uid || '')) }}</div>
+                            <div class="text-xs text-zinc-500">UID: {{ biliUidProfile?.uid || '-' }}</div>
+                        </div>
+
+                        <div class="text-xs leading-5 text-zinc-400 break-words">
+                            {{ biliUidProfile?.sign || t('bili_uid_profile_sign_empty') }}
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-2 text-xs">
+                            <div class="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
+                                <div class="text-zinc-500">{{ t('bili_uid_profile_favorites') }}</div>
+                                <div class="mt-1 font-semibold text-zinc-100">{{ biliUidProfile?.favoriteFolderCount ?? biliUidFavorites.length }}</div>
+                            </div>
+                            <div class="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
+                                <div class="text-zinc-500">{{ t('bili_uid_profile_public_favorites') }}</div>
+                                <div class="mt-1 font-semibold text-zinc-100">{{ biliUidProfile?.publicFavoriteFolderCount ?? biliUidFavorites.length }}</div>
+                            </div>
+                            <div class="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
+                                <div class="text-zinc-500">{{ t('bili_uid_profile_fans') }}</div>
+                                <div class="mt-1 font-semibold text-zinc-100">{{ biliUidProfile?.fans ?? '-' }}</div>
+                            </div>
+                            <div class="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
+                                <div class="text-zinc-500">{{ t('bili_uid_profile_following') }}</div>
+                                <div class="mt-1 font-semibold text-zinc-100">{{ biliUidProfile?.following ?? '-' }}</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900/70">
+                        <div class="px-4 py-3 border-b border-zinc-800/80 flex items-center justify-between gap-2">
+                            <div class="text-xs font-mono uppercase tracking-wider text-zinc-500">
+                                {{ t('bili_uid_favorites_title') }} ({{ biliUidFavorites.length }})
+                            </div>
+                            <label class="flex items-center gap-2 text-xs text-zinc-400 cursor-pointer">
+                                <input type="checkbox" :checked="isAllBiliFavoritesSelected" @change="toggleSelectAllBiliFavorites"
+                                    class="w-4 h-4 rounded border-zinc-600 bg-zinc-800 accent-blue-500">
+                                <span>{{ t('select_all') }}</span>
+                            </label>
+                        </div>
+
+                        <div v-if="biliUidFavorites.length === 0" class="px-4 py-6 text-center text-sm text-zinc-500">
+                            {{ t('bili_uid_no_public_favorites') }}
+                        </div>
+
+                        <div v-else class="divide-y divide-zinc-800/80">
+                            <button v-for="item in biliUidFavorites" :key="item.id"
+                                type="button"
+                                class="w-full px-4 py-3 text-left flex items-center gap-3 transition-colors hover:bg-zinc-800/70"
+                                @click="toggleBiliFavoriteSelection(item.id)">
+                                <div @click.stop>
+                                    <input type="checkbox" :checked="selectedBiliFavoriteIds.has(String(item.id))"
+                                        @change="toggleBiliFavoriteSelection(item.id)"
+                                        class="w-5 h-5 rounded border-zinc-600 bg-zinc-800 accent-blue-500">
+                                </div>
+                                <div class="min-w-0 flex-1">
+                                    <div class="text-sm font-medium text-zinc-200 truncate">{{ item.title }}</div>
+                                    <div class="text-xs text-zinc-500">{{ item.mediaCount || 0 }}</div>
+                                </div>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="p-4 border-t border-zinc-800 bg-zinc-950 flex gap-3">
+                    <button @click="closeBiliUidModal"
+                        class="flex-1 rounded-2xl border border-zinc-700 px-4 py-3 text-sm text-zinc-300 transition hover:border-zinc-500 hover:text-white">
+                        {{ t('cancel') }}
+                    </button>
+                    <button @click="importSelectedBiliFavorites" :disabled="selectedBiliFavoriteIds.size === 0"
+                        class="flex-1 rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed">
+                        {{ t('bili_uid_import_selected_favorites') }} ({{ selectedBiliFavoriteIds.size }})
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <!-- NEW: PLAYLIST SELECTION MODAL -->
         <div v-if="showPlaylistModal"
             class="fixed inset-0 z-50 bg-[#09090b]/95 backdrop-blur-md flex flex-col pt-safe pb-safe animate-fade-in">

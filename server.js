@@ -12,7 +12,7 @@ const { createSongFromMeta, createSongFromHistoryItem, getRequesterName } = requ
 const { getNetworkInterfaces, getWifiSSID, deleteSongFile } = require('./src/services/system');
 const { processDownloadQueue } = require('./src/services/downloader');
 const { queueKaraokeProcessing, queueAllReadySongsForKaraoke, processNextKaraoke, clearKaraokeQueue } = require('./src/services/karaoke');
-const { fetchUrlInfo } = require('./src/services/fetcher');
+const { fetchUrlInfo, lookupBilibiliFavoritesByUid } = require('./src/services/fetcher');
 const { getLyricsBySongId, invalidateLyricsSession } = require('./src/services/lyrics');
 const { cleanupRuntimeArtifacts } = require('./src/services/maintenance');
 const {
@@ -337,6 +337,42 @@ io.on('connection', async (socket) => {
 
         emitSocketError(socket, 'Unable to parse the provided URL', { url: normalizedUrl }, 'parse_failed');
     }, 'Failed to parse URL');
+
+    wrapSocketHandler(socket, 'bilibili_lookup_uid', async (payload) => {
+        const requestId = getRequestIdFromPayload(payload);
+        const uidInput = payload && typeof payload.uid === 'string' ? payload.uid.trim() : '';
+        if (!uidInput) {
+            socket.emit('bilibili_uid_result', {
+                requestId,
+                ok: false,
+                code: 'invalid_request',
+                message: 'Please provide a valid Bilibili UID',
+            });
+            return;
+        }
+
+        try {
+            const result = await lookupBilibiliFavoritesByUid(uidInput);
+            socket.emit('bilibili_uid_result', {
+                requestId,
+                ok: true,
+                ...result,
+            });
+        } catch (error) {
+            logger.warn('Fetcher', 'Bilibili UID lookup failed', {
+                socketId: socket.id,
+                requestId,
+                uidInput,
+                error,
+            });
+            socket.emit('bilibili_uid_result', {
+                requestId,
+                ok: false,
+                code: 'lookup_failed',
+                message: error && error.message ? error.message : 'Unable to lookup this Bilibili UID',
+            });
+        }
+    }, 'Failed to lookup Bilibili UID');
 
     wrapSocketHandler(socket, 'add_batch_songs', async (data) => {
         const songs = data && Array.isArray(data.songs) ? data.songs : [];

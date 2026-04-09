@@ -446,6 +446,180 @@ const requestJson = (url, timeoutMs = 15000) => new Promise((resolve, reject) =>
     request.on('error', reject);
 });
 
+const parseBilibiliUid = (value = '') => {
+    const text = String(value || '').trim();
+    if (!text) return null;
+
+    const match = text.match(/^uid\s*[:：]?\s*(\d{1,20})$/i) || text.match(/^(\d{1,20})$/);
+    if (!match) return null;
+
+    const normalizedUid = String(match[1] || '').replace(/^0+(?=\d)/, '').trim();
+    if (!/^[1-9]\d{0,19}$/.test(normalizedUid)) return null;
+    return normalizedUid;
+};
+
+const buildBilibiliFavoriteFolderUrl = (uid, folderId) => (
+    `https://space.bilibili.com/${uid}/favlist?fid=${folderId}&ftype=create`
+);
+
+const fetchBilibiliProfileByUid = async (uid) => {
+    const apiUrl = `https://api.bilibili.com/x/web-interface/card?mid=${encodeURIComponent(uid)}`;
+    let response = null;
+    try {
+        response = await requestJson(apiUrl, 12000);
+    } catch (error) {
+        logger.warn('Fetcher', 'Bilibili profile API request failed', { uid, error });
+        throw new Error('Failed to request Bilibili account info');
+    }
+
+    if (!response || response.code !== 0 || !response.data || !response.data.card) {
+        const code = response && Number.isFinite(response.code) ? response.code : 'unknown';
+        logger.warn('Fetcher', 'Bilibili profile API returned invalid response', { uid, code });
+        throw new Error('Unable to find this Bilibili account');
+    }
+
+    const card = response.data.card;
+    return {
+        uid,
+        name: String(card.name || '').trim() || `UID ${uid}`,
+        sign: String(card.sign || '').trim() || '',
+        fans: Number.isFinite(card.fans) ? card.fans : null,
+        following: Number.isFinite(card.attention) ? card.attention : null,
+        level: Number.isFinite(card.level) ? card.level : null,
+    };
+};
+
+const normalizeBilibiliFolderResponse = (response) => {
+    if (!response || response.code !== 0 || !response.data || !Array.isArray(response.data.list)) {
+        return null;
+    }
+    return {
+        totalCount: Number.isFinite(response.data.count) ? response.data.count : response.data.list.length,
+        list: response.data.list,
+        hasMore: !!response.data.has_more,
+    };
+};
+
+const fetchBilibiliFavoriteFoldersByUid = async (uid) => {
+    const listAllUrl = `https://api.bilibili.com/x/v3/fav/folder/created/list-all?up_mid=${encodeURIComponent(uid)}&jsonp=jsonp`;
+    const fallbackPageSize = 20;
+    const fallbackMaxPages = 10;
+
+    let normalized = null;
+    try {
+        const response = await requestJson(listAllUrl, 12000);
+        normalized = normalizeBilibiliFolderResponse(response);
+        if (!normalized) {
+            const code = response && Number.isFinite(response.code) ? response.code : 'unknown';
+            logger.warn('Fetcher', 'Bilibili list-all folders API returned incomplete payload, falling back', {
+                uid,
+                code,
+                hasData: !!(response && response.data),
+            });
+        }
+    } catch (error) {
+        logger.warn('Fetcher', 'Bilibili list-all folders API request failed, falling back', { uid, error });
+    }
+
+    const rawList = [];
+    let totalCount = 0;
+
+    if (normalized) {
+        rawList.push(...normalized.list);
+        totalCount = normalized.totalCount;
+    } else {
+        let pageNumber = 1;
+        let hasMore = true;
+
+        while (hasMore && pageNumber <= fallbackMaxPages) {
+            const pageUrl = `https://api.bilibili.com/x/v3/fav/folder/created/list?up_mid=${encodeURIComponent(uid)}&pn=${pageNumber}&ps=${fallbackPageSize}&jsonp=jsonp`;
+            let pageResponse = null;
+            try {
+                pageResponse = await requestJson(pageUrl, 12000);
+            } catch (error) {
+                logger.warn('Fetcher', 'Bilibili paged folders API request failed', { uid, pageNumber, error });
+                if (pageNumber === 1) {
+                    throw new Error('Failed to request Bilibili favorites');
+                }
+                break;
+            }
+
+            const pageNormalized = normalizeBilibiliFolderResponse(pageResponse);
+            if (!pageNormalized) {
+                const code = pageResponse && Number.isFinite(pageResponse.code) ? pageResponse.code : 'unknown';
+                logger.warn('Fetcher', 'Bilibili paged folders API returned invalid response', { uid, pageNumber, code });
+                if (pageNumber === 1) {
+                    throw new Error('Unable to load favorites for this account');
+                }
+                break;
+            }
+
+            if (pageNumber === 1) {
+                totalCount = pageNormalized.totalCount;
+            }
+
+            rawList.push(...pageNormalized.list);
+            hasMore = pageNormalized.hasMore
+                && pageNormalized.list.length > 0
+                && rawList.length < pageNormalized.totalCount;
+            pageNumber += 1;
+        }
+    }
+
+    if (!Number.isFinite(totalCount)) {
+        totalCount = rawList.length;
+    }
+
+    const seenFolderIds = new Set();
+    const favorites = rawList
+        .filter((item) => {
+            const attr = Number(item && item.attr);
+            if (!Number.isFinite(attr)) return true;
+            return (attr & 1) === 0;
+        })
+        .map((item) => {
+            const folderId = String(item && item.id ? item.id : '').trim();
+            if (!folderId) return null;
+            if (seenFolderIds.has(folderId)) return null;
+            seenFolderIds.add(folderId);
+            return {
+                id: folderId,
+                title: String(item && item.title ? item.title : '').trim() || `Favorite Folder ${folderId}`,
+                mediaCount: Number.isFinite(item && item.media_count) ? item.media_count : 0,
+                cover: String(item && item.cover ? item.cover : '').trim() || '',
+                url: buildBilibiliFavoriteFolderUrl(uid, folderId),
+            };
+        })
+        .filter(Boolean);
+
+    return {
+        totalCount,
+        favorites,
+    };
+};
+
+const lookupBilibiliFavoritesByUid = async (uidInput) => {
+    const uid = parseBilibiliUid(uidInput);
+    if (!uid) {
+        throw new Error('Please provide a valid Bilibili UID');
+    }
+
+    const [profile, folderResult] = await Promise.all([
+        fetchBilibiliProfileByUid(uid),
+        fetchBilibiliFavoriteFoldersByUid(uid),
+    ]);
+
+    return {
+        uid,
+        profile: {
+            ...profile,
+            favoriteFolderCount: folderResult.totalCount,
+            publicFavoriteFolderCount: folderResult.favorites.length,
+        },
+        favorites: folderResult.favorites,
+    };
+};
+
 const fetchBilibiliPageList = async (bvid) => {
     if (!bvid) return null;
     const apiUrl = `https://api.bilibili.com/x/player/pagelist?bvid=${encodeURIComponent(bvid)}&jsonp=jsonp`;
@@ -710,4 +884,5 @@ const fetchUrlInfo = async (url) => {
 
 module.exports = {
     fetchUrlInfo,
+    lookupBilibiliFavoritesByUid,
 };
