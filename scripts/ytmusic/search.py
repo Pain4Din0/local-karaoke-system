@@ -73,6 +73,12 @@ SINGLE_MARKERS = (
 )
 YEAR_RE = re.compile(r"(19|20)\d{2}")
 METRIC_TEXT_RE = re.compile(r"\d")
+TRAILING_METRIC_FRAGMENT_RE = re.compile(
+    r"(?:^|[|,，•·])\s*(?:"
+    r"\d[\d\s.,]*[kKmMbB万萬亿億]?(?:\+)?\s*(?:views?|次观看|次觀看|回視聴)"
+    r"|(?:播放次数|觀看次數|观看次数|再生回数|monthly listeners?|monthly viewers?|monthly audience|subscribers?|likes?)\b[^|,，•·]*)\s*$",
+    re.IGNORECASE,
+)
 ALL_SECTION_ORDER = ("songs", "albums", "singles", "artists")
 ALL_SECTION_WEIGHTS = {
     "songs": 3,
@@ -169,6 +175,26 @@ def is_non_artist_metadata_text(value):
         " likes",
         " like",
     ))
+
+
+def strip_trailing_metric_fragment(value):
+    text = normalize_space(value)
+    if not text:
+        return ""
+    cleaned = text
+    while True:
+        next_text = TRAILING_METRIC_FRAGMENT_RE.sub("", cleaned).strip(" ,，|•·")
+        if next_text == cleaned:
+            break
+        cleaned = next_text
+    return cleaned
+
+
+def normalize_artist_text(value):
+    text = strip_trailing_metric_fragment(value)
+    if not text or is_non_artist_metadata_text(text):
+        return ""
+    return text
 
 
 def normalize_language(value):
@@ -302,28 +328,28 @@ def normalize_artists(value, fallback=None):
     if isinstance(value, list):
         for item in value:
             if isinstance(item, dict):
-                name = normalize_space(item.get("name"))
-                if name and not is_non_artist_metadata_text(name):
+                name = normalize_artist_text(item.get("name"))
+                if name:
                     artists.append({
                         "name": name,
                         "id": normalize_space(item.get("id")) or None,
                     })
             else:
-                name = normalize_space(item)
-                if name and not is_non_artist_metadata_text(name):
+                name = normalize_artist_text(item)
+                if name:
                     artists.append({"name": name, "id": None})
     elif isinstance(value, dict):
-        name = normalize_space(value.get("name"))
-        if name and not is_non_artist_metadata_text(name):
+        name = normalize_artist_text(value.get("name"))
+        if name:
             artists.append({"name": name, "id": normalize_space(value.get("id")) or None})
     else:
-        name = normalize_space(value)
-        if name and not is_non_artist_metadata_text(name):
+        name = normalize_artist_text(value)
+        if name:
             artists.append({"name": name, "id": None})
 
     if not artists and fallback:
-        fallback_name = normalize_space(fallback)
-        if fallback_name and not is_non_artist_metadata_text(fallback_name):
+        fallback_name = normalize_artist_text(fallback)
+        if fallback_name:
             artists.append({"name": fallback_name, "id": None})
 
     return artists
@@ -615,7 +641,11 @@ def normalize_track_item(
     if not video_id or not title:
         return None
 
-    artists = normalize_artists(item.get("artists"), fallback=item.get("artist") or default_artists)
+    author_text = normalize_artist_text(item.get("author"))
+    artists = normalize_artists(
+        item.get("artists"),
+        fallback=item.get("artist") or default_artists or author_text,
+    )
     album = normalize_album_ref(
         item.get("album"),
         fallback_name=default_album,
@@ -642,8 +672,8 @@ def normalize_track_item(
         "playlistId": playlist_id or None,
         "artists": artists,
         "albumRef": album,
-        "uploader": artist_text or normalize_space(item.get("author")) or "Unknown",
-        "artist": artist_text or normalize_space(item.get("author")) or "Unknown",
+        "uploader": artist_text or author_text or "Unknown",
+        "artist": artist_text or author_text or "Unknown",
         "album": album["name"] if album else "",
         "track": title,
         "sourceId": video_id,
